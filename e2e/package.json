@@ -1,0 +1,12 @@
+{
+  "name": "dociai-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test.mjs",
+    "test:crosstab": "node test-crosstab.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}
