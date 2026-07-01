@@ -14,17 +14,27 @@
 - 時事ニュースを取得、要約、読み上げできる
 - 将来的にYouTube/Twitch/OBS連携へ拡張できる
 
-## PoCの起動イメージ
+## 起動方法
 
 ```bash
+cp config.local.example.json config.local.json   # 初回のみ。APIキーを書き込む
 python3 -m http.server 8080
 ```
 
-```txt
-http://localhost:8080
-```
+- `http://localhost:8080/` — 操作卓 (配信者用UI)
+- `http://localhost:8080/obs.html` — OBS/配信画面用の表示専用UI ([docs/obs-mode.md](docs/obs-mode.md))
 
-APIキーを含む `config.local.json` はGit管理しません。公開デプロイにも含めません。
+操作卓を開くと `config.local.json` を自動読込します (「サーバーから読込」「ファイルを選択」でも可)。
+APIキーを含む `config.local.json` はGit管理しません。公開デプロイにも含めません。読み込んだキーはメモリ保持のみで、LocalStorage等には保存されません。
+
+### APIキーなしで試す
+
+`config.local.example.json` にはモックコネクタとテスト用ペルソナが入っているため、
+そのまま `config.local.json` にコピーするだけで動作確認できます (openai/openrouter系ペルソナはOFFにするか、キーを設定してください)。
+
+1. コメント欄に「テスト」を含むコメントを送信 → テストAI(モック)が応答し読み上げる
+2. `Alt+3` → テストAI(モック)を手動発話
+3. ニュースの `sources` を `{ "name": "mock", "type": "mock" }` にすると、モックニュースの取得→要約→読み上げも試せる
 
 ## 中核コンセプト
 
@@ -43,15 +53,17 @@ flowchart TD
 
 ## 主要モジュール
 
-| モジュール | 役割 |
-|---|---|
-| `CommentStore` | コメント履歴を保持し、直近文脈と要約文脈を提供する |
-| `ScreenContext` | 画面キャプチャと画像説明を保持する |
-| `TriggerEngine` | キーワード、ショートカット、定期実行、手動発火を判定する |
-| `PersonaRouter` | 反応するペルソナとモデルを選ぶ |
-| `AIConnector` | OpenAI、OpenRouter、Gemini、ローカルLLMなどを抽象化する |
-| `SpeechQueue` | 応答音声の順番、割り込み、クールダウンを制御する |
-| `NewsReader` | RSS等からニュースを取得し、要約して読み上げキューへ入れる |
+| モジュール | 実装 | 役割 |
+|---|---|---|
+| `CommentStore` | `src/comment-store.js` | コメント履歴 (リングバッファ) と長期要約 `streamSummary` を保持する |
+| `ScreenContext` | `src/screen-capture.js` | 画面キャプチャと画像説明を保持する (`maxAgeSeconds` で鮮度管理) |
+| `TriggerEngine` | `src/trigger-engine.js` | キーワード、ショートカット、定期実行、確率、手動発火を判定する |
+| `PersonaRouter` | `src/persona-router.js` | 反応するペルソナを選び、最大応答数とクールダウンを守る |
+| `AIConnector` | `src/connectors.js` | OpenAI / OpenRouter / OpenAI互換 / モックを抽象化する |
+| `ContextBuilder` | `src/context-builder.js` | コメント・画面・ニュース文脈をプロンプトにまとめる |
+| `SpeechQueue` | `src/speech-queue.js` | Web Speech APIで順番に読み上げ、停止/スキップ/全消去を制御する |
+| `NewsReader` | `src/news-reader.js` | RSSからニュースを取得し、要約して読み上げキューへ入れる |
+| `CommentSource` | `src/comment-sources.js` | 手動入力/将来のYouTube・Twitchを同じ形で流し込む ([docs/comment-sources.md](docs/comment-sources.md)) |
 
 ## GitHub Issues
 
@@ -63,6 +75,7 @@ flowchart TD
 
 ## 参考
 
-- ニュース読み上げ機構は `azumag/soviet_now` を参考にする予定です。
-- GitHub上で該当リポジトリの詳細を確認できたら、RSS取得、要約、読み上げキュー、スケジューリングの構造を移植対象として再検討します。
+- ニュース読み上げ機構は `azumag/soviet_now` (broadcast/radio_news.sh) を参考にしています。
+  移植候補のパターン (AIスパム判定・タイトル正規化による重複排除など) は
+  [docs/configuration.md](docs/configuration.md) の末尾にメモしています。
 

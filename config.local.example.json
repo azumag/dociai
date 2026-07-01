@@ -14,15 +14,17 @@
       "provider": "openai",
       "apiKey": "sk-...",
       "model": "gpt-4.1-mini"
+    },
+    "mock_test": {
+      "provider": "mock"
     }
   },
   "context": {
     "commentHistoryLimit": 80,
     "includeRecentComments": 20,
-    "summaryIntervalSeconds": 300,
+    "maxPromptChars": 4000,
     "screenCapture": {
       "enabled": true,
-      "mode": "manual_or_triggered",
       "connector": "vision_model",
       "maxAgeSeconds": 120
     }
@@ -55,6 +57,20 @@
         "rate": 1.2,
         "pitch": 1.1
       }
+    },
+    {
+      "id": "mock_ai",
+      "name": "テストAI(モック)",
+      "connector": "mock_test",
+      "enabled": true,
+      "systemPrompt": "APIキーなしの動作確認用ペルソナです。",
+      "triggers": ["mention_test", "hotkey_mock"],
+      "voice": {
+        "enabled": true,
+        "name": "default",
+        "rate": 1.0,
+        "pitch": 1.0
+      }
     }
   ],
   "triggers": {
@@ -62,9 +78,17 @@
       "type": "keyword",
       "keywords": ["AIさん", "どう思う", "解説して"]
     },
+    "mention_test": {
+      "type": "keyword",
+      "keywords": ["テスト"]
+    },
     "hotkey_partner": {
       "type": "hotkey",
       "keys": "Alt+1"
+    },
+    "hotkey_mock": {
+      "type": "hotkey",
+      "keys": "Alt+3"
     },
     "random_comment": {
       "type": "random",
@@ -83,6 +107,7 @@
   "news": {
     "enabled": true,
     "trigger": "news_every_30min",
+    "persona": "partner_ai",
     "sources": [
       {
         "name": "NHK",
@@ -94,4 +119,3 @@
     "style": "配信の合間に自然に読める短いニュース紹介にする"
   }
 }
-

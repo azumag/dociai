@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dociai — OBS表示</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles/main.css">
+</head>
+<body class="obs">
+  <div class="obs-root">
+    <div id="obs-speaking" class="obs-speaking" hidden>
+      <span class="obs-lamp"></span>
+      <span id="obs-speaking-name"></span>
+    </div>
+    <div id="obs-reply" class="obs-reply" hidden>
+      <div class="obs-persona" id="obs-reply-persona"></div>
+      <div class="obs-text" id="obs-reply-text"></div>
+    </div>
+    <div id="obs-comment" class="obs-comment" hidden>
+      <span class="author" id="obs-comment-author"></span><span id="obs-comment-text"></span>
+    </div>
+    <div id="obs-waiting" class="obs-waiting">操作卓 (index.html) からの信号待ち…</div>
+  </div>
+  <script type="module" src="./src/obs.js"></script>
+</body>
+</html>

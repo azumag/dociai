@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dociai — 配信AI操作卓</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles/main.css">
+</head>
+<body>
+  <header class="console-header">
+    <div class="brand">
+      <span class="brand-mark">DOCIAI</span>
+      <span class="brand-sub">配信AI操作卓</span>
+    </div>
+    <div class="tally" id="tally" aria-label="ペルソナ状態ランプ"></div>
+    <div class="config-controls">
+      <span class="chip" id="config-status">設定: 未読込</span>
+      <button id="btn-load-server" type="button">サーバーから読込</button>
+      <button id="btn-load-file" type="button">ファイルを選択</button>
+      <input type="file" id="file-input" accept=".json,application/json" hidden>
+      <a class="obs-link" href="./obs.html" target="_blank" rel="noopener">OBS表示</a>
+    </div>
+  </header>
+
+  <main class="console">
+    <div class="col col-left">
+      <section class="panel">
+        <h2>コメント</h2>
+        <form id="comment-form" autocomplete="off">
+          <input id="comment-author" placeholder="名前 (省略可)" aria-label="コメントの名前">
+          <div class="comment-row">
+            <input id="comment-text" placeholder="コメントを入力…" aria-label="コメント本文" required>
+            <button type="submit">送信</button>
+          </div>
+        </form>
+        <ol id="comment-log" class="log comment-log" aria-live="polite"></ol>
+      </section>
+      <section class="panel">
+        <h2>システムログ</h2>
+        <ol id="event-log" class="log event-log"></ol>
+      </section>
+    </div>
+
+    <div class="col col-center">
+      <section class="panel panel-replies">
+        <h2>AI応答</h2>
+        <ol id="reply-log" class="log reply-log" aria-live="polite"></ol>
+      </section>
+      <section class="panel">
+        <h2>プロンプトデバッグ</h2>
+        <div id="debug-meta" class="muted">まだAI呼び出しはありません</div>
+        <pre id="debug-prompt" class="debug-pre"></pre>
+      </section>
+    </div>
+
+    <div class="col col-right">
+      <section class="panel">
+        <h2>ペルソナ</h2>
+        <ul id="persona-list" class="rack-list"></ul>
+      </section>
+      <section class="panel">
+        <h2>音声キュー <span id="speech-state" class="chip"></span></h2>
+        <div class="btn-row">
+          <button id="btn-speech-stop" type="button">停止</button>
+          <button id="btn-speech-resume" type="button">再開</button>
+          <button id="btn-speech-skip" type="button">スキップ</button>
+          <button id="btn-speech-clear" type="button">全消去</button>
+        </div>
+        <ul id="speech-list" class="rack-list"></ul>
+      </section>
+      <section class="panel">
+        <h2>トリガー</h2>
+        <ul id="trigger-list" class="rack-list"></ul>
+      </section>
+      <section class="panel">
+        <h2>画面キャプチャ</h2>
+        <div class="btn-row">
+          <button id="btn-screen-start" type="button">共有開始</button>
+          <button id="btn-screen-stop" type="button">共有停止</button>
+          <button id="btn-screen-read" type="button">画面を読み取る</button>
+        </div>
+        <div id="screen-status" class="muted"></div>
+      </section>
+      <section class="panel">
+        <h2>ニュース</h2>
+        <div class="btn-row">
+          <button id="btn-news-read" type="button">今すぐ読む</button>
+        </div>
+        <div id="news-status" class="muted"></div>
+      </section>
+      <section class="panel">
+        <h2>コネクタ</h2>
+        <ul id="connector-list" class="rack-list"></ul>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
