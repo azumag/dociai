@@ -1,0 +1,97 @@
+{
+  "connectors": {
+    "openai_main": {
+      "provider": "openai",
+      "apiKey": "sk-...",
+      "model": "gpt-4.1-mini"
+    },
+    "openrouter_fun": {
+      "provider": "openrouter",
+      "apiKey": "or-...",
+      "model": "anthropic/claude-3.5-haiku"
+    },
+    "vision_model": {
+      "provider": "openai",
+      "apiKey": "sk-...",
+      "model": "gpt-4.1-mini"
+    }
+  },
+  "context": {
+    "commentHistoryLimit": 80,
+    "includeRecentComments": 20,
+    "summaryIntervalSeconds": 300,
+    "screenCapture": {
+      "enabled": true,
+      "mode": "manual_or_triggered",
+      "connector": "vision_model",
+      "maxAgeSeconds": 120
+    }
+  },
+  "personas": [
+    {
+      "id": "partner_ai",
+      "name": "相棒AI",
+      "connector": "openai_main",
+      "enabled": true,
+      "systemPrompt": "あなたは配信者の相棒AIです。コメントと画面状況を踏まえ、短く自然に返します。",
+      "triggers": ["mention_ai", "hotkey_partner"],
+      "voice": {
+        "enabled": true,
+        "name": "default",
+        "rate": 1.1,
+        "pitch": 1.0
+      }
+    },
+    {
+      "id": "tsukkomi_ai",
+      "name": "ツッコミAI",
+      "connector": "openrouter_fun",
+      "enabled": true,
+      "systemPrompt": "あなたは配信のツッコミ役です。軽く茶化しつつ、失礼にならないよう短く返します。",
+      "triggers": ["random_comment"],
+      "voice": {
+        "enabled": true,
+        "name": "default",
+        "rate": 1.2,
+        "pitch": 1.1
+      }
+    }
+  ],
+  "triggers": {
+    "mention_ai": {
+      "type": "keyword",
+      "keywords": ["AIさん", "どう思う", "解説して"]
+    },
+    "hotkey_partner": {
+      "type": "hotkey",
+      "keys": "Alt+1"
+    },
+    "random_comment": {
+      "type": "random",
+      "probability": 0.2
+    },
+    "news_every_30min": {
+      "type": "interval",
+      "minutes": 30
+    }
+  },
+  "router": {
+    "defaultPersona": "partner_ai",
+    "maxRepliesPerComment": 1,
+    "cooldownSeconds": 8
+  },
+  "news": {
+    "enabled": true,
+    "trigger": "news_every_30min",
+    "sources": [
+      {
+        "name": "NHK",
+        "type": "rss",
+        "url": "https://www.nhk.or.jp/rss/news/cat0.xml"
+      }
+    ],
+    "maxItems": 3,
+    "style": "配信の合間に自然に読める短いニュース紹介にする"
+  }
+}
+
