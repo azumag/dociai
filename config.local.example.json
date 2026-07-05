@@ -34,6 +34,12 @@
       "maxAgeSeconds": 120
     }
   },
+  "commentSources": {
+    "twitch": {
+      "enabled": false,
+      "channels": ["your_twitch_channel"]
+    }
+  },
   "personas": [
     {
       "id": "partner_ai",

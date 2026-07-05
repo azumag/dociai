@@ -114,6 +114,15 @@ export function validateConfig(cfg) {
     }
   }
 
+  // comment sources
+  if (cfg.commentSources?.twitch?.enabled) {
+    const twitch = cfg.commentSources.twitch;
+    const channels = twitch.channels ?? (twitch.channel ? [twitch.channel] : []);
+    if (!Array.isArray(channels) || !channels.filter((c) => String(c ?? "").trim()).length) {
+      errors.push("commentSources.twitch.enabled が true ですが channels が空です");
+    }
+  }
+
   // context
   if (cfg.context?.screenCapture?.enabled && cfg.context.screenCapture.connector) {
     if (!cfg.connectors?.[cfg.context.screenCapture.connector]) {
@@ -152,6 +161,13 @@ export function applyDefaults(cfg) {
       },
     },
     news: cfg.news ? { maxItems: 3, mode: "topic", dedupe: true, ...cfg.news } : { enabled: false, mode: "topic", dedupe: true },
+    commentSources: {
+      ...(cfg.commentSources ?? {}),
+      twitch: {
+        enabled: false,
+        ...(cfg.commentSources?.twitch ?? {}),
+      },
+    },
   };
 }
 
