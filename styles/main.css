@@ -376,3 +376,191 @@ body.obs.transparent { background: transparent; }
   font-size: 12px;
   color: var(--ink-dim);
 }
+
+/* ---- 設定エディタ (issue #15) ---- */
+.settings-modal {
+  width: min(960px, 92vw);
+  max-height: 88vh;
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.settings-modal::backdrop { background: rgba(0,0,0,0.6); }
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--panel-edge);
+}
+.settings-header h2 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.settings-close {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  padding: 2px 8px;
+}
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--panel-edge);
+  flex-wrap: wrap;
+}
+.settings-tabs button {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.settings-tabs button.is-active {
+  background: var(--focus);
+  color: #0f1218;
+  border-color: var(--focus);
+}
+.settings-body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.settings-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--panel-edge);
+  flex-wrap: wrap;
+}
+.settings-footer .primary {
+  background: var(--ok);
+  color: #0f1218;
+  border-color: var(--ok);
+  font-weight: 600;
+}
+.settings-footer .danger {
+  color: var(--onair);
+  border-color: #5c2727;
+}
+.settings-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 200px;
+}
+.settings-error {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--onair);
+}
+
+.list-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.list-header h3 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  flex: 1;
+}
+
+.card {
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  padding: 10px;
+  background: #171c24;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.card h3, .card h4 {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-dim);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.card-row .field { flex: 1; min-width: 120px; }
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+.card-grid .field { min-width: 0; }
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.field-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-dim);
+  letter-spacing: 0.05em;
+}
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip-check {
+  font-family: var(--mono);
+  font-size: 11px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 999px;
+  padding: 2px 8px 2px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.chip-check input { margin: 0; }
+
+button.danger { color: var(--onair); border-color: #5c2727; }
+button.primary { background: var(--ok); color: #0f1218; border-color: var(--ok); font-weight: 600; }
+
+textarea {
+  background: #10131a;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  padding: 5px 8px;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  resize: vertical;
+}
+select {
+  background: #10131a;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  padding: 5px 8px;
+  width: 100%;
+}
