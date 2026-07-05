@@ -2,7 +2,7 @@
 // config.local.json をサーバー経由fetchまたはファイル選択で読み込む。
 // 読み込んだ設定 (APIキー含む) はメモリ保持のみ。永続ストレージには書かない。
 
-const KNOWN_PROVIDERS = ["openai", "openrouter", "openai-compatible", "mock"];
+const KNOWN_PROVIDERS = ["openai", "openrouter", "openai-compatible", "ollama", "mock"];
 const KNOWN_TRIGGER_TYPES = ["keyword", "hotkey", "interval", "random", "manual"];
 const KNOWN_NEWS_SOURCE_TYPES = ["rss", "mock"];
 const KNOWN_NEWS_MODES = ["topic", "current", "simple"];
@@ -27,7 +27,7 @@ export function validateConfig(cfg) {
       }
       if (c.provider && c.provider !== "mock") {
         if (!c.model) errors.push(`connectors.${id}.model がありません`);
-        if (!c.apiKey && c.provider !== "openai-compatible") {
+        if (!c.apiKey && !["openai-compatible", "ollama"].includes(c.provider)) {
           warnings.push(`connectors.${id} にapiKeyがありません。呼び出し時に認証エラーになる可能性があります`);
         }
       }

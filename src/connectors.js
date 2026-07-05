@@ -9,6 +9,7 @@ import { maskApiKey } from "./security.js";
 const BASE_URLS = {
   openai: "https://api.openai.com/v1",
   openrouter: "https://openrouter.ai/api/v1",
+  ollama: "http://localhost:11434/v1",
 };
 
 export class ConnectorError extends Error {
@@ -25,7 +26,7 @@ export function createConnector(id, cfg) {
   return new OpenAICompatibleConnector(id, cfg);
 }
 
-// OpenAI Chat Completions互換。openai / openrouter / baseUrl指定のローカルLLMをカバーする。
+// OpenAI Chat Completions互換。openai / openrouter / ollama / baseUrl指定のローカルLLMをカバーする。
 class OpenAICompatibleConnector {
   // APIキーはprivateフィールドに閉じ、describe()やJSON化で漏れないようにする
   #apiKey;
@@ -40,7 +41,8 @@ class OpenAICompatibleConnector {
   }
 
   describe() {
-    return { id: this.id, provider: this.provider, model: this.model, apiKeyMasked: maskApiKey(this.#apiKey) };
+    const apiKeyMasked = this.provider === "ollama" ? "(不要)" : maskApiKey(this.#apiKey);
+    return { id: this.id, provider: this.provider, model: this.model, apiKeyMasked };
   }
 
   #headers() {
