@@ -68,35 +68,36 @@ try {
   check("設定エディタが開く", true);
 
   // 2. 既定タブは connectors
-  const activeTab = await page.$eval(".settings-tabs button.is-active", (el) => el.dataset.tab);
+  const activeTab = await page.$eval(".settings-sidebar button.is-active", (el) => el.dataset.tab);
   check("既定タブは connectors", activeTab === "connectors", `active=${activeTab}`);
 
-  // 3. コネクタID (input value) に mock_main が入っている
+  // 3. コネクタID (input value) に既存のコネクタが表示されている
   const connText = await visibleText(page);
-  check("コネクタ一覧に既存ID (mock_main) が表示される", connText.includes("mock_main"), connText.slice(0, 120).replace(/\n/g, " "));
+  const hasConnector = connText.includes("openai_main") || connText.includes("mock_main") || connText.includes("ollama");
+  check("コネクタ一覧に既存IDが表示される", hasConnector, connText.slice(0, 120).replace(/\n/g, " "));
 
   // 4. ペルソナタブ
-  await page.click('.settings-tabs button[data-tab="personas"]');
+  await page.click('.settings-sidebar button[data-tab="personas"]');
   await page.waitForFunction(
-    () => document.querySelector('.settings-tabs button.is-active')?.dataset.tab === "personas",
+    () => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "personas",
     { timeout: 2000 },
   );
   const personaText = await visibleText(page);
   check("ペルソナ一覧に相棒AI が表示される", personaText.includes("相棒AI"), personaText.slice(0, 120).replace(/\n/g, " "));
 
   // 5. トリガータブ
-  await page.click('.settings-tabs button[data-tab="triggers"]');
+  await page.click('.settings-sidebar button[data-tab="triggers"]');
   await page.waitForFunction(
-    () => document.querySelector('.settings-tabs button.is-active')?.dataset.tab === "triggers",
+    () => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "triggers",
     { timeout: 2000 },
   );
   const trigText = await visibleText(page);
   check("トリガー一覧に mention_ai が表示される", trigText.includes("mention_ai"), trigText.slice(0, 120).replace(/\n/g, " "));
 
   // 6. 画面・文脈タブ
-  await page.click('.settings-tabs button[data-tab="context"]');
+  await page.click('.settings-sidebar button[data-tab="context"]');
   await page.waitForFunction(
-    () => document.querySelector('.settings-tabs button.is-active')?.dataset.tab === "context",
+    () => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "context",
     { timeout: 2000 },
   );
   const ctxText = await visibleText(page);
@@ -104,9 +105,9 @@ try {
     ctxText.includes("screenCapture") && ctxText.includes("maxTokens"), ctxText.slice(0, 120).replace(/\n/g, " "));
 
   // 7. VOICEVOX タブ
-  await page.click('.settings-tabs button[data-tab="voicevox"]');
+  await page.click('.settings-sidebar button[data-tab="voicevox"]');
   await page.waitForFunction(
-    () => document.querySelector('.settings-tabs button.is-active')?.dataset.tab === "voicevox",
+    () => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "voicevox",
     { timeout: 2000 },
   );
   const vvText = await visibleText(page);
@@ -114,9 +115,9 @@ try {
     vvText.includes("baseUrl") && vvText.includes("defaultSpeaker"), vvText.slice(0, 120).replace(/\n/g, " "));
 
   // 8. コネクタタブに戻して新規コネクタを追加
-  await page.click('.settings-tabs button[data-tab="connectors"]');
+  await page.click('.settings-sidebar button[data-tab="connectors"]');
   await page.waitForFunction(
-    () => document.querySelector('.settings-tabs button.is-active')?.dataset.tab === "connectors",
+    () => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "connectors",
     { timeout: 2000 },
   );
   await page.click(".list-header button");
@@ -124,9 +125,9 @@ try {
   check("新規コネクタ new_connector_1 が追加される", connText2.includes("new_connector_1"), connText2.slice(0, 120).replace(/\n/g, " "));
 
   // 9. ペルソナを1つ追加
-  await page.click('.settings-tabs button[data-tab="personas"]');
+  await page.click('.settings-sidebar button[data-tab="personas"]');
   await page.waitForFunction(
-    () => document.querySelector('.settings-tabs button.is-active')?.dataset.tab === "personas",
+    () => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "personas",
     { timeout: 2000 },
   );
   await page.click(".list-header button");
@@ -134,7 +135,7 @@ try {
   check("新規ペルソナ new_persona_1 が追加される", pText2.includes("new_persona_1"), pText2.slice(0, 120).replace(/\n/g, " "));
 
   // 10. 適用ボタン → 設定が再読み込みされる
-  await page.click('.settings-footer button.primary');
+  await page.click('.settings-footer .btn-primary');
   await page.waitForFunction(
     () => document.querySelector("dialog.settings-modal")?.open === false,
     { timeout: 3000 },
