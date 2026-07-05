@@ -24,7 +24,7 @@
 
 | フィールド | 説明 |
 |---|---|
-| `provider` | `openai` / `openrouter` / `openai-compatible` / `ollama` / `mock` |
+| `provider` | `openai` / `openrouter` / `openai-compatible` / `ollama` / `minimax` / `mock` |
 | `apiKey` | APIキー。`mock` / `ollama` では不要 |
 | `model` | モデルID。`mock` では省略可 |
 | `baseUrl` | 省略可。ローカルLLM やOpenAI互換サーバーを指す。`ollama` の既定は `http://localhost:11434/v1` |
@@ -41,6 +41,20 @@ Ollama を使う場合は、Ollama を起動してモデルを pull したうえ
       "provider": "ollama",
       "model": "llama3.2",
       "baseUrl": "http://localhost:11434/v1"
+    }
+  }
+}
+```
+
+MiniMax 公式の Anthropic Messages 互換APIを使う場合は `provider: "minimax"` を指定します。既定の `baseUrl` は `https://api.minimax.io/anthropic` です。
+
+```json
+{
+  "connectors": {
+    "minimax_main": {
+      "provider": "minimax",
+      "apiKey": "sk-...",
+      "model": "MiniMax-M3"
     }
   }
 }
@@ -96,6 +110,7 @@ Ollama を使う場合は、Ollama を起動してモデルを pull したうえ
 | `screenCapture.enabled` | false | 画面キャプチャ文脈のON/OFF |
 | `screenCapture.connector` | — | 画面説明に使うVision対応コネクタID |
 | `screenCapture.maxAgeSeconds` | 120 | これより古い画面説明はプロンプトに入れない |
+| `screenCapture.maxTokens` | 768 | 画面説明生成に使う最大出力トークン数。thinking系vision modelでは大きめを推奨 |
 
 ## commentSources
 

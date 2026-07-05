@@ -76,7 +76,7 @@ export class ScreenContext {
           ],
         },
       ];
-      const { text } = await connector.chat(messages, { maxTokens: 150 });
+      const { text } = await connector.chat(messages, { maxTokens: this.cfg.maxTokens ?? 768 });
       this.summary = text;
       this.capturedAt = Date.now();
       this.log(`画面文脈を更新: ${text}`);

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node test.mjs",
+    "test:minimax": "node test-minimax-provider.mjs",
     "test:news": "node test-news-reader.mjs",
     "test:ollama": "node test-ollama-provider.mjs",
     "test:twitch": "node test-twitch-source.mjs",
