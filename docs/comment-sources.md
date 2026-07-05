@@ -14,7 +14,7 @@
 }
 ```
 
-`app.js` 側は `source.start((raw) => addComment(raw))` と接続するだけで、トリガー判定・ペルソナ応答は共通フローに乗る。現在は `ManualCommentSource` のみ実装済み。
+`app.js` 側は `source.start((raw) => addComment(raw))` と接続するだけで、トリガー判定・ペルソナ応答は共通フローに乗る。現在は `ManualCommentSource` と `TwitchChatSource` を実装済み。
 
 ## YouTube Live Chat 取得方式の調査
 
@@ -41,12 +41,25 @@
 
 **推奨方針**: 匿名IRC (justinfan) 方式が認証ゼロ・ブラウザのWebSocketだけで動くため、実コメント連携の最初の実装に最適。
 
-必要な実装:
+実装済みの流れ:
 
 1. `new WebSocket("wss://irc-ws.chat.twitch.tv:443")`
 2. `NICK justinfan12345` → `JOIN #channelname`
 3. `PRIVMSG` 行をパースして `onComment({ author, text, source: "twitch" })`
 4. `PING` に `PONG` を返す
+
+設定例:
+
+```json
+{
+  "commentSources": {
+    "twitch": {
+      "enabled": true,
+      "channels": ["your_twitch_channel"]
+    }
+  }
+}
+```
 
 ## 認証方式と必要権限の整理
 
@@ -59,6 +72,6 @@
 
 ## 実装順の提案
 
-1. Twitch 匿名IRCアダプタ (認証不要で最短)
+1. Twitch 匿名IRCアダプタ (実装済み)
 2. YouTube Data API アダプタ (APIキーのみ)
 3. OAuthが要るケース (限定配信・送信) はローカル常駐アプリ化と同時に検討

@@ -11,7 +11,7 @@ import { PersonaRouter } from "./persona-router.js";
 import { SpeechQueue } from "./speech-queue.js";
 import { ScreenContext } from "./screen-capture.js";
 import { NewsReader } from "./news-reader.js";
-import { ManualCommentSource } from "./comment-sources.js";
+import { ManualCommentSource, TwitchChatSource } from "./comment-sources.js";
 import { scrubSecrets, collectApiKeys, checkSecretStorage } from "./security.js";
 
 const $ = (sel) => document.querySelector(sel);
@@ -30,6 +30,7 @@ const state = {
   screenContext: null,
   newsReader: null,
   manualSource: new ManualCommentSource(),
+  externalCommentSources: [],
   thinking: new Set(),
   speakingPersonaId: null,
   lastDebug: null,
@@ -243,6 +244,8 @@ async function applyLoaded({ config, warnings, source }) {
   });
   state.triggerEngine.start();
 
+  startExternalCommentSources(config);
+
   for (const w of warnings) logEvent(`設定の警告: ${w}`, "warn");
 
   // issue #13: APIキーが永続ストレージに残っていないことを実測して報告
@@ -259,11 +262,26 @@ async function applyLoaded({ config, warnings, source }) {
 }
 
 function teardown() {
+  for (const source of state.externalCommentSources) source.stop();
+  state.externalCommentSources = [];
   state.triggerEngine?.stop();
   state.screenContext?.stop();
   state.speechQueue?.clear();
   state.thinking.clear();
   state.speakingPersonaId = null;
+}
+
+function startExternalCommentSources(config) {
+  const twitch = config.commentSources?.twitch;
+  if (!twitch?.enabled) return;
+
+  try {
+    const source = new TwitchChatSource(twitch, { log: (m, level) => logEvent(m, level) });
+    source.start((raw) => addComment(raw));
+    state.externalCommentSources.push(source);
+  } catch (e) {
+    logEvent(`Twitchチャットを開始できません: ${scrub(e.message)}`, "error");
+  }
 }
 
 function reportConfigError(e) {

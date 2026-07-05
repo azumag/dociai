@@ -97,6 +97,30 @@ Ollama を使う場合は、Ollama を起動してモデルを pull したうえ
 | `screenCapture.connector` | — | 画面説明に使うVision対応コネクタID |
 | `screenCapture.maxAgeSeconds` | 120 | これより古い画面説明はプロンプトに入れない |
 
+## commentSources
+
+手動入力は常に使えます。Twitch チャットを読む場合は `commentSources.twitch` を有効にします。
+
+```json
+{
+  "commentSources": {
+    "twitch": {
+      "enabled": true,
+      "channels": ["your_twitch_channel"]
+    }
+  }
+}
+```
+
+| フィールド | 既定 | 説明 |
+|---|---|---|
+| `twitch.enabled` | false | Twitch 匿名IRC WebSocketを開始する |
+| `twitch.channels` | [] | 読み取るチャンネル名。`#` は付けても省略しても可 |
+| `twitch.nick` | `justinfan...` | 省略可。匿名読み取り用ニックネーム |
+| `twitch.url` | `wss://irc-ws.chat.twitch.tv:443` | 省略可。通常は変更不要 |
+
+Twitch は読み取り専用なら OAuth 不要です。受信したコメントは手動入力と同じ `CommentStore` に入り、キーワード・ランダムなど既存トリガーの対象になります。
+
 ## news
 
 | フィールド | 説明 |
