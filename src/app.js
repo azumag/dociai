@@ -2,7 +2,7 @@
 // イベントの流れ: コメント/ホットキー/interval → TriggerEngine → PersonaRouter
 //   → ContextBuilder → AIConnector → AI応答ログ + SpeechQueue → OBS表示へbroadcast
 
-import { loadFromServer, loadFromFile, validateConfig, applyDefaults } from "./config-loader.js";
+import { loadFromServer, loadFromFile, saveToServer, validateConfig, applyDefaults } from "./config-loader.js";
 import { createConnector } from "./connectors.js";
 import { CommentStore } from "./comment-store.js";
 import { ContextBuilder } from "./context-builder.js";
@@ -551,16 +551,18 @@ function renderDebug() {
 
 // ---- 設定UI (issue #15) ----
 
-// UI編集後の素のconfigを受け取り、既定値を適用して applyLoaded に渡す。
+// UI編集後の素のconfigを受け取り、config.local.json への保存を待ってから applyLoaded に渡す。
+// 保存が失敗した場合は例外を投げ、呼び出し元 (SettingsUI) にエラー表示を委ねる。
 // APIキーは draft に保持された実値を使う (localStorage には書かない)。
-function applyEditedConfig(rawConfig) {
+async function applyEditedConfig(rawConfig) {
   const { errors, warnings } = validateConfig(rawConfig);
   if (errors.length) {
     for (const e of errors) logEvent(`設定エディタ: ${scrub(e)}`, "error");
-    return;
+    throw new Error("設定エラーのため保存を中止しました");
   }
+  await saveToServer(rawConfig);
   const config = applyDefaults(rawConfig);
-  applyLoaded({ config, warnings, source: "UI編集" });
+  await applyLoaded({ config, warnings, source: "UI編集 (config.local.json に保存済み)" });
 }
 
 const settingsUI = new SettingsUI({

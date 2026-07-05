@@ -1,15 +1,21 @@
 // 設定UIエディタのブラウザE2E (issue #15)
-// 前提: http.server が BASE_URL で動いていて、config.local.json がモック構成。
+// 前提: scripts/serve.py が BASE_URL で動いていて (「保存して適用」が実際にディスクへ書き込む
+// ため、保存に対応しない python -m http.server では 適用時にエラー表示になり失敗する)、
+// config.local.json がモック構成。
 import puppeteer from "puppeteer-core";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const CHROME = process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const BASE = process.env.BASE_URL ?? "http://localhost:8080";
 const SHOT_DIR = process.env.SHOT_DIR ?? ".";
 // エクスポートのダウンロード先をプロジェクトディレクトリ外に分離 (config.local.json を誤って消さないため)
 const DOWNLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dociai-export-"));
+// 「保存して適用」は本物の config.local.json を書き換えるため、テスト後に必ず元へ戻す。
+const CONFIG_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "config.local.json");
+const originalConfigText = fs.readFileSync(CONFIG_PATH, "utf8");
 
 const results = [];
 const check = (name, ok, detail = "") => {
@@ -142,7 +148,7 @@ try {
   );
   check("適用でモーダルが閉じる", true);
   const logText = await page.$eval("#event-log", (el) => el.textContent);
-  check("適用ログが残る", logText.includes("UI編集内容で上書き適用"), logText.slice(0, 120).replace(/\n/g, " "));
+  check("適用ログが残る", logText.includes("config.local.json に保存し、適用しました"), logText.slice(0, 120).replace(/\n/g, " "));
 
   // 11. コネクタ一覧パネルに new_connector_1 が出る
   const listText = await page.$eval("#connector-list", (el) => el.textContent);
@@ -150,6 +156,20 @@ try {
   // ペルソナ一覧パネルは表示名で出る (新規ペルソナ1)
   const personaListText = await page.$eval("#persona-list", (el) => el.textContent);
   check("適用後のペルソナ一覧に新規ペルソナ1 が反映される", personaListText.includes("新規ペルソナ1"), personaListText.slice(0, 120));
+
+  // 11b. config.local.json に実際に書き込まれているか (issue #15 の核心: UI編集がディスクへ永続化される)
+  const diskConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+  check("config.local.json に new_connector_1 が書き込まれる", !!diskConfig.connectors?.new_connector_1);
+  check("config.local.json に new_persona_1 が書き込まれる", (diskConfig.personas ?? []).some((p) => p.id === "new_persona_1"));
+
+  // 11c. ページを再読み込みしても編集内容が残る (ダウンロード→手動コピー不要であることの確認)
+  await page.reload({ waitUntil: "networkidle0" });
+  await page.waitForFunction(
+    () => document.querySelector("#config-status")?.textContent.includes("読込済"),
+    { timeout: 8000 },
+  );
+  const reloadedListText = await page.$eval("#connector-list", (el) => el.textContent);
+  check("再読み込み後もコネクタ一覧に new_connector_1 が残る (ダウンロード操作なしで永続化)", reloadedListText.includes("new_connector_1"), reloadedListText.slice(0, 120));
 
   // 12. エクスポートのダウンロードを捕捉
   await page.click("#btn-settings");
@@ -209,6 +229,7 @@ try {
   await page.screenshot({ path: `${SHOT_DIR}/settings-ui.png` });
 } finally {
   await browser.close();
+  fs.writeFileSync(CONFIG_PATH, originalConfigText);
 }
 
 const failed = results.filter((r) => !r.ok);

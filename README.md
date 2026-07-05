@@ -18,7 +18,7 @@
 
 ```bash
 cp config.local.example.json config.local.json   # 初回のみ。APIキーを書き込む
-python3 -m http.server 8080
+python3 scripts/serve.py 8080
 ```
 
 - `http://localhost:8080/` — 操作卓 (配信者用UI)
@@ -26,6 +26,12 @@ python3 -m http.server 8080
 
 操作卓を開くと `config.local.json` を自動読込します (「サーバーから読込」「ファイルを選択」でも可)。
 APIキーを含む `config.local.json` はGit管理しません。公開デプロイにも含めません。読み込んだキーはメモリ保持のみで、LocalStorage等には保存されません。
+
+`scripts/serve.py` は静的ファイル配信に加え、設定エディタ (「設定を編集」→「保存して適用」) からの
+保存要求 (`PUT /config.local.json`) を受け付け、ディスク上の `config.local.json` を直接書き換えます。
+127.0.0.1 のみで待受けるため外部には公開されません。`python3 -m http.server` でも閲覧はできますが、
+保存要求には対応していないため設定エディタでの保存は失敗します (その場合は「JSONエクスポート」で
+手動保存してください)。
 
 ### APIキーなしで試す
 
