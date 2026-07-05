@@ -40,6 +40,13 @@
       "maxTokens": 768
     }
   },
+  "voicevox": {
+    "enabled": false,
+    "baseUrl": "http://127.0.0.1:50021",
+    "defaultSpeaker": 3,
+    "maxChars": 200,
+    "timeoutMs": 30000
+  },
   "commentSources": {
     "twitch": {
       "enabled": false,
@@ -56,6 +63,7 @@
       "triggers": ["mention_ai", "hotkey_partner"],
       "voice": {
         "enabled": true,
+        "engine": "webspeech",
         "name": "default",
         "rate": 1.1,
         "pitch": 1.0
@@ -70,9 +78,11 @@
       "triggers": ["random_comment"],
       "voice": {
         "enabled": true,
-        "name": "default",
-        "rate": 1.2,
-        "pitch": 1.1
+        "engine": "voicevox",
+        "speaker": 3,
+        "speed": 1.1,
+        "pitch": -0.05,
+        "intonation": 1.1
       }
     },
     {

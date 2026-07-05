@@ -8,6 +8,9 @@
     "test:news": "node test-news-reader.mjs",
     "test:ollama": "node test-ollama-provider.mjs",
     "test:twitch": "node test-twitch-source.mjs",
+    "test:voicevox": "node test-voicevox-chunk.mjs",
+    "test:voicevox:engine": "node test-voicevox-engine.mjs",
+    "test:voicevox:e2e": "node test-voicevox-e2e.mjs",
     "test:crosstab": "node test-crosstab.mjs"
   },
   "dependencies": {
