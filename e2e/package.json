@@ -5,6 +5,7 @@
   "scripts": {
     "test": "node test.mjs",
     "test:news": "node test-news-reader.mjs",
+    "test:ollama": "node test-ollama-provider.mjs",
     "test:crosstab": "node test-crosstab.mjs"
   },
   "dependencies": {

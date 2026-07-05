@@ -24,13 +24,27 @@
 
 | フィールド | 説明 |
 |---|---|
-| `provider` | `openai` / `openrouter` / `openai-compatible` / `mock` |
-| `apiKey` | APIキー。`mock` では不要 |
+| `provider` | `openai` / `openrouter` / `openai-compatible` / `ollama` / `mock` |
+| `apiKey` | APIキー。`mock` / `ollama` では不要 |
 | `model` | モデルID。`mock` では省略可 |
-| `baseUrl` | 省略可。ローカルLLM (例: `http://localhost:11434/v1`) やOpenAI互換サーバーを指す |
+| `baseUrl` | 省略可。ローカルLLM やOpenAI互換サーバーを指す。`ollama` の既定は `http://localhost:11434/v1` |
 | `timeoutMs` | 省略可。既定 30000 |
 
 `mock` はAPIキーなしで応答・画面認識・ニュース要約の動作確認ができるモックです。
+
+Ollama を使う場合は、Ollama を起動してモデルを pull したうえで `provider: "ollama"` を指定します。発話用ペルソナ、ニュース要約、`context.screenCapture.connector` の vision_model 参照先として同じように選べます。
+
+```json
+{
+  "connectors": {
+    "ollama_local": {
+      "provider": "ollama",
+      "model": "llama3.2",
+      "baseUrl": "http://localhost:11434/v1"
+    }
+  }
+}
+```
 
 ## personas
 
