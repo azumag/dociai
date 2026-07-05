@@ -1,8 +1,11 @@
 // 設定UIエディタ (issue #15)
 // connectors / personas / triggers / context(screenCapture) / voicevox / news / commentSources を
-// UIから追加・編集・削除できる。編集した設定はメモリ上の draft に保持し、「適用」で onApply(config)。
-// APIキーは localStorage/sessionStorage には書かない (issue #13)。エクスポートはユーザー操作で
-// ファイルダウンロードのみ。
+// UIから追加・編集・削除できる。編集した設定はメモリ上の draft に保持し、「保存して適用」で
+// onApply(config) を呼ぶ。onApply は scripts/serve.py の PUT /config.local.json 経由でディスクへ
+// 保存してから現在のアプリ状態に反映する (src/app.js の applyEditedConfig)。保存に対応しない
+// サーバー (python -m http.server 等) では失敗し、モーダルは閉じずエラーを表示する。
+// APIキーは localStorage/sessionStorage には書かない (issue #13)。「JSONエクスポート」は
+// ファイルダウンロードによる手動バックアップ/保存失敗時のフォールバック用。
 //
 // 設計: 各入力に input/change リスナーを付け、draft を直接更新する。タブ切替・追加・削除の
 // ときだけ再描画する (入力フォーカスは失われるが、入力値は draft に反映済みなので保持される)。
@@ -16,6 +19,9 @@ const NEWS_MODES = ["topic", "current", "simple"];
 const NEWS_SOURCE_TYPES = ["rss", "mock"];
 
 const clone = (v) => JSON.parse(JSON.stringify(v ?? null));
+// 壊れた/手編集された config.local.json で配列であるべき値が文字列などになっていても
+// .join() でクラッシュしないようにする (クラッシュするとタブ全体が描画されず入力欄ごと消える)。
+const asArray = (v) => (Array.isArray(v) ? v : []);
 
 export class SettingsUI {
   constructor({ getCurrent = () => null, onApply = () => {}, log = () => {} } = {}) {
@@ -51,9 +57,8 @@ export class SettingsUI {
     dlg.className = "settings-modal";
     this.root = dlg;
     document.body.append(dlg);
-    dlg.addEventListener("click", (e) => {
-      if (e.target === dlg) this.close();
-    });
+    // 背景クリックでの close は行わない。閉じるのは ×/キャンセル/保存して適用のみ
+    // (誤クリックで編集内容を失わないため)。
 
     const header = document.createElement("header");
     header.className = "settings-header";
@@ -123,8 +128,9 @@ export class SettingsUI {
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
     applyBtn.className = "btn-primary";
-    applyBtn.innerHTML = `<span>&#10003;</span> 適用して再読込`;
+    applyBtn.innerHTML = `<span>&#10003;</span> 保存して適用`;
     applyBtn.addEventListener("click", () => this.#apply());
+    this._applyBtn = applyBtn;
     footerActions.append(exportBtn, cancelBtn, applyBtn);
     footer.append(errors, footerActions);
 
@@ -551,7 +557,14 @@ export class SettingsUI {
       voiceGrid.append(this.#arrSelect("voice.engine", VOICE_ENGINES, "personas", i, "voice.engine", { value: v.engine ?? "webspeech" }));
       voiceGrid.append(this.#arrField("voice.name (webspeech)", "personas", i, "voice.name", { value: v.name ?? "" }));
       voiceGrid.append(this.#arrField("voice.speaker (voicevox)", "personas", i, "voice.speaker", { type: "number", value: v.speaker ?? "" }));
-      voiceGrid.append(this.#arrField("voice.rate / speed", "personas", i, "voice.rate", { type: "number", value: v.rate ?? v.speed ?? "" }));
+      // webspeech は voice.rate、voicevox は voice.speed を見る (src/speech-queue.js)。
+      // 1つの入力欄で両方に同じ値を書き込み、エンジンを切り替えても効くようにする。
+      const rateField = this.#arrField("voice.rate / speed", "personas", i, "voice.rate", { type: "number", value: v.rate ?? v.speed ?? "" });
+      rateField.querySelector("input").addEventListener("input", (e) => {
+        const val = e.target.value === "" ? null : Number(e.target.value);
+        this.#getArr("personas")[i].voice.speed = val;
+      });
+      voiceGrid.append(rateField);
       voiceGrid.append(this.#arrField("voice.pitch", "personas", i, "voice.pitch", { type: "number", value: v.pitch ?? "" }));
       voiceGrid.append(this.#arrField("voice.intonation", "personas", i, "voice.intonation", { type: "number", value: v.intonation ?? "" }));
       voiceGrid.append(this.#arrField("voice.volume", "personas", i, "voice.volume", { type: "number", value: v.volume ?? "" }));
@@ -591,7 +604,7 @@ export class SettingsUI {
       const row2 = document.createElement("div");
       row2.className = "compact-row";
       if (t.type === "keyword") {
-        const kwField = this.#mapField("keywords (カンマ区切り)", "triggers", id, "keywords", { value: (t.keywords ?? []).join(", ") });
+        const kwField = this.#mapField("keywords (カンマ区切り)", "triggers", id, "keywords", { value: asArray(t.keywords).join(", ") });
         const inp = kwField.querySelector("input");
         inp.addEventListener("input", () => {
           this.draft.triggers[id].keywords = inp.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean);
@@ -731,12 +744,7 @@ export class SettingsUI {
     title.textContent = "Twitch";
     const { card, body: cardBody } = this.#card([title]);
     cardBody.append(this.#pathCheckbox("twitch.enabled", "commentSources.twitch.enabled", { value: t.enabled }));
-    const channelsInput = this.#pathField("channels (カンマ区切り)", "commentSources.twitch.channels", { value: (t.channels ?? []).join(", "), attrs: { spellcheck: "false" } });
-    const inp = channelsInput.querySelector("input");
-    inp.addEventListener("input", () => {
-      this.draft.commentSources.twitch.channels = inp.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean);
-    });
-    cardBody.append(channelsInput);
+    cardBody.append(this.#pathField("channels (カンマ区切り)", "commentSources.twitch.channels", { value: asArray(t.channels).join(", "), csv: true, attrs: { spellcheck: "false" } }));
     cardBody.append(this.#pathField("nick (省略可)", "commentSources.twitch.nick", { value: t.nick ?? "", attrs: { spellcheck: "false" } }));
     cardBody.append(this.#pathField("url (省略可)", "commentSources.twitch.url", { value: t.url ?? "", attrs: { spellcheck: "false" } }));
     this._body.append(card);
@@ -747,7 +755,7 @@ export class SettingsUI {
   }
 
   // ---- 適用 / エクスポート ----
-  #apply() {
+  async #apply() {
     const { errors, warnings } = validateConfig(this.draft);
     this._errors.replaceChildren();
     if (errors.length) {
@@ -761,9 +769,20 @@ export class SettingsUI {
       return;
     }
     for (const w of warnings) this.log(`設定エディタの警告: ${w}`, "warn");
-    this.onApply(clone(this.draft));
-    this.log("設定をUI編集内容で上書き適用しました");
-    this.close();
+    this._applyBtn.disabled = true;
+    try {
+      await this.onApply(clone(this.draft));
+      this.log("設定を config.local.json に保存し、適用しました");
+      this.close();
+    } catch (e) {
+      const div = document.createElement("div");
+      div.className = "settings-error";
+      div.textContent = `${e.message} (「JSONエクスポート」で手動保存もできます)`;
+      this._errors.append(div);
+      this.log(`設定エディタ: 保存に失敗しました (${e.message})`, "error");
+    } finally {
+      this._applyBtn.disabled = false;
+    }
   }
 
   #export() {

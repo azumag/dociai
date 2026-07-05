@@ -11,7 +11,7 @@
 ## 使い方
 
 ```bash
-python3 -m http.server 8080
+python3 scripts/serve.py 8080
 ```
 
 1. `http://localhost:8080/` を開いて操作卓を使う

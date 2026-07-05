@@ -236,6 +236,26 @@ export async function loadFromServer() {
   return parseAndValidate(await res.text(), "サーバー");
 }
 
+// 設定エディタ (issue #15) から呼ばれる。scripts/serve.py の PUT /config.local.json で
+// ディスクへ書き込む。python3 -m http.server など保存に対応しないサーバーでは失敗するので、
+// 呼び出し側でエラーを捕捉し、JSONエクスポートへの案内を行うこと。
+export async function saveToServer(config) {
+  let res;
+  try {
+    res = await fetch("./config.local.json", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config, null, 2),
+    });
+  } catch (e) {
+    throw new Error(`config.local.json への保存に失敗しました: ${e.message}`);
+  }
+  if (!res.ok) {
+    const detail = await res.json().then((j) => j?.error).catch(() => "");
+    throw new Error(`config.local.json への保存に失敗しました (HTTP ${res.status}${detail ? `: ${detail}` : ""})。scripts/serve.py で起動しているか確認してください`);
+  }
+}
+
 export function loadFromFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

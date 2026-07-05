@@ -168,7 +168,7 @@ export class SpeechQueue {
         const blob = await this.voicevox.synth(chunks[i], {
           speaker: v.speaker,
           pitch: v.pitch,
-          speed: v.speed,
+          speed: v.speed ?? v.rate,
           intonation: v.intonation,
           volume: v.volume,
         });
