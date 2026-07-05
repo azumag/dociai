@@ -130,15 +130,39 @@ export function validateConfig(cfg) {
     }
   }
 
+  // voicevox (issue #17)
+  if (cfg.voicevox?.enabled) {
+    const v = cfg.voicevox;
+    if (!v.baseUrl) errors.push("voicevox.enabled が true ですが voicevox.baseUrl がありません");
+    if (v.defaultSpeaker == null || !Number.isFinite(Number(v.defaultSpeaker))) {
+      errors.push("voicevox.defaultSpeaker は数値で指定してください (例: 3)");
+    }
+    if (v.maxChars != null && !(Number(v.maxChars) > 0)) {
+      errors.push("voicevox.maxChars は正の数にしてください");
+    }
+  }
+
+  // personas.voice.engine (issue #17)
+  for (const [i, p] of (cfg.personas ?? []).entries()) {
+    const label = p?.id ? `personas[${p.id}]` : `personas[${i}]`;
+    const engine = p?.voice?.engine;
+    if (engine && !["webspeech", "voicevox"].includes(engine)) {
+      errors.push(`${label}.voice.engine "${engine}" は未対応です (対応: webspeech, voicevox)`);
+    }
+    if (engine === "voicevox" && !cfg.voicevox?.enabled) {
+      warnings.push(`${label}.voice.engine が voicevox ですが voicevox.enabled が true ではありません。Web Speech API にフォールバックします`);
+    }
+  }
+
   return { errors, warnings };
 }
 
 export function applyDefaults(cfg) {
-  const personas = cfg.personas.map((p) => ({
+  const personas = (cfg.personas ?? []).map((p) => ({
     enabled: true,
     triggers: [],
     ...p,
-    voice: { enabled: true, name: "default", rate: 1.0, pitch: 1.0, ...(p.voice ?? {}) },
+    voice: { enabled: true, engine: "webspeech", name: "default", rate: 1.0, pitch: 1.0, ...(p.voice ?? {}) },
   }));
   return {
     ...cfg,
@@ -160,6 +184,14 @@ export function applyDefaults(cfg) {
         maxTokens: 768,
         ...(cfg.context?.screenCapture ?? {}),
       },
+    },
+    voicevox: {
+      enabled: false,
+      baseUrl: "http://127.0.0.1:50021",
+      defaultSpeaker: 3,
+      maxChars: 200,
+      timeoutMs: 30000,
+      ...(cfg.voicevox ?? {}),
     },
     news: cfg.news ? { maxItems: 3, mode: "topic", dedupe: true, ...cfg.news } : { enabled: false, mode: "topic", dedupe: true },
     commentSources: {

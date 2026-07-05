@@ -79,8 +79,46 @@ MiniMax 公式の Anthropic Messages 互換APIを使う場合は `provider: "min
 ```
 
 - `triggers` — このペルソナが反応するトリガーIDの配列
+- `voice.engine` — `webspeech` (既定, ブラウザ内蔵) または `voicevox` (issue #17)
 - `voice.name` — Web Speech APIの音声名。`default` なら日本語音声を自動選択
+- `voice.speaker` — VOICEVOX の話者ID (数値)。`/speakers` の style id。省略時は `voicevox.defaultSpeaker`
+- `voice.speed` / `voice.pitch` / `voice.intonation` / `voice.volume` — VOICEVOX の各 Scale (soviet_now 互換)。`pitch` は現在の pitchScale に加算、それ以外は上書き
+- `voice.rate` / `voice.pitch` — Web Speech API 用 (1.0 基準)。`engine: voicevox` のときは無視される
 - `voice.enabled: false` — 応答はログに出すが読み上げない
+
+## voicevox
+
+VOICEVOX engine を使った音声合成 (issue #17)。ローカル Docker でもリモートホストでも可。
+
+```json
+{
+  "voicevox": {
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:50021",
+    "defaultSpeaker": 3,
+    "maxChars": 200,
+    "timeoutMs": 30000
+  }
+}
+```
+
+| フィールド | 既定 | 説明 |
+|---|---|---|
+| `enabled` | false | VOICEVOX を有効化。`personas[].voice.engine: "voicevox"` のペルソナが使う |
+| `baseUrl` | `http://127.0.0.1:50021` | engine の URL。例: `http://192.168.11.13:50021` |
+| `defaultSpeaker` | 3 | ペルソナが `voice.speaker` を省略したときの話者ID (3 = ずんだもん ノーマル) |
+| `maxChars` | 200 | 長文をチャンクに分ける際の1チャンク上限文字数 (soviet_now 互換) |
+| `timeoutMs` | 30000 | 1チャンク合成のタイムアウト |
+
+実装は `azumag/soviet_now/voicevox_tts.sh` をブラウザ向けに移植したものです。
+長文は句点(`。`)・読点(`、`)・改行で `maxChars` を超えないように分割し、
+各チャンクを `audio_query` → `synthesis` の2段階で合成して順次再生します。
+`pitch` はクエリの `pitchScale` に加算、`speed` / `intonation` / `volume` は上書きします。
+
+CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
+`Access-Control-Allow-Origin` を返します。`http://localhost:8080` からのリクエストは
+そのまま通るので追加設定不要です。別ホストに置く場合は engine 側で
+`--cors_policy_mode all` を指定してください。
 
 ## triggers
 

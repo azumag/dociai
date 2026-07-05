@@ -9,6 +9,7 @@ import { ContextBuilder } from "./context-builder.js";
 import { TriggerEngine } from "./trigger-engine.js";
 import { PersonaRouter } from "./persona-router.js";
 import { SpeechQueue } from "./speech-queue.js";
+import { VoiceVoxClient } from "./voicevox.js";
 import { ScreenContext } from "./screen-capture.js";
 import { NewsReader } from "./news-reader.js";
 import { ManualCommentSource, TwitchChatSource } from "./comment-sources.js";
@@ -203,7 +204,23 @@ async function applyLoaded({ config, warnings, source }) {
     renderTally();
   });
 
-  state.speechQueue = new SpeechQueue({ onUpdate: onSpeechUpdate, log: (m) => logEvent(m) });
+  state.speechQueue = new SpeechQueue({
+    onUpdate: onSpeechUpdate,
+    log: (m) => logEvent(m),
+    voicevox: config.voicevox?.enabled
+      ? new VoiceVoxClient({
+          baseUrl: config.voicevox.baseUrl,
+          timeoutMs: config.voicevox.timeoutMs,
+          log: (m) => logEvent(m),
+        })
+      : null,
+  });
+  if (config.voicevox?.enabled) {
+    state.speechQueue.voicevox
+      ?.speakers()
+      .then((list) => logEvent(`VOICEVOX 接続OK: 話者${list.length}件 / ${config.voicevox.baseUrl}`))
+      .catch((e) => logEvent(`VOICEVOX 接続確認に失敗: ${scrub(e.message)}`, "warn"));
+  }
 
   state.screenContext = config.context.screenCapture.enabled
     ? new ScreenContext({ config, getConnector: (id) => state.connectors.get(id), log: (m) => logEvent(m) })
