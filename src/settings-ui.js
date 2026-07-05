@@ -57,36 +57,49 @@ export class SettingsUI {
 
     const header = document.createElement("header");
     header.className = "settings-header";
-    header.innerHTML = `<h2>設定エディタ</h2>`;
+    const title = document.createElement("div");
+    title.className = "settings-title";
+    title.innerHTML = `<span class="settings-title-icon">&#9881;</span><h2>設定エディタ</h2>`;
+    header.append(title);
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "settings-close";
-    closeBtn.textContent = "×";
+    closeBtn.innerHTML = "&times;";
+    closeBtn.title = "閉じる";
     closeBtn.addEventListener("click", () => this.close());
     header.append(closeBtn);
 
+    // sidebar + main を包むシェル
+    const shell = document.createElement("div");
+    shell.className = "settings-shell";
+
     const nav = document.createElement("nav");
-    nav.className = "settings-tabs";
+    nav.className = "settings-sidebar";
     const tabs = [
-      ["connectors", "コネクタ"],
-      ["personas", "ペルソナ"],
-      ["triggers", "トリガー"],
-      ["context", "画面・文脈"],
-      ["voicevox", "VOICEVOX"],
-      ["news", "ニュース"],
-      ["sources", "コメントソース"],
+      ["connectors", "コネクタ", "AIプロバイダ"],
+      ["personas", "ペルソナ", "応答キャラクター"],
+      ["triggers", "トリガー", "発火条件"],
+      ["context", "画面・文脈", "vision / 履歴"],
+      ["voicevox", "VOICEVOX", "音声合成エンジン"],
+      ["news", "ニュース", "RSS / 要約"],
+      ["sources", "コメントソース", "Twitch 等"],
     ];
-    for (const [id, label] of tabs) {
+    for (const [id, label, desc] of tabs) {
       const b = document.createElement("button");
       b.type = "button";
       b.dataset.tab = id;
-      b.textContent = label;
+      b.innerHTML = `<span class="tab-label"></span><span class="tab-desc"></span>`;
+      b.querySelector(".tab-label").textContent = label;
+      b.querySelector(".tab-desc").textContent = desc;
       b.addEventListener("click", () => {
         this.activeTab = id;
         this.#render();
       });
       nav.append(b);
     }
+
+    const main = document.createElement("div");
+    main.className = "settings-main";
 
     const body = document.createElement("div");
     body.className = "settings-body";
@@ -95,31 +108,36 @@ export class SettingsUI {
     footer.className = "settings-footer";
     const errors = document.createElement("div");
     errors.className = "settings-errors";
-    const spacer = document.createElement("span");
-    spacer.style.flex = "1";
+    const footerActions = document.createElement("div");
+    footerActions.className = "settings-actions";
     const exportBtn = document.createElement("button");
     exportBtn.type = "button";
-    exportBtn.textContent = "JSONエクスポート";
+    exportBtn.className = "btn-ghost";
+    exportBtn.innerHTML = `<span>&#8595;</span> JSONエクスポート`;
     exportBtn.addEventListener("click", () => this.#export());
     const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
+    cancelBtn.className = "btn-ghost";
     cancelBtn.textContent = "キャンセル";
     cancelBtn.addEventListener("click", () => this.close());
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
-    applyBtn.className = "primary";
-    applyBtn.textContent = "適用して再読込";
+    applyBtn.className = "btn-primary";
+    applyBtn.innerHTML = `<span>&#10003;</span> 適用して再読込`;
     applyBtn.addEventListener("click", () => this.#apply());
-    footer.append(errors, spacer, exportBtn, cancelBtn, applyBtn);
+    footerActions.append(exportBtn, cancelBtn, applyBtn);
+    footer.append(errors, footerActions);
 
-    dlg.append(header, nav, body, footer);
+    main.append(body, footer);
+    shell.append(nav, main);
+    dlg.append(header, shell);
     this._body = body;
     this._errors = errors;
     this._built = true;
   }
 
   #render() {
-    for (const b of this.root.querySelectorAll(".settings-tabs button")) {
+    for (const b of this.root.querySelectorAll(".settings-sidebar button")) {
       b.classList.toggle("is-active", b.dataset.tab === this.activeTab);
     }
     this._body.replaceChildren();
@@ -377,18 +395,33 @@ export class SettingsUI {
     if (onAdd) {
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = "+ 追加";
+      b.className = "btn-add";
+      b.innerHTML = `<span>+</span> 追加`;
       b.addEventListener("click", onAdd);
       h.append(b);
     }
     return h;
   }
 
+  // カードを作成し、head 部と body 部を分離して返す。body に要素を append する。
+  #card(headContent) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const head = document.createElement("div");
+    head.className = "card-head";
+    if (headContent) head.append(...headContent);
+    const body = document.createElement("div");
+    body.className = "card-body";
+    card.append(head, body);
+    return { card, head, body };
+  }
+
   #removeBtn(onRemove, label = "削除") {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "danger";
-    b.textContent = label;
+    b.className = "btn-remove";
+    b.innerHTML = `<span>&times;</span>`;
+    b.title = label;
     b.addEventListener("click", onRemove);
     return b;
   }
@@ -411,21 +444,16 @@ export class SettingsUI {
       return;
     }
     for (const [id, c] of entries) {
-      const card = document.createElement("div");
-      card.className = "card";
-      const idRow = document.createElement("div");
-      idRow.className = "card-row";
-      idRow.append(this.#mapField("ID", "connectors", id, "__id__", { value: id, attrs: { spellcheck: "false" } }));
-      idRow.append(this.#removeBtn(() => {
+      const idField = this.#mapField("ID", "connectors", id, "__id__", { value: id, attrs: { spellcheck: "false" } });
+      const removeBtn = this.#removeBtn(() => {
         delete this.draft.connectors[id];
-        // 参照を外す
         for (const p of this.draft.personas ?? []) {
           if (p.connector === id) p.connector = "";
         }
         if (this.draft.context?.screenCapture?.connector === id) this.draft.context.screenCapture.connector = "";
         this.#render();
-      }));
-      card.append(idRow);
+      });
+      const { card, body: cardBody } = this.#card([idField, removeBtn]);
       const fields = document.createElement("div");
       fields.className = "card-grid";
       fields.append(this.#mapSelect("provider", PROVIDERS, "connectors", id, "provider", { value: c.provider }));
@@ -433,8 +461,8 @@ export class SettingsUI {
       fields.append(this.#mapField("apiKey", "connectors", id, "apiKey", { value: c.apiKey ?? "", attrs: { spellcheck: "false", autocomplete: "off" } }));
       fields.append(this.#mapField("baseUrl", "connectors", id, "baseUrl", { value: c.baseUrl ?? "", attrs: { spellcheck: "false" } }));
       fields.append(this.#mapField("timeoutMs", "connectors", id, "timeoutMs", { type: "number", value: c.timeoutMs ?? "" }));
-      card.append(fields);
-      body.append(card);
+      cardBody.append(fields);
+      this._body.append(card);
     }
   }
 
@@ -458,23 +486,21 @@ export class SettingsUI {
     const connectorIds = Object.keys(this.draft.connectors ?? {});
     const triggerIds = Object.keys(this.draft.triggers ?? {});
     for (const [i, p] of (this.draft.personas ?? []).entries()) {
-      const card = document.createElement("div");
-      card.className = "card";
-      const top = document.createElement("div");
-      top.className = "card-row";
-      top.append(this.#arrField("ID", "personas", i, "id", { value: p.id, attrs: { spellcheck: "false" } }));
-      top.append(this.#arrField("表示名", "personas", i, "name", { value: p.name }));
-      top.append(this.#arrCheckbox("有効", "personas", i, "enabled", { value: p.enabled }));
-      top.append(this.#removeBtn(() => {
-        this.draft.personas.splice(i, 1);
-        this.#render();
-      }));
-      card.append(top);
+      const headEls = [
+        this.#arrField("ID", "personas", i, "id", { value: p.id, attrs: { spellcheck: "false" } }),
+        this.#arrField("表示名", "personas", i, "name", { value: p.name }),
+        this.#arrCheckbox("有効", "personas", i, "enabled", { value: p.enabled }),
+        this.#removeBtn(() => {
+          this.draft.personas.splice(i, 1);
+          this.#render();
+        }),
+      ];
+      const { card, body: cardBody } = this.#card(headEls);
       const grid = document.createElement("div");
       grid.className = "card-grid";
       grid.append(this.#arrSelect("connector", connectorIds, "personas", i, "connector", { value: p.connector }));
-      card.append(grid);
-      card.append(this.#arrField("systemPrompt", "personas", i, "systemPrompt", { value: p.systemPrompt ?? "", textarea: true, rows: 3 }));
+      cardBody.append(grid);
+      cardBody.append(this.#arrField("systemPrompt", "personas", i, "systemPrompt", { value: p.systemPrompt ?? "", textarea: true, rows: 3 }));
       // triggers: チェックボックス群
       const trigWrap = document.createElement("div");
       trigWrap.className = "field";
@@ -505,12 +531,13 @@ export class SettingsUI {
         trigBox.append(m);
       }
       trigWrap.append(trigBox);
-      card.append(trigWrap);
+      cardBody.append(trigWrap);
       // voice
       const v = p.voice ?? {};
-      const voiceHead = document.createElement("h4");
-      voiceHead.textContent = "voice";
-      card.append(voiceHead);
+      const voiceHead = document.createElement("div");
+      voiceHead.className = "sub-section";
+      voiceHead.innerHTML = `<span class="sub-section-label">voice</span>`;
+      cardBody.append(voiceHead);
       const voiceGrid = document.createElement("div");
       voiceGrid.className = "card-grid";
       voiceGrid.append(this.#arrCheckbox("voice.enabled", "personas", i, "voice.enabled", { value: v.enabled }));
@@ -521,8 +548,8 @@ export class SettingsUI {
       voiceGrid.append(this.#arrField("voice.pitch", "personas", i, "voice.pitch", { type: "number", value: v.pitch ?? "" }));
       voiceGrid.append(this.#arrField("voice.intonation", "personas", i, "voice.intonation", { type: "number", value: v.intonation ?? "" }));
       voiceGrid.append(this.#arrField("voice.volume", "personas", i, "voice.volume", { type: "number", value: v.volume ?? "" }));
-      card.append(voiceGrid);
-      body.append(card);
+      cardBody.append(voiceGrid);
+      this._body.append(card);
     }
   }
 
@@ -536,111 +563,109 @@ export class SettingsUI {
       this.#render();
     }));
     for (const [id, t] of Object.entries(this.draft.triggers ?? {})) {
-      const card = document.createElement("div");
-      card.className = "card";
-      const top = document.createElement("div");
-      top.className = "card-row";
-      top.append(this.#mapField("ID", "triggers", id, "__id__", { value: id, attrs: { spellcheck: "false" } }));
-      top.append(this.#removeBtn(() => {
+      const idField = this.#mapField("ID", "triggers", id, "__id__", { value: id, attrs: { spellcheck: "false" } });
+      const removeBtn = this.#removeBtn(() => {
         delete this.draft.triggers[id];
         for (const p of this.draft.personas ?? []) {
           p.triggers = (p.triggers ?? []).filter((x) => x !== id);
         }
         if (this.draft.news?.trigger === id) this.draft.news.trigger = "";
         this.#render();
-      }));
-      card.append(top);
-      card.append(this.#mapSelect("type", TRIGGER_TYPES, "triggers", id, "type", { value: t.type }));
+      });
+      const { card, body: cardBody } = this.#card([idField, removeBtn]);
+      cardBody.append(this.#mapSelect("type", TRIGGER_TYPES, "triggers", id, "type", { value: t.type }));
       if (t.type === "keyword") {
-        card.append(this.#mapField("keywords (カンマ区切り)", "triggers", id, "keywords", { value: (t.keywords ?? []).join(", ") }));
-        // keywords は配列。入力時に配列へ変換するため専用ハンドラに差し替え
-        const inp = card.querySelector("input:last-of-type");
+        const kwField = this.#mapField("keywords (カンマ区切り)", "triggers", id, "keywords", { value: (t.keywords ?? []).join(", ") });
+        const inp = kwField.querySelector("input");
         inp.addEventListener("input", () => {
           this.draft.triggers[id].keywords = inp.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean);
         });
+        cardBody.append(kwField);
       } else if (t.type === "hotkey") {
-        card.append(this.#mapField("keys (例: Alt+1)", "triggers", id, "keys", { value: t.keys ?? "", attrs: { spellcheck: "false" } }));
+        cardBody.append(this.#mapField("keys (例: Alt+1)", "triggers", id, "keys", { value: t.keys ?? "", attrs: { spellcheck: "false" } }));
       } else if (t.type === "interval") {
         const g = document.createElement("div");
         g.className = "card-grid";
         g.append(this.#mapField("minutes", "triggers", id, "minutes", { type: "number", value: t.minutes ?? "" }));
         g.append(this.#mapField("seconds", "triggers", id, "seconds", { type: "number", value: t.seconds ?? "" }));
-        card.append(g);
+        cardBody.append(g);
       } else if (t.type === "random") {
-        card.append(this.#mapField("probability (0-1)", "triggers", id, "probability", { type: "number", value: t.probability ?? "" }));
+        cardBody.append(this.#mapField("probability (0-1)", "triggers", id, "probability", { type: "number", value: t.probability ?? "" }));
       }
-      body.append(card);
+      this._body.append(card);
     }
   }
 
   // ---- context / screenCapture / router ----
   #renderContext() {
-    const body = this._body;
     const connectorIds = Object.keys(this.draft.connectors ?? {});
     const sc = this.draft.context?.screenCapture ?? {};
     const ctx = this.draft.context ?? {};
-    const card = document.createElement("div");
-    card.className = "card";
-    const h = document.createElement("h3");
-    h.textContent = "画面キャプチャ (vision_model)";
-    card.append(h);
-    card.append(this.#pathCheckbox("screenCapture.enabled", "context.screenCapture.enabled", { value: sc.enabled }));
-    card.append(this.#pathSelect("screenCapture.connector", ["", ...connectorIds], "context.screenCapture.connector", { value: sc.connector ?? "" }));
-    const g = document.createElement("div");
-    g.className = "card-grid";
-    g.append(this.#pathField("maxAgeSeconds", "context.screenCapture.maxAgeSeconds", { type: "number", value: sc.maxAgeSeconds ?? 120 }));
-    g.append(this.#pathField("maxTokens", "context.screenCapture.maxTokens", { type: "number", value: sc.maxTokens ?? 768 }));
-    g.append(this.#pathField("commentHistoryLimit", "context.commentHistoryLimit", { type: "number", value: ctx.commentHistoryLimit ?? 80 }));
-    g.append(this.#pathField("includeRecentComments", "context.includeRecentComments", { type: "number", value: ctx.includeRecentComments ?? 20 }));
-    g.append(this.#pathField("maxPromptChars", "context.maxPromptChars", { type: "number", value: ctx.maxPromptChars ?? 4000 }));
-    card.append(g);
-    body.append(card);
 
-    const rcard = document.createElement("div");
-    rcard.className = "card";
-    const rh = document.createElement("h3");
-    rh.textContent = "router";
-    rcard.append(rh);
+    // screenCapture
+    const scTitle = document.createElement("div");
+    scTitle.className = "card-title";
+    scTitle.textContent = "画面キャプチャ (vision_model)";
+    const { card: scCard, body: scBody } = this.#card([scTitle]);
+    scBody.append(this.#pathCheckbox("screenCapture.enabled", "context.screenCapture.enabled", { value: sc.enabled }));
+    scBody.append(this.#pathSelect("screenCapture.connector", ["", ...connectorIds], "context.screenCapture.connector", { value: sc.connector ?? "" }));
+    const scGrid = document.createElement("div");
+    scGrid.className = "card-grid";
+    scGrid.append(this.#pathField("maxAgeSeconds", "context.screenCapture.maxAgeSeconds", { type: "number", value: sc.maxAgeSeconds ?? 120 }));
+    scGrid.append(this.#pathField("maxTokens", "context.screenCapture.maxTokens", { type: "number", value: sc.maxTokens ?? 768 }));
+    scGrid.append(this.#pathField("commentHistoryLimit", "context.commentHistoryLimit", { type: "number", value: ctx.commentHistoryLimit ?? 80 }));
+    scGrid.append(this.#pathField("includeRecentComments", "context.includeRecentComments", { type: "number", value: ctx.includeRecentComments ?? 20 }));
+    scGrid.append(this.#pathField("maxPromptChars", "context.maxPromptChars", { type: "number", value: ctx.maxPromptChars ?? 4000 }));
+    scBody.append(scGrid);
+    this._body.append(scCard);
+
+    // router
+    const rTitle = document.createElement("div");
+    rTitle.className = "card-title";
+    rTitle.textContent = "router";
+    const { card: rCard, body: rBody } = this.#card([rTitle]);
     const rg = document.createElement("div");
     rg.className = "card-grid";
     rg.append(this.#pathSelect("defaultPersona", (this.draft.personas ?? []).map((p) => p.id), "router.defaultPersona", { value: this.draft.router?.defaultPersona ?? "" }));
     rg.append(this.#pathField("maxRepliesPerComment", "router.maxRepliesPerComment", { type: "number", value: this.draft.router?.maxRepliesPerComment ?? 1 }));
     rg.append(this.#pathField("cooldownSeconds", "router.cooldownSeconds", { type: "number", value: this.draft.router?.cooldownSeconds ?? 8 }));
-    rcard.append(rg);
-    body.append(rcard);
+    rBody.append(rg);
+    this._body.append(rCard);
   }
 
   // ---- voicevox ----
   #renderVoicevox() {
-    const body = this._body;
     const v = this.draft.voicevox ?? {};
-    const card = document.createElement("div");
-    card.className = "card";
-    card.append(this.#pathCheckbox("voicevox.enabled", "voicevox.enabled", { value: v.enabled }));
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = "VOICEVOX エンジン";
+    const { card, body: cardBody } = this.#card([title]);
+    cardBody.append(this.#pathCheckbox("voicevox.enabled", "voicevox.enabled", { value: v.enabled }));
     const g = document.createElement("div");
     g.className = "card-grid";
     g.append(this.#pathField("baseUrl", "voicevox.baseUrl", { value: v.baseUrl ?? "http://127.0.0.1:50021", attrs: { spellcheck: "false" } }));
     g.append(this.#pathField("defaultSpeaker", "voicevox.defaultSpeaker", { type: "number", value: v.defaultSpeaker ?? 3 }));
     g.append(this.#pathField("maxChars", "voicevox.maxChars", { type: "number", value: v.maxChars ?? 200 }));
     g.append(this.#pathField("timeoutMs", "voicevox.timeoutMs", { type: "number", value: v.timeoutMs ?? 30000 }));
-    card.append(g);
-    body.append(card);
+    cardBody.append(g);
+    this._body.append(card);
     const note = document.createElement("p");
-    note.className = "muted";
+    note.className = "muted settings-note";
     note.textContent = "話者IDは engine の /speakers の style id (例: 3 = ずんだもん ノーマル)。CORS は engine が localhost 系 Origin を許可する既定で通ります。";
-    body.append(note);
+    this._body.append(note);
   }
 
   // ---- news ----
   #renderNews() {
-    const body = this._body;
     const n = this.draft.news ?? { enabled: false, sources: [], mode: "topic" };
     if (!this.draft.news) this.draft.news = n;
     const triggerIds = Object.keys(this.draft.triggers ?? {});
     const personaIds = (this.draft.personas ?? []).map((p) => p.id);
-    const card = document.createElement("div");
-    card.className = "card";
-    card.append(this.#listHeader("ニュース", null));
+
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = "ニュース";
+    const { card, body: cardBody } = this.#card([title]);
     const g = document.createElement("div");
     g.className = "card-grid";
     g.append(this.#pathCheckbox("news.enabled", "news.enabled", { value: n.enabled }));
@@ -649,62 +674,58 @@ export class SettingsUI {
     g.append(this.#pathSelect("mode", NEWS_MODES, "news.mode", { value: n.mode ?? "topic" }));
     g.append(this.#pathField("maxItems", "news.maxItems", { type: "number", value: n.maxItems ?? 3 }));
     g.append(this.#pathCheckbox("dedupe", "news.dedupe", { value: n.dedupe ?? true }));
-    card.append(g);
-    card.append(this.#pathField("corsProxy", "news.corsProxy", { value: n.corsProxy ?? "", attrs: { spellcheck: "false" } }));
-    card.append(this.#pathField("style", "news.style", { value: n.style ?? "", textarea: true, rows: 2 }));
-    body.append(card);
+    cardBody.append(g);
+    cardBody.append(this.#pathField("corsProxy", "news.corsProxy", { value: n.corsProxy ?? "", attrs: { spellcheck: "false" } }));
+    cardBody.append(this.#pathField("style", "news.style", { value: n.style ?? "", textarea: true, rows: 2 }));
+    this._body.append(card);
 
-    body.append(this.#listHeader("ニュースソース", () => {
+    this._body.append(this.#listHeader("ニュースソース", () => {
       this.draft.news.sources.push({ name: "新規ソース", type: "rss", url: "", enabled: true });
       this.#render();
     }));
     for (const [i, s] of (n.sources ?? []).entries()) {
-      const c = document.createElement("div");
-      c.className = "card";
-      const top = document.createElement("div");
-      top.className = "card-row";
-      top.append(this.#arrField("name", "news.sources", i, "name", { value: s.name ?? "" }));
-      top.append(this.#arrCheckbox("enabled", "news.sources", i, "enabled", { value: s.enabled ?? true }));
-      top.append(this.#removeBtn(() => {
-        this.draft.news.sources.splice(i, 1);
-        this.#render();
-      }));
-      c.append(top);
+      const headEls = [
+        this.#arrField("name", "news.sources", i, "name", { value: s.name ?? "" }),
+        this.#arrCheckbox("enabled", "news.sources", i, "enabled", { value: s.enabled ?? true }),
+        this.#removeBtn(() => {
+          this.draft.news.sources.splice(i, 1);
+          this.#render();
+        }),
+      ];
+      const { card: c, body: cBody } = this.#card(headEls);
       const g2 = document.createElement("div");
       g2.className = "card-grid";
       g2.append(this.#arrSelect("type", NEWS_SOURCE_TYPES, "news.sources", i, "type", { value: s.type ?? "rss" }));
       g2.append(this.#arrField("url", "news.sources", i, "url", { value: s.url ?? "", attrs: { spellcheck: "false" } }));
-      c.append(g2);
-      body.append(c);
+      cBody.append(g2);
+      this._body.append(c);
     }
   }
 
   // ---- comment sources ----
   #renderSources() {
-    const body = this._body;
     const t = this.draft.commentSources?.twitch ?? { enabled: false, channels: [] };
     if (!this.draft.commentSources) this.draft.commentSources = { twitch: t };
     if (!this.draft.commentSources.twitch) this.draft.commentSources.twitch = t;
-    const card = document.createElement("div");
-    card.className = "card";
-    const h = document.createElement("h3");
-    h.textContent = "Twitch";
-    card.append(h);
-    card.append(this.#pathCheckbox("twitch.enabled", "commentSources.twitch.enabled", { value: t.enabled }));
+
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = "Twitch";
+    const { card, body: cardBody } = this.#card([title]);
+    cardBody.append(this.#pathCheckbox("twitch.enabled", "commentSources.twitch.enabled", { value: t.enabled }));
     const channelsInput = this.#pathField("channels (カンマ区切り)", "commentSources.twitch.channels", { value: (t.channels ?? []).join(", "), attrs: { spellcheck: "false" } });
-    // channels は配列。入力時に配列へ変換
     const inp = channelsInput.querySelector("input");
     inp.addEventListener("input", () => {
       this.draft.commentSources.twitch.channels = inp.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean);
     });
-    card.append(channelsInput);
-    card.append(this.#pathField("nick (省略可)", "commentSources.twitch.nick", { value: t.nick ?? "", attrs: { spellcheck: "false" } }));
-    card.append(this.#pathField("url (省略可)", "commentSources.twitch.url", { value: t.url ?? "", attrs: { spellcheck: "false" } }));
-    body.append(card);
+    cardBody.append(channelsInput);
+    cardBody.append(this.#pathField("nick (省略可)", "commentSources.twitch.nick", { value: t.nick ?? "", attrs: { spellcheck: "false" } }));
+    cardBody.append(this.#pathField("url (省略可)", "commentSources.twitch.url", { value: t.url ?? "", attrs: { spellcheck: "false" } }));
+    this._body.append(card);
     const note = document.createElement("p");
-    note.className = "muted";
+    note.className = "muted settings-note";
     note.textContent = "手動入力は常に有効です。Twitch は読み取り専用なら OAuth 不要です。";
-    body.append(note);
+    this._body.append(note);
   }
 
   // ---- 適用 / エクスポート ----
