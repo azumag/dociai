@@ -2,7 +2,7 @@
 // config.local.json をサーバー経由fetchまたはファイル選択で読み込む。
 // 読み込んだ設定 (APIキー含む) はメモリ保持のみ。永続ストレージには書かない。
 
-const KNOWN_PROVIDERS = ["openai", "openrouter", "openai-compatible", "ollama", "mock"];
+const KNOWN_PROVIDERS = ["openai", "openrouter", "openai-compatible", "ollama", "minimax", "mock"];
 const KNOWN_TRIGGER_TYPES = ["keyword", "hotkey", "interval", "random", "manual"];
 const KNOWN_NEWS_SOURCE_TYPES = ["rss", "mock"];
 const KNOWN_NEWS_MODES = ["topic", "current", "simple"];
@@ -157,6 +157,7 @@ export function applyDefaults(cfg) {
       screenCapture: {
         enabled: false,
         maxAgeSeconds: 120,
+        maxTokens: 768,
         ...(cfg.context?.screenCapture ?? {}),
       },
     },

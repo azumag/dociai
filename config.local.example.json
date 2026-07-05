@@ -20,6 +20,11 @@
       "model": "llama3.2",
       "baseUrl": "http://localhost:11434/v1"
     },
+    "minimax_main": {
+      "provider": "minimax",
+      "apiKey": "sk-...",
+      "model": "MiniMax-M3"
+    },
     "mock_test": {
       "provider": "mock"
     }
@@ -31,7 +36,8 @@
     "screenCapture": {
       "enabled": true,
       "connector": "vision_model",
-      "maxAgeSeconds": 120
+      "maxAgeSeconds": 120,
+      "maxTokens": 768
     }
   },
   "commentSources": {
