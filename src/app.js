@@ -2,7 +2,7 @@
 // イベントの流れ: コメント/ホットキー/interval → TriggerEngine → PersonaRouter
 //   → ContextBuilder → AIConnector → AI応答ログ + SpeechQueue → OBS表示へbroadcast
 
-import { loadFromServer, loadFromFile } from "./config-loader.js";
+import { loadFromServer, loadFromFile, validateConfig, applyDefaults } from "./config-loader.js";
 import { createConnector } from "./connectors.js";
 import { CommentStore } from "./comment-store.js";
 import { ContextBuilder } from "./context-builder.js";
@@ -14,6 +14,7 @@ import { ScreenContext } from "./screen-capture.js";
 import { NewsReader } from "./news-reader.js";
 import { ManualCommentSource, TwitchChatSource } from "./comment-sources.js";
 import { scrubSecrets, collectApiKeys, checkSecretStorage } from "./security.js";
+import { SettingsUI } from "./settings-ui.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -548,6 +549,26 @@ function renderDebug() {
   pre.textContent = scrub(state.lastDebug.debugText);
 }
 
+// ---- 設定UI (issue #15) ----
+
+// UI編集後の素のconfigを受け取り、既定値を適用して applyLoaded に渡す。
+// APIキーは draft に保持された実値を使う (localStorage には書かない)。
+function applyEditedConfig(rawConfig) {
+  const { errors, warnings } = validateConfig(rawConfig);
+  if (errors.length) {
+    for (const e of errors) logEvent(`設定エディタ: ${scrub(e)}`, "error");
+    return;
+  }
+  const config = applyDefaults(rawConfig);
+  applyLoaded({ config, warnings, source: "UI編集" });
+}
+
+const settingsUI = new SettingsUI({
+  getCurrent: () => state.config,
+  onApply: (cfg) => applyEditedConfig(cfg),
+  log: (m, level) => logEvent(m, level),
+});
+
 // ---- 起動 ----
 
 function bindUI() {
@@ -570,6 +591,8 @@ function bindUI() {
       reportConfigError(err);
     }
   });
+
+  $("#btn-settings").addEventListener("click", () => settingsUI.open());
 
   $("#comment-form").addEventListener("submit", (e) => {
     e.preventDefault();
