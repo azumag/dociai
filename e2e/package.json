@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node test.mjs",
+    "test:news": "node test-news-reader.mjs",
     "test:crosstab": "node test-crosstab.mjs"
   },
   "dependencies": {

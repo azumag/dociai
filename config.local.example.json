@@ -108,6 +108,7 @@
     "enabled": true,
     "trigger": "news_every_30min",
     "persona": "partner_ai",
+    "mode": "topic",
     "sources": [
       {
         "name": "NHK",
@@ -116,6 +117,7 @@
       }
     ],
     "maxItems": 3,
+    "dedupe": true,
     "style": "配信の合間に自然に読める短いニュース紹介にする"
   }
 }

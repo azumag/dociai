@@ -9,6 +9,12 @@ const COMMON_RULES = [
   "配信者や視聴者を不快にさせる発言はしない。",
 ].join("\n");
 
+const NEWS_MODE_INSTRUCTIONS = {
+  topic: "トピックモード: 現状の配信トピックとして自然に紹介し、配信の流れに接続してください。",
+  current: "時事モード: ニュースの背景や意味を一段深く読み解き、あなた自身の短い考察を添えてください。",
+  simple: "シンプルモード: 独自の考察や推測は足さず、提示された事実だけを短く伝えてください。",
+};
+
 function hhmmss(date) {
   return new Date(date).toTimeString().slice(0, 8);
 }
@@ -76,13 +82,26 @@ export class ContextBuilder {
     }
 
     if (news) {
-      parts.push(`# 読み上げるニュース\nタイトル: ${news.title}\n概要: ${news.description || "(概要なし)"}`);
+      const meta = [
+        `タイトル: ${news.title}`,
+        news.sourceName ? `ソース: ${news.sourceName}` : null,
+        news.publishedAt ? `日時: ${news.publishedAt}` : null,
+        news.link ? `URL: ${news.link}` : null,
+        `概要: ${news.description || "(概要なし)"}`,
+      ].filter(Boolean);
+      parts.push(`# 読み上げるニュース\n${meta.join("\n")}`);
     }
 
     let instruction;
     if (news) {
+      const mode = this.config.news?.mode ?? "topic";
+      const modeInstruction = NEWS_MODE_INSTRUCTIONS[mode] ?? NEWS_MODE_INSTRUCTIONS.topic;
       const style = this.config.news?.style ?? "配信の合間に自然に読める短いニュース紹介にする";
-      instruction = `上のニュースを、あなたのキャラクターとして視聴者に紹介してください。方針: ${style}`;
+      instruction = [
+        "上のニュースを、あなたのキャラクターとして視聴者に紹介してください。",
+        modeInstruction,
+        `方針: ${style}`,
+      ].join("\n");
     } else if (comment) {
       instruction = `次のコメントに、あなたのキャラクターとして返答してください。\n${comment.author}: ${comment.text}`;
     } else {

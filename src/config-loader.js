@@ -4,6 +4,8 @@
 
 const KNOWN_PROVIDERS = ["openai", "openrouter", "openai-compatible", "mock"];
 const KNOWN_TRIGGER_TYPES = ["keyword", "hotkey", "interval", "random", "manual"];
+const KNOWN_NEWS_SOURCE_TYPES = ["rss", "mock"];
+const KNOWN_NEWS_MODES = ["topic", "current", "simple"];
 
 export function validateConfig(cfg) {
   const errors = [];
@@ -86,6 +88,23 @@ export function validateConfig(cfg) {
   if (cfg.news?.enabled) {
     if (!Array.isArray(cfg.news.sources) || !cfg.news.sources.length) {
       errors.push("news.enabled が true ですが news.sources が空です");
+    } else {
+      cfg.news.sources.forEach((src, i) => {
+        const label = src?.name ? `news.sources[${src.name}]` : `news.sources[${i}]`;
+        if (!src || typeof src !== "object") {
+          errors.push(`news.sources[${i}] がオブジェクトではありません`);
+          return;
+        }
+        if (!src.name) warnings.push(`${label}.name がありません。ログ表示用の名前を付けることを推奨します`);
+        if (!src.type) errors.push(`${label}.type がありません`);
+        else if (!KNOWN_NEWS_SOURCE_TYPES.includes(src.type)) {
+          errors.push(`${label}.type "${src.type}" は未対応です (対応: ${KNOWN_NEWS_SOURCE_TYPES.join(", ")})`);
+        }
+        if (src.type === "rss" && !src.url) errors.push(`${label}.url がありません`);
+      });
+    }
+    if (cfg.news.mode && !KNOWN_NEWS_MODES.includes(cfg.news.mode)) {
+      errors.push(`news.mode "${cfg.news.mode}" は未対応です (対応: ${KNOWN_NEWS_MODES.join(", ")})`);
     }
     if (cfg.news.trigger && !cfg.triggers?.[cfg.news.trigger]) {
       warnings.push(`news.trigger "${cfg.news.trigger}" が triggers に存在しません`);
@@ -132,7 +151,7 @@ export function applyDefaults(cfg) {
         ...(cfg.context?.screenCapture ?? {}),
       },
     },
-    news: cfg.news ? { maxItems: 3, ...cfg.news } : { enabled: false },
+    news: cfg.news ? { maxItems: 3, mode: "topic", dedupe: true, ...cfg.news } : { enabled: false, mode: "topic", dedupe: true },
   };
 }
 
