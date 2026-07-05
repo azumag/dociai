@@ -618,6 +618,42 @@ body.obs.transparent { background: transparent; }
 }
 .card-grid .field { min-width: 0; }
 
+/* ---- コンパクトカード (connectors / triggers) ---- */
+.card.compact {
+  border-radius: 10px;
+  background: var(--panel);
+}
+.card.compact .card-head:empty { display: none; }
+.card.compact .card-body {
+  padding: 12px 14px;
+  gap: 10px;
+}
+.compact-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+.compact-row .field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.compact-row .field-label {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+.compact-row .btn-remove {
+  flex: none;
+  margin-bottom: 1px;
+}
+.compact-row .card-grid {
+  flex: 1 1 0;
+  gap: 10px;
+}
+@media (max-width: 760px) {
+  .compact-row { flex-wrap: wrap; }
+  .compact-row .field { min-width: calc(50% - 5px); }
+}
+
 .card h3, .card h4 {
   margin: 0;
   font-size: 11px;

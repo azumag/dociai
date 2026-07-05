@@ -444,24 +444,31 @@ export class SettingsUI {
       return;
     }
     for (const [id, c] of entries) {
-      const idField = this.#mapField("ID", "connectors", id, "__id__", { value: id, attrs: { spellcheck: "false" } });
-      const removeBtn = this.#removeBtn(() => {
-        delete this.draft.connectors[id];
-        for (const p of this.draft.personas ?? []) {
-          if (p.connector === id) p.connector = "";
-        }
-        if (this.draft.context?.screenCapture?.connector === id) this.draft.context.screenCapture.connector = "";
-        this.#render();
-      });
-      const { card, body: cardBody } = this.#card([idField, removeBtn]);
-      const fields = document.createElement("div");
-      fields.className = "card-grid";
-      fields.append(this.#mapSelect("provider", PROVIDERS, "connectors", id, "provider", { value: c.provider }));
-      fields.append(this.#mapField("model", "connectors", id, "model", { value: c.model ?? "", attrs: { spellcheck: "false" } }));
-      fields.append(this.#mapField("apiKey", "connectors", id, "apiKey", { value: c.apiKey ?? "", attrs: { spellcheck: "false", autocomplete: "off" } }));
-      fields.append(this.#mapField("baseUrl", "connectors", id, "baseUrl", { value: c.baseUrl ?? "", attrs: { spellcheck: "false" } }));
-      fields.append(this.#mapField("timeoutMs", "connectors", id, "timeoutMs", { type: "number", value: c.timeoutMs ?? "" }));
-      cardBody.append(fields);
+      const { card, body: cardBody } = this.#card(null);
+      card.classList.add("compact");
+      const row1 = document.createElement("div");
+      row1.className = "compact-row";
+      row1.append(
+        this.#mapField("ID", "connectors", id, "__id__", { value: id, attrs: { spellcheck: "false" } }),
+        this.#mapSelect("provider", PROVIDERS, "connectors", id, "provider", { value: c.provider }),
+        this.#mapField("model", "connectors", id, "model", { value: c.model ?? "", attrs: { spellcheck: "false" } }),
+        this.#removeBtn(() => {
+          delete this.draft.connectors[id];
+          for (const p of this.draft.personas ?? []) {
+            if (p.connector === id) p.connector = "";
+          }
+          if (this.draft.context?.screenCapture?.connector === id) this.draft.context.screenCapture.connector = "";
+          this.#render();
+        }),
+      );
+      const row2 = document.createElement("div");
+      row2.className = "compact-row";
+      row2.append(
+        this.#mapField("apiKey", "connectors", id, "apiKey", { value: c.apiKey ?? "", attrs: { spellcheck: "false", autocomplete: "off" } }),
+        this.#mapField("baseUrl", "connectors", id, "baseUrl", { value: c.baseUrl ?? "", attrs: { spellcheck: "false" } }),
+        this.#mapField("timeoutMs", "connectors", id, "timeoutMs", { type: "number", value: c.timeoutMs ?? "" }),
+      );
+      cardBody.append(row1, row2);
       this._body.append(card);
     }
   }
@@ -563,35 +570,46 @@ export class SettingsUI {
       this.#render();
     }));
     for (const [id, t] of Object.entries(this.draft.triggers ?? {})) {
-      const idField = this.#mapField("ID", "triggers", id, "__id__", { value: id, attrs: { spellcheck: "false" } });
-      const removeBtn = this.#removeBtn(() => {
-        delete this.draft.triggers[id];
-        for (const p of this.draft.personas ?? []) {
-          p.triggers = (p.triggers ?? []).filter((x) => x !== id);
-        }
-        if (this.draft.news?.trigger === id) this.draft.news.trigger = "";
-        this.#render();
-      });
-      const { card, body: cardBody } = this.#card([idField, removeBtn]);
-      cardBody.append(this.#mapSelect("type", TRIGGER_TYPES, "triggers", id, "type", { value: t.type }));
+      const { card, body: cardBody } = this.#card(null);
+      card.classList.add("compact");
+      const row1 = document.createElement("div");
+      row1.className = "compact-row";
+      row1.append(
+        this.#mapField("ID", "triggers", id, "__id__", { value: id, attrs: { spellcheck: "false" } }),
+        this.#mapSelect("type", TRIGGER_TYPES, "triggers", id, "type", { value: t.type }),
+        this.#removeBtn(() => {
+          delete this.draft.triggers[id];
+          for (const p of this.draft.personas ?? []) {
+            p.triggers = (p.triggers ?? []).filter((x) => x !== id);
+          }
+          if (this.draft.news?.trigger === id) this.draft.news.trigger = "";
+          this.#render();
+        }),
+      );
+      cardBody.append(row1);
+
+      const row2 = document.createElement("div");
+      row2.className = "compact-row";
       if (t.type === "keyword") {
         const kwField = this.#mapField("keywords (カンマ区切り)", "triggers", id, "keywords", { value: (t.keywords ?? []).join(", ") });
         const inp = kwField.querySelector("input");
         inp.addEventListener("input", () => {
           this.draft.triggers[id].keywords = inp.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean);
         });
-        cardBody.append(kwField);
+        row2.append(kwField);
       } else if (t.type === "hotkey") {
-        cardBody.append(this.#mapField("keys (例: Alt+1)", "triggers", id, "keys", { value: t.keys ?? "", attrs: { spellcheck: "false" } }));
+        row2.append(this.#mapField("keys (例: Alt+1)", "triggers", id, "keys", { value: t.keys ?? "", attrs: { spellcheck: "false" } }));
       } else if (t.type === "interval") {
         const g = document.createElement("div");
         g.className = "card-grid";
         g.append(this.#mapField("minutes", "triggers", id, "minutes", { type: "number", value: t.minutes ?? "" }));
         g.append(this.#mapField("seconds", "triggers", id, "seconds", { type: "number", value: t.seconds ?? "" }));
-        cardBody.append(g);
+        row2.append(g);
       } else if (t.type === "random") {
-        cardBody.append(this.#mapField("probability (0-1)", "triggers", id, "probability", { type: "number", value: t.probability ?? "" }));
+        row2.append(this.#mapField("probability (0-1)", "triggers", id, "probability", { type: "number", value: t.probability ?? "" }));
       }
+      if (!row2.children.length) row2.style.display = "none";
+      cardBody.append(row2);
       this._body.append(card);
     }
   }
