@@ -3,15 +3,29 @@
 // 既読はメモリ上の guid セットで管理し、同じニュースを繰り返し読まない。
 
 const MOCK_NEWS = [
-  { title: "ローカルPoCが初起動", description: "配信AIコンパニオンのローカルPoCが初めて起動し、コメントへの音声応答に成功した。", guid: "mock-1" },
-  { title: "モックニュース機能のテスト", description: "APIキーなしで動作確認できるモックニュースソースが追加された。", guid: "mock-2" },
-  { title: "次はOBS連携へ", description: "開発ロードマップによると、次の焦点はOBSブラウザソース連携だという。", guid: "mock-3" },
+  { title: "ローカルPoCが初起動", description: "配信AIコンパニオンのローカルPoCが初めて起動し、コメントへの音声応答に成功した。", guid: "mock-1", publishedAt: "2026-07-01T09:00:00+09:00", sourceName: "mock" },
+  { title: "モックニュース機能のテスト", description: "APIキーなしで動作確認できるモックニュースソースが追加された。", guid: "mock-2", publishedAt: "2026-07-01T09:05:00+09:00", sourceName: "mock" },
+  { title: "次はOBS連携へ", description: "開発ロードマップによると、次の焦点はOBSブラウザソース連携だという。", guid: "mock-3", publishedAt: "2026-07-01T09:10:00+09:00", sourceName: "mock" },
+  { title: "ローカル PoC が初起動！", description: "別ソースでも同じニュースが配信された。", guid: "mock-duplicate", publishedAt: "2026-07-01T09:03:00+09:00", sourceName: "mock-alt" },
 ];
 
 function stripHtml(html) {
   const div = document.createElement("div");
   div.innerHTML = html ?? "";
   return (div.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeTitle(title) {
+  return (title ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[\p{P}\p{S}\s]/gu, "");
+}
+
+function parseDate(value) {
+  const t = Date.parse(value ?? "");
+  return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
 
 export class NewsReader {
@@ -62,10 +76,15 @@ export class NewsReader {
 
       for (const item of picks) {
         const { messages, debugText } = this.contextBuilder.build({ persona, news: item, includeScreen: "never" });
-        const { text } = await connector.chat(messages);
-        this.readGuids.add(item.guid);
-        this.onRead({ persona, item, text, debugText });
-        this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice });
+        try {
+          const { text } = await connector.chat(messages);
+          this.readGuids.add(item.guid);
+          this.onRead({ persona, item, text, debugText });
+          this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice });
+        } catch (e) {
+          this.readGuids.add(item.guid);
+          this.log(`ニュース1件の読み上げ失敗 [${item.title}]: ${e.message}`, "error");
+        }
       }
     } finally {
       this.busy = false;
@@ -74,7 +93,8 @@ export class NewsReader {
 
   async fetchAll() {
     const out = [];
-    for (const src of this.config.news?.sources ?? []) {
+    const sources = (this.config.news?.sources ?? []).filter((src) => src.enabled !== false);
+    for (const src of sources) {
       try {
         out.push(...(await this.fetchSource(src)));
       } catch (e) {
@@ -84,7 +104,7 @@ export class NewsReader {
         this.log(`ニュース取得失敗 [${src.name}]: ${e.message}${corsHint}`, "error");
       }
     }
-    return out;
+    return this.refineItems(out);
   }
 
   async fetchSource(src) {
@@ -104,11 +124,32 @@ export class NewsReader {
       const title = pick("title");
       const link = pick("link") || node.querySelector("link")?.getAttribute("href") || "";
       const description = stripHtml(pick("description") || pick("summary") || pick("content")).slice(0, 300);
+      const publishedAt = parseDate(pick("pubDate") || pick("published") || pick("updated") || pick("dc\\:date"));
       const guid = pick("guid") || pick("id") || link || title;
-      return { title, link, description, guid, sourceName: src.name };
+      return { title, link, description, publishedAt, guid, sourceName: src.name };
     }).filter((i) => i.title);
 
     return items;
+  }
+
+  refineItems(items) {
+    const news = this.config.news ?? {};
+    const seen = new Set();
+    const refined = [];
+    for (const item of items) {
+      const key = normalizeTitle(item.title);
+      if (news.dedupe !== false && key) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      refined.push({ ...item, normalizedTitle: key });
+    }
+    refined.sort((a, b) => {
+      const bt = Date.parse(b.publishedAt ?? "") || 0;
+      const at = Date.parse(a.publishedAt ?? "") || 0;
+      return bt - at;
+    });
+    return refined;
   }
 
   status() {

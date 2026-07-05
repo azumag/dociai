@@ -90,13 +90,25 @@
 | `enabled` | ニュース機能のON/OFF |
 | `trigger` | 読み上げを起動するトリガーID (通常 `interval`) |
 | `persona` | 読み上げ担当ペルソナID。省略時は `router.defaultPersona` |
-| `sources` | `{ name, type: "rss" \| "mock", url }` の配列。`mock` はテスト用 |
+| `mode` | `topic` / `current` / `simple`。既定 `topic` |
+| `sources` | `{ name, type: "rss" \| "mock", url, enabled }` の配列。`mock` はテスト用。`enabled: false` で一時停止 |
 | `maxItems` | 1回の実行で読む最大件数 (既定 3) |
+| `dedupe` | タイトル正規化による重複排除。既定 `true` |
 | `style` | 要約の口調指示 |
 | `corsProxy` | 省略可。RSSがCORSで取れない場合のプロキシプレフィックス (例: `https://corsproxy.io/?url=`)。URLはこの後ろにencodeURIComponentで連結される |
 
 RSS取得はブラウザから直接fetchするため、CORSヘッダのないフィード (NHK等) は
 `corsProxy` を設定するか、CORS対応のフィードを使ってください。
+
+ニュースソースは配列で自由に増減できます。RSS/Atom の `pubDate` / `published` / `updated` がある場合は新しい順に並び、同じ見出しは NFKC 正規化と記号除去後のキーで重複排除されます。
+
+`mode` は読み上げの立ち位置を切り替えます。
+
+| mode | 動作 |
+|---|---|
+| `topic` | 現状の配信トピックとして自然に紹介する |
+| `current` | 背景や意味を深掘りし、短い独自考察を添える |
+| `simple` | 独自考察や推測を足さず、提示された事実だけを伝える |
 
 ## ニュース読み上げの参考: `azumag/soviet_now` 構造メモ (issue #10)
 
