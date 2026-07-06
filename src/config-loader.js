@@ -31,6 +31,9 @@ export function validateConfig(cfg) {
           warnings.push(`connectors.${id} にapiKeyがありません。呼び出し時に認証エラーになる可能性があります`);
         }
       }
+      if (c.timeoutMs != null && Number(c.timeoutMs) > 0 && Number(c.timeoutMs) < 1000) {
+        warnings.push(`connectors.${id}.timeoutMs は${c.timeoutMs}(ミリ秒)です。秒のつもりの値だと即座にタイムアウトします (例: 30秒 → 30000)`);
+      }
     }
   }
 
@@ -140,6 +143,23 @@ export function validateConfig(cfg) {
     if (v.maxChars != null && !(Number(v.maxChars) > 0)) {
       errors.push("voicevox.maxChars は正の数にしてください");
     }
+    if (v.timeoutMs != null && Number(v.timeoutMs) > 0 && Number(v.timeoutMs) < 1000) {
+      warnings.push(`voicevox.timeoutMs は${v.timeoutMs}(ミリ秒)です。秒のつもりの値だと即座にタイムアウトします (例: 30秒 → 30000)`);
+    }
+  }
+
+  // micMonitor (issue #32)
+  if (cfg.micMonitor?.enabled) {
+    const m = cfg.micMonitor;
+    if (m.threshold != null && !(Number(m.threshold) > 0 && Number(m.threshold) <= 1)) {
+      errors.push("micMonitor.threshold は0より大きく1以下の数値にしてください");
+    }
+    if (m.minSpeechMs != null && !(Number(m.minSpeechMs) >= 0)) {
+      errors.push("micMonitor.minSpeechMs は0以上の数値にしてください");
+    }
+    if (m.silenceHoldMs != null && !(Number(m.silenceHoldMs) >= 0)) {
+      errors.push("micMonitor.silenceHoldMs は0以上の数値にしてください");
+    }
   }
 
   // personas.voice.engine (issue #17)
@@ -192,6 +212,13 @@ export function applyDefaults(cfg) {
       maxChars: 200,
       timeoutMs: 30000,
       ...(cfg.voicevox ?? {}),
+    },
+    micMonitor: {
+      enabled: false,
+      threshold: 0.05,
+      minSpeechMs: 150,
+      silenceHoldMs: 800,
+      ...(cfg.micMonitor ?? {}),
     },
     news: cfg.news ? { maxItems: 3, mode: "topic", dedupe: true, ...cfg.news } : { enabled: false, mode: "topic", dedupe: true },
     commentSources: {

@@ -47,6 +47,12 @@
     "maxChars": 200,
     "timeoutMs": 30000
   },
+  "micMonitor": {
+    "enabled": true,
+    "threshold": 0.05,
+    "minSpeechMs": 150,
+    "silenceHoldMs": 800
+  },
   "commentSources": {
     "twitch": {
       "enabled": false,

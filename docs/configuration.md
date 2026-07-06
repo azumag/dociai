@@ -28,7 +28,7 @@
 | `apiKey` | APIキー。`mock` / `ollama` では不要 |
 | `model` | モデルID。`mock` では省略可 |
 | `baseUrl` | 省略可。ローカルLLM やOpenAI互換サーバーを指す。`ollama` の既定は `http://localhost:11434/v1` |
-| `timeoutMs` | 省略可。既定 30000 |
+| `timeoutMs` | 省略可。既定 30000 (ミリ秒。秒ではない点に注意) |
 
 `mock` はAPIキーなしで応答・画面認識・ニュース要約の動作確認ができるモックです。
 
@@ -119,6 +119,39 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
 `Access-Control-Allow-Origin` を返します。`http://localhost:8080` からのリクエストは
 そのまま通るので追加設定不要です。別ホストに置く場合は engine 側で
 `--cors_policy_mode all` を指定してください。
+
+## micMonitor
+
+マイク入力を監視し、配信者が発話している間はAI音声キューを保留、無音に戻ると
+再開する (issue #32)。
+
+```json
+{
+  "micMonitor": {
+    "enabled": false,
+    "threshold": 0.05,
+    "minSpeechMs": 150,
+    "silenceHoldMs": 800
+  }
+}
+```
+
+| フィールド | 既定 | 説明 |
+|---|---|---|
+| `enabled` | false | マイク監視機能を有効化 (操作卓の「監視開始」ボタンで手動起動する) |
+| `threshold` | 0.05 | 発話とみなすRMS音量のしきい値 (0-1)。マイクのゲイン・部屋の暗騒音により調整が必要 |
+| `minSpeechMs` | 150 | しきい値超えがこの時間継続したら「発話中」と判定するまでの継続時間 (ms) |
+| `silenceHoldMs` | 800 | しきい値未満がこの時間継続したら「無音」と判定し読み上げを再開するまでの継続時間 (ms) |
+
+「発話中」判定になると `SpeechQueue.stop()` が呼ばれ、再生中の発話は中断されて
+**保留 (waiting) に戻ります** (手動の「停止」ボタンと同じ挙動)。無音判定に戻ると
+`SpeechQueue.resume()` が呼ばれ、中断された発話は最初から読み上げ直されます。しきい値の
+調整は操作卓の「マイク監視」パネルのメーター表示を見ながら行ってください。
+
+スピーカーで音声を再生している環境では、AI自身の声がマイクに回り込んで誤検知する
+可能性があります。`echoCancellation`/`noiseSuppression` は既定で有効にしていますが、
+最も確実な対策は `docs/obs-mode.md` の「音声出力先の扱い」で触れている
+ヘッドホンや仮想オーディオデバイスでの分離です。
 
 ## triggers
 

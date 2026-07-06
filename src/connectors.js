@@ -13,6 +13,12 @@ const BASE_URLS = {
   minimax: "https://api.minimax.io/anthropic",
 };
 
+// 秒未満のtimeoutMsをそのまま切り捨てると「0秒でタイムアウトしました」という
+// 誤解を招く表示になる (例: ミリ秒のつもりで秒の値を入力した設定ミス)。
+function formatTimeout(ms) {
+  return ms < 1000 ? `${ms}ミリ秒` : `${Math.round(ms / 1000)}秒`;
+}
+
 export class ConnectorError extends Error {
   constructor(message, { kind = "unknown", retryAfter = null } = {}) {
     super(message);
@@ -111,7 +117,7 @@ class OpenAICompatibleConnector {
       });
     } catch (e) {
       if (e.name === "AbortError") {
-        throw new ConnectorError(`${this.id}: ${Math.round(this.timeoutMs / 1000)}秒でタイムアウトしました`, { kind: "timeout" });
+        throw new ConnectorError(`${this.id}: ${formatTimeout(this.timeoutMs)}でタイムアウトしました`, { kind: "timeout" });
       }
       throw new ConnectorError(`${this.id}: 接続できません (${e.message})`, { kind: "network" });
     } finally {
@@ -191,7 +197,7 @@ class MiniMaxConnector {
       });
     } catch (e) {
       if (e.name === "AbortError") {
-        throw new ConnectorError(`${this.id}: ${Math.round(this.timeoutMs / 1000)}秒でタイムアウトしました`, { kind: "timeout" });
+        throw new ConnectorError(`${this.id}: ${formatTimeout(this.timeoutMs)}でタイムアウトしました`, { kind: "timeout" });
       }
       throw new ConnectorError(`${this.id}: 接続できません (${e.message})`, { kind: "network" });
     } finally {

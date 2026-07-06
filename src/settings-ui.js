@@ -86,6 +86,7 @@ export class SettingsUI {
       ["triggers", "トリガー", "発火条件"],
       ["context", "画面・文脈", "vision / 履歴"],
       ["voicevox", "VOICEVOX", "音声合成エンジン"],
+      ["micMonitor", "マイク監視", "発話で読み上げを保留"],
       ["news", "ニュース", "RSS / 要約"],
       ["sources", "コメントソース", "Twitch 等"],
     ];
@@ -153,6 +154,7 @@ export class SettingsUI {
     else if (tab === "triggers") this.#renderTriggers();
     else if (tab === "context") this.#renderContext();
     else if (tab === "voicevox") this.#renderVoicevox();
+    else if (tab === "micMonitor") this.#renderMicMonitor();
     else if (tab === "news") this.#renderNews();
     else if (tab === "sources") this.#renderSources();
     this._body.scrollTop = 0;
@@ -472,7 +474,7 @@ export class SettingsUI {
       row2.append(
         this.#mapField("apiKey", "connectors", id, "apiKey", { value: c.apiKey ?? "", attrs: { spellcheck: "false", autocomplete: "off" } }),
         this.#mapField("baseUrl", "connectors", id, "baseUrl", { value: c.baseUrl ?? "", attrs: { spellcheck: "false" } }),
-        this.#mapField("timeoutMs", "connectors", id, "timeoutMs", { type: "number", value: c.timeoutMs ?? "" }),
+        this.#mapField("timeoutMs (ms)", "connectors", id, "timeoutMs", { type: "number", value: c.timeoutMs ?? "" }),
       );
       cardBody.append(row1, row2);
       this._body.append(card);
@@ -677,12 +679,37 @@ export class SettingsUI {
     g.append(this.#pathField("baseUrl", "voicevox.baseUrl", { value: v.baseUrl ?? "http://127.0.0.1:50021", attrs: { spellcheck: "false" } }));
     g.append(this.#pathField("defaultSpeaker", "voicevox.defaultSpeaker", { type: "number", value: v.defaultSpeaker ?? 3 }));
     g.append(this.#pathField("maxChars", "voicevox.maxChars", { type: "number", value: v.maxChars ?? 200 }));
-    g.append(this.#pathField("timeoutMs", "voicevox.timeoutMs", { type: "number", value: v.timeoutMs ?? 30000 }));
+    g.append(this.#pathField("timeoutMs (ms)", "voicevox.timeoutMs", { type: "number", value: v.timeoutMs ?? 30000 }));
     cardBody.append(g);
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
     note.textContent = "話者IDは engine の /speakers の style id (例: 3 = ずんだもん ノーマル)。CORS は engine が localhost 系 Origin を許可する既定で通ります。";
+    this._body.append(note);
+  }
+
+  // ---- micMonitor (issue #32) ----
+  #renderMicMonitor() {
+    const m = this.draft.micMonitor ?? {};
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = "マイク監視 (発話ゲーティング)";
+    const { card, body: cardBody } = this.#card([title]);
+    const enabledField = this.#pathCheckbox("micMonitor.enabled", "micMonitor.enabled", { value: m.enabled });
+    enabledField.querySelector("input").addEventListener("change", () => this.#render());
+    cardBody.append(enabledField);
+    if (m.enabled) {
+      const g = document.createElement("div");
+      g.className = "card-grid";
+      g.append(this.#pathField("threshold (0-1)", "micMonitor.threshold", { type: "number", value: m.threshold ?? 0.05, attrs: { step: "0.01", min: "0", max: "1" } }));
+      g.append(this.#pathField("minSpeechMs", "micMonitor.minSpeechMs", { type: "number", value: m.minSpeechMs ?? 150 }));
+      g.append(this.#pathField("silenceHoldMs", "micMonitor.silenceHoldMs", { type: "number", value: m.silenceHoldMs ?? 800 }));
+      cardBody.append(g);
+    }
+    this._body.append(card);
+    const note = document.createElement("p");
+    note.className = "muted settings-note";
+    note.textContent = "配信者の発話を検知するとAI音声キューを保留し、無音に戻ると再開します (中断された発話は最初から読み上げ直されます)。スピーカー環境ではAI自身の声を誤検知することがあるため、ヘッドホンや仮想オーディオデバイスでの分離を推奨します (docs/obs-mode.md 参照)。";
     this._body.append(note);
   }
 

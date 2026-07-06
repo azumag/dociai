@@ -172,6 +172,13 @@ try {
   const readDisabled = await page.$eval("#btn-screen-read", (el) => el.disabled);
   check("画面キャプチャ: 共有前は開始のみ活性・読み取り不活性", startEnabled && readDisabled, screenStatus.trim().slice(0, 60));
 
+  // ---- マイク監視パネル (issue #32): 監視開始前はボタン活性状態のみ確認 ----
+  // 実マイクでのVAD自体はheadlessでは検証しない (要 --use-fake-device-for-media-stream 等)
+  const micStatus = await page.$eval("#mic-status", (el) => el.textContent);
+  const micStartEnabled = await page.$eval("#btn-mic-start", (el) => !el.disabled);
+  const micStopDisabled = await page.$eval("#btn-mic-stop", (el) => el.disabled);
+  check("マイク監視: 開始前は開始のみ活性・停止不活性", micStartEnabled && micStopDisabled, micStatus.trim().slice(0, 60));
+
   const speechFinal = await page.$eval("#speech-list", (el) => el.textContent);
   console.log("INFO | 音声キュー最終状態:", speechFinal.trim().slice(0, 200));
   await page.screenshot({ path: `${SHOT_DIR}/console-ui.png` });

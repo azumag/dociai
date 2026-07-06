@@ -11,6 +11,7 @@ import { PersonaRouter } from "./persona-router.js";
 import { SpeechQueue } from "./speech-queue.js";
 import { VoiceVoxClient } from "./voicevox.js";
 import { ScreenContext } from "./screen-capture.js";
+import { MicMonitor } from "./mic-monitor.js";
 import { NewsReader } from "./news-reader.js";
 import { ManualCommentSource, TwitchChatSource } from "./comment-sources.js";
 import { scrubSecrets, collectApiKeys, checkSecretStorage } from "./security.js";
@@ -30,11 +31,13 @@ const state = {
   personaRouter: null,
   speechQueue: null,
   screenContext: null,
+  micMonitor: null,
   newsReader: null,
   manualSource: new ManualCommentSource(),
   externalCommentSources: [],
   thinking: new Set(),
   speakingPersonaId: null,
+  manualSpeechHold: false,
   lastDebug: null,
   obs: new BroadcastChannel("dociai-obs"),
 };
@@ -228,6 +231,23 @@ async function applyLoaded({ config, warnings, source }) {
     : null;
   state.screenContext?.onChange(renderScreenPanel);
 
+  state.micMonitor = config.micMonitor?.enabled
+    ? new MicMonitor({ config, log: (m) => logEvent(m) })
+    : null;
+  // マイクの発話検知でAI音声キューを保留/再開する。stop() は resume() と違い
+  // 「既にpaused」を弾く内部ガードが無いため、話している間ずっと呼び続けて
+  // イベントログが埋まらないよう明示的にガードする。手動の「停止」ボタン
+  // (state.manualSpeechHold) による保留はマイクの無音検知では解除しない。
+  state.micMonitor?.onChange(() => {
+    renderMicPanel();
+    if (!state.speechQueue) return;
+    if (state.micMonitor.speaking) {
+      if (!state.speechQueue.paused) state.speechQueue.stop();
+    } else if (!state.manualSpeechHold) {
+      state.speechQueue.resume();
+    }
+  });
+
   state.contextBuilder = new ContextBuilder({
     commentStore: state.commentStore,
     screenContext: state.screenContext,
@@ -284,9 +304,11 @@ function teardown() {
   state.externalCommentSources = [];
   state.triggerEngine?.stop();
   state.screenContext?.stop();
+  state.micMonitor?.stop();
   state.speechQueue?.clear();
   state.thinking.clear();
   state.speakingPersonaId = null;
+  state.manualSpeechHold = false;
 }
 
 function startExternalCommentSources(config) {
@@ -318,6 +340,7 @@ function renderAll() {
   renderPersonas();
   renderTriggers();
   renderSpeechQueue();
+  renderMicPanel();
   renderScreenPanel();
   renderNewsPanel();
   renderComments();
@@ -476,12 +499,40 @@ function renderSpeechQueue() {
   if (!state.speechQueue) {
     chip.textContent = "";
   } else if (state.speechQueue.paused) {
-    chip.textContent = "停止中";
+    chip.textContent = state.manualSpeechHold
+      ? "手動停止中"
+      : state.micMonitor?.speaking
+        ? "マイク検知で保留中"
+        : "停止中";
     chip.className = "chip is-warn";
   } else {
     chip.textContent = `待機 ${state.speechQueue.waitingCount()}`;
     chip.className = "chip";
   }
+}
+
+function renderMicPanel() {
+  const el = $("#mic-status");
+  const fill = $("#mic-meter-fill");
+  const enabled = state.config?.micMonitor?.enabled;
+  $("#btn-mic-start").disabled = !enabled || state.micMonitor?.active;
+  $("#btn-mic-stop").disabled = !state.micMonitor?.active;
+  if (!state.config) {
+    el.textContent = "設定を読み込むと使えます";
+    fill.style.width = "0%";
+    fill.classList.remove("is-speaking");
+    return;
+  }
+  if (!enabled) {
+    el.textContent = "設定で無効です (micMonitor.enabled: false)";
+    fill.style.width = "0%";
+    fill.classList.remove("is-speaking");
+    return;
+  }
+  const s = state.micMonitor.status();
+  el.textContent = `監視: ${s.active ? "中" : "停止"}` + (s.active ? ` / ${s.speaking ? "発話検知中 (AI保留)" : "無音"}` : "");
+  fill.style.width = `${Math.min(100, Math.round(s.level * 250))}%`;
+  fill.classList.toggle("is-speaking", s.speaking);
 }
 
 function renderScreenPanel() {
@@ -605,10 +656,29 @@ function bindUI() {
     $("#comment-text").focus();
   });
 
-  $("#btn-speech-stop").addEventListener("click", () => state.speechQueue?.stop());
-  $("#btn-speech-resume").addEventListener("click", () => state.speechQueue?.resume());
+  $("#btn-speech-stop").addEventListener("click", () => {
+    state.manualSpeechHold = true;
+    state.speechQueue?.stop();
+  });
+  $("#btn-speech-resume").addEventListener("click", () => {
+    state.manualSpeechHold = false;
+    state.speechQueue?.resume();
+  });
   $("#btn-speech-skip").addEventListener("click", () => state.speechQueue?.skip());
   $("#btn-speech-clear").addEventListener("click", () => state.speechQueue?.clear());
+
+  $("#btn-mic-start").addEventListener("click", async () => {
+    try {
+      await state.micMonitor.start();
+    } catch (e) {
+      logEvent(`マイク監視を開始できません: ${scrub(e.message)}`, "error");
+    }
+    renderMicPanel();
+  });
+  $("#btn-mic-stop").addEventListener("click", () => {
+    state.micMonitor?.stop();
+    renderMicPanel();
+  });
 
   $("#btn-screen-start").addEventListener("click", async () => {
     try {

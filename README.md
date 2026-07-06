@@ -55,6 +55,7 @@ flowchart TD
   G --> H["Persona Router"]
   H --> I["AI Connector"]
   I --> J["Speech Queue"]
+  K["Mic Monitor"] -. gates .-> J
 ```
 
 ## 主要モジュール
@@ -68,6 +69,7 @@ flowchart TD
 | `AIConnector` | `src/connectors.js` | OpenAI / OpenRouter / OpenAI互換 / モックを抽象化する |
 | `ContextBuilder` | `src/context-builder.js` | コメント・画面・ニュース文脈をプロンプトにまとめる |
 | `SpeechQueue` | `src/speech-queue.js` | Web Speech APIで順番に読み上げ、停止/スキップ/全消去を制御する |
+| `MicMonitor` | `src/mic-monitor.js` | マイク入力の発話を検知し、発話中は音声キューを保留、無音に戻ると再開する (issue #32) |
 | `NewsReader` | `src/news-reader.js` | RSSからニュースを取得し、要約して読み上げキューへ入れる |
 | `CommentSource` | `src/comment-sources.js` | 手動入力/将来のYouTube・Twitchを同じ形で流し込む ([docs/comment-sources.md](docs/comment-sources.md)) |
 

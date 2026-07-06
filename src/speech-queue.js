@@ -16,6 +16,7 @@ export class SpeechQueue {
     this.current = null;
     this.paused = false;
     this.cancelling = false;
+    this._holdingItem = null;
     this.onUpdate = onUpdate;
     this.log = log;
     this.voicevox = voicevox ?? null; // VoiceVoxClient | null
@@ -47,6 +48,10 @@ export class SpeechQueue {
 
   stop() {
     this.paused = true;
+    // マイク発話検知/手動停止による「保留」はキューからの離脱ではないので、
+    // 話している途中のアイテムを skipped で終わらせず waiting に戻し、
+    // resume() 後に最初から再生し直す (#finish 側で消費するマーカー)。
+    if (this.current) this._holdingItem = this.current;
     this.#cancelCurrent();
     this.log("読み上げを停止しました (キュー保留)");
     this.onUpdate(this.items, this);
@@ -84,7 +89,11 @@ export class SpeechQueue {
     const item = this.current;
     if (item._audio) {
       try { item._audio.pause(); } catch {}
-      item._audio.currentTime = NaN;
+      // 事前合成中 (まだ src 未設定) は #speakVoiceVox 側の cancelling チェックが
+      // 次のループで自己終了する。既にチャンク再生済み (src あり) だと ended/error が
+      // 二度と来ないため、Web Speech の speechSynthesis.cancel() → onerror → #finish()
+      // と同等の後始末をここで明示的に行う。
+      if (item._audio.src) this.#finish(item, "skipped");
     }
     if (this.supported) {
       try { speechSynthesis.cancel(); } catch {}
@@ -230,6 +239,11 @@ export class SpeechQueue {
     if (this.current !== item) return;
     this.current = null;
     if (this.cancelling && state === "done") state = "skipped";
+    if (this._holdingItem === item) {
+      this._holdingItem = null;
+      state = "waiting";
+      item.chunkIndex = 0;
+    }
     this.cancelling = false;
     if (item._blobUrls) {
       for (const url of item._blobUrls) {
