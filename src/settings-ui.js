@@ -1,5 +1,5 @@
 // 設定UIエディタ (issue #15)
-// connectors / personas / triggers / context(screenCapture) / voicevox / news / commentSources を
+// connectors / personas / triggers / context(screenCapture) / voicevox / news / topics / commentSources を
 // UIから追加・編集・削除できる。編集した設定はメモリ上の draft に保持し、「保存して適用」で
 // onApply(config) を呼ぶ。onApply は scripts/serve.py の PUT /config.local.json 経由でディスクへ
 // 保存してから現在のアプリ状態に反映する (src/app.js の applyEditedConfig)。保存に対応しない
@@ -17,6 +17,7 @@ const TRIGGER_TYPES = ["keyword", "hotkey", "interval", "random", "manual"];
 const VOICE_ENGINES = ["webspeech", "voicevox"];
 const NEWS_MODES = ["topic", "current", "simple"];
 const NEWS_SOURCE_TYPES = ["rss", "mock"];
+const TOPIC_SOURCE_TYPES = ["todoist"];
 
 const clone = (v) => JSON.parse(JSON.stringify(v ?? null));
 // 壊れた/手編集された config.local.json で配列であるべき値が文字列などになっていても
@@ -161,6 +162,7 @@ export class SettingsUI {
       ["micMonitor", "マイク監視", "発話で読み上げを保留"],
       ["commentReader", "コメント読み上げ", "全コメントを音声で読み上げ"],
       ["news", "ニュース", "RSS / 要約"],
+      ["topics", "話題", "Todoist / 配信ネタ"],
       ["sources", "コメントソース", "Twitch 等"],
     ];
     for (const [id, label, desc] of tabs) {
@@ -230,6 +232,7 @@ export class SettingsUI {
     else if (tab === "micMonitor") this.#renderMicMonitor();
     else if (tab === "commentReader") this.#renderCommentReader();
     else if (tab === "news") this.#renderNews();
+    else if (tab === "topics") this.#renderTopics();
     else if (tab === "sources") this.#renderSources();
     this._body.scrollTop = 0;
   }
@@ -384,11 +387,12 @@ export class SettingsUI {
         p.triggers = (p.triggers ?? []).map((t) => (t === oldKey ? newKey : t));
       }
       if (this.draft.news?.trigger === oldKey) this.draft.news.trigger = newKey;
+      if (this.draft.topics?.trigger === oldKey) this.draft.topics.trigger = newKey;
     }
     this.#render();
   }
 
-  // 配列要素のフィールド (personas, news.sources)
+  // 配列要素のフィールド (personas, news.sources, topics.sources)
   #arrField(label, arrPath, index, field, { type = "text", value = "", attrs = {}, textarea = false, rows = 3 } = {}) {
     const wrap = document.createElement("label");
     wrap.className = "field";
@@ -870,6 +874,54 @@ export class SettingsUI {
       g2.className = "card-grid";
       g2.append(this.#arrSelect("type", NEWS_SOURCE_TYPES, "news.sources", i, "type", { value: s.type ?? "rss" }));
       g2.append(this.#arrField("url", "news.sources", i, "url", { value: s.url ?? "", attrs: { spellcheck: "false" } }));
+      cBody.append(g2);
+      this._body.append(c);
+    }
+  }
+
+  // ---- topics ----
+  #renderTopics() {
+    const t = this.draft.topics ?? { enabled: false, sources: [] };
+    if (!this.draft.topics) this.draft.topics = t;
+    if (!Array.isArray(t.sources)) t.sources = [];
+    const triggerIds = Object.keys(this.draft.triggers ?? {});
+    const personaIds = (this.draft.personas ?? []).map((p) => p.id);
+
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = "話題";
+    const { card, body: cardBody } = this.#card([title]);
+    const g = document.createElement("div");
+    g.className = "card-grid";
+    g.append(this.#pathCheckbox("topics.enabled", "topics.enabled", { value: t.enabled }));
+    g.append(this.#pathSelect("trigger", ["", ...triggerIds], "topics.trigger", { value: t.trigger ?? "" }));
+    g.append(this.#pathSelect("persona", ["", ...personaIds], "topics.persona", { value: t.persona ?? "" }));
+    g.append(this.#pathField("maxItems", "topics.maxItems", { type: "number", value: t.maxItems ?? 3 }));
+    g.append(this.#pathCheckbox("dedupe", "topics.dedupe", { value: t.dedupe ?? true }));
+    cardBody.append(g);
+    cardBody.append(this.#pathField("intro", "topics.intro", { value: t.intro ?? "", textarea: true, rows: 2 }));
+    cardBody.append(this.#pathField("style", "topics.style", { value: t.style ?? "", textarea: true, rows: 2 }));
+    this._body.append(card);
+
+    this._body.append(this.#listHeader("話題ソース", () => {
+      this.draft.topics.sources.push({ name: "配信ネタ (Todoist)", type: "todoist", enabled: true, token: "", projectId: "" });
+      this.#render();
+    }));
+    for (const [i, s] of t.sources.entries()) {
+      const headEls = [
+        this.#arrField("name", "topics.sources", i, "name", { value: s.name ?? "" }),
+        this.#arrCheckbox("enabled", "topics.sources", i, "enabled", { value: s.enabled ?? true }),
+        this.#removeBtn(() => {
+          this.draft.topics.sources.splice(i, 1);
+          this.#render();
+        }),
+      ];
+      const { card: c, body: cBody } = this.#card(headEls);
+      const g2 = document.createElement("div");
+      g2.className = "card-grid";
+      g2.append(this.#arrSelect("type", TOPIC_SOURCE_TYPES, "topics.sources", i, "type", { value: s.type ?? "todoist" }));
+      g2.append(this.#arrField("token (Todoist個人アクセストークン)", "topics.sources", i, "token", { value: s.token ?? "", attrs: { spellcheck: "false", autocomplete: "off" } }));
+      g2.append(this.#arrField("projectId", "topics.sources", i, "projectId", { value: s.projectId ?? "", attrs: { spellcheck: "false" } }));
       cBody.append(g2);
       this._body.append(c);
     }

@@ -13,6 +13,7 @@ import { VoiceVoxClient } from "./voicevox.js";
 import { ScreenContext } from "./screen-capture.js";
 import { MicMonitor } from "./mic-monitor.js";
 import { NewsReader } from "./news-reader.js";
+import { TopicReader } from "./topic-reader.js";
 import { ManualCommentSource, TwitchChatSource, stripEmotes } from "./comment-sources.js";
 import { scrubSecrets, collectApiKeys, checkSecretStorage } from "./security.js";
 import { SettingsUI } from "./settings-ui.js";
@@ -33,6 +34,7 @@ const state = {
   screenContext: null,
   micMonitor: null,
   newsReader: null,
+  topicReader: null,
   manualSource: new ManualCommentSource(),
   externalCommentSources: [],
   thinking: new Set(),
@@ -76,7 +78,7 @@ function logEvent(message, level = "info") {
   while (log.children.length > 200) log.lastChild.remove();
 }
 
-function appendReply({ persona, text = null, error = null, triggerId, newsTitle = null }) {
+function appendReply({ persona, text = null, error = null, triggerId, newsTitle = null, topicTitle = null, contentLabel = null, contentTitle = null }) {
   const li = document.createElement("li");
   li.className = `reply-item${error ? " is-error" : ""}`;
   li.style.setProperty("--persona-color", personaColor(persona.id));
@@ -84,9 +86,11 @@ function appendReply({ persona, text = null, error = null, triggerId, newsTitle 
   head.className = "reply-head";
   head.innerHTML = `<span class="persona-name"></span><span class="time">${hhmmss()}</span><span>trigger: ${triggerId}</span>`;
   head.querySelector(".persona-name").textContent = persona.name;
-  if (newsTitle) {
+  const label = contentLabel ?? (newsTitle ? "news" : topicTitle ? "topic" : null);
+  const title = contentTitle ?? newsTitle ?? topicTitle;
+  if (label && title) {
     const n = document.createElement("span");
-    n.textContent = `news: ${newsTitle.slice(0, 24)}`;
+    n.textContent = `${label}: ${title.slice(0, 24)}`;
     head.append(n);
   }
   const body = document.createElement("div");
@@ -125,11 +129,17 @@ function readCommentAloud(comment) {
 function handleTrigger(triggerId, { comment = null, personaId = null, manual = false } = {}) {
   if (!state.config) return;
 
-  // ニュース用トリガーはペルソナ応答ではなくNewsReaderへ
+  // ニュース/話題用トリガーはペルソナ応答ではなく専用Readerへ
+  let handledByReader = false;
   if (state.newsReader?.enabled && state.config.news.trigger === triggerId) {
     runNews();
-    return;
+    handledByReader = true;
   }
+  if (state.topicReader?.enabled && state.config.topics.trigger === triggerId) {
+    runTopics();
+    handledByReader = true;
+  }
+  if (handledByReader) return;
 
   const { selected, skipped } = state.personaRouter.select(triggerId, {
     comment,
@@ -190,6 +200,16 @@ async function runNews() {
     logEvent(`ニュース読み上げ失敗: ${scrub(e.message)}`, "error");
   }
   renderNewsPanel();
+}
+
+async function runTopics() {
+  if (!state.topicReader) return;
+  try {
+    await state.topicReader.run();
+  } catch (e) {
+    logEvent(`話題読み上げ失敗: ${scrub(e.message)}`, "error");
+  }
+  renderTopicPanel();
 }
 
 function onSpeechUpdate(items, queue) {
@@ -297,6 +317,28 @@ async function applyLoaded({ config, warnings, source }) {
     },
   });
 
+  state.topicReader = new TopicReader({
+    config,
+    getConnector: (id) => state.connectors.get(id),
+    personaRouter: state.personaRouter,
+    contextBuilder: state.contextBuilder,
+    speechQueue: state.speechQueue,
+    log: (m, level) => logEvent(m, level),
+    onRead: ({ persona, item, text, debugText }) => {
+      state.lastDebug = { personaName: `${persona.name} (話題)`, debugText, at: new Date() };
+      renderDebug();
+      appendReply({ persona, text, triggerId: "topics", topicTitle: item.title });
+      broadcast("reply", {
+        personaId: persona.id,
+        personaName: persona.name,
+        color: personaColor(persona.id),
+        text,
+        time: Date.now(),
+      });
+      renderTopicPanel();
+    },
+  });
+
   state.triggerEngine = new TriggerEngine(config.triggers, {
     onFire: handleTrigger,
     log: (m) => logEvent(m),
@@ -364,6 +406,7 @@ function renderAll() {
   renderMicPanel();
   renderScreenPanel();
   renderNewsPanel();
+  renderTopicPanel();
   renderComments();
   renderDebug();
 }
@@ -486,8 +529,12 @@ function renderTriggers() {
     grow.querySelector(".name").textContent = id;
     const users = (state.config.personas ?? []).filter((p) => (p.triggers ?? []).includes(id)).map((p) => p.name);
     const newsUses = state.config.news?.enabled && state.config.news.trigger === id;
+    const topicUses = state.config.topics?.enabled && state.config.topics.trigger === id;
+    const uses = [...users];
+    if (newsUses) uses.push("ニュース読み上げ");
+    if (topicUses) uses.push("話題読み上げ");
     grow.querySelector(".detail").textContent =
-      `${triggerDetail(t)} → ${newsUses ? "ニュース読み上げ" : users.join(", ") || "(使用ペルソナなし)"}`;
+      `${triggerDetail(t)} → ${uses.join(", ") || "(使用ペルソナなし)"}`;
     const fire = document.createElement("button");
     fire.type = "button";
     fire.textContent = "発火";
@@ -594,6 +641,22 @@ function renderNewsPanel() {
     return;
   }
   const trigger = state.config.news.trigger ? `トリガー: ${state.config.news.trigger}` : "トリガー未設定";
+  el.textContent = `${trigger} / 既読 ${s.readCount}件` + (s.lastRunAt ? ` / 最終実行 ${hhmmss(s.lastRunAt)}` : "");
+}
+
+function renderTopicPanel() {
+  const el = $("#topic-status");
+  $("#btn-topic-read").disabled = !state.topicReader?.enabled || state.topicReader?.busy;
+  if (!state.config) {
+    el.textContent = "設定を読み込むと使えます";
+    return;
+  }
+  const s = state.topicReader.status();
+  if (!s.enabled) {
+    el.textContent = "設定で無効です (topics.enabled: false)";
+    return;
+  }
+  const trigger = state.config.topics.trigger ? `トリガー: ${state.config.topics.trigger}` : "トリガー未設定";
   el.textContent = `${trigger} / 既読 ${s.readCount}件` + (s.lastRunAt ? ` / 最終実行 ${hhmmss(s.lastRunAt)}` : "");
 }
 
@@ -722,6 +785,10 @@ function bindUI() {
   $("#btn-news-read").addEventListener("click", () => {
     renderNewsPanel();
     runNews();
+  });
+  $("#btn-topic-read").addEventListener("click", () => {
+    renderTopicPanel();
+    runTopics();
   });
 
   // クールダウン残り秒の表示だけを定期更新する

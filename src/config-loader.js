@@ -5,7 +5,18 @@
 const KNOWN_PROVIDERS = ["openai", "openrouter", "openai-compatible", "ollama", "minimax", "mock"];
 const KNOWN_TRIGGER_TYPES = ["keyword", "hotkey", "interval", "random", "manual"];
 const KNOWN_NEWS_SOURCE_TYPES = ["rss", "mock"];
+const KNOWN_TOPIC_SOURCE_TYPES = ["todoist"];
 const KNOWN_NEWS_MODES = ["topic", "current", "simple"];
+const DEFAULT_TOPIC_INTRO = "上のお題について、あなたのキャラクターとして自由にコメントしてください。";
+const DEFAULT_TOPIC_STYLE = "雑談のお題として、自然な自分の言葉で自由にコメントする";
+
+function splitNewsAndLegacyTopics(cfg) {
+  const sources = Array.isArray(cfg.news?.sources) ? cfg.news.sources : [];
+  return {
+    newsSources: sources.filter((src) => src?.type !== "todoist"),
+    legacyTopicSources: sources.filter((src) => src?.type === "todoist"),
+  };
+}
 
 export function validateConfig(cfg) {
   const errors = [];
@@ -103,7 +114,11 @@ export function validateConfig(cfg) {
         }
         if (!src.name) warnings.push(`${label}.name がありません。ログ表示用の名前を付けることを推奨します`);
         if (!src.type) errors.push(`${label}.type がありません`);
-        else if (!KNOWN_NEWS_SOURCE_TYPES.includes(src.type)) {
+        else if (src.type === "todoist") {
+          warnings.push(`${label}.type "todoist" は news から分離されました。topics.sources へ移してください`);
+          if (!src.token) errors.push(`${label}.token がありません (Todoist の個人アクセストークン)`);
+          if (!src.projectId) errors.push(`${label}.projectId がありません`);
+        } else if (!KNOWN_NEWS_SOURCE_TYPES.includes(src.type)) {
           errors.push(`${label}.type "${src.type}" は未対応です (対応: ${KNOWN_NEWS_SOURCE_TYPES.join(", ")})`);
         }
         if (src.type === "rss" && !src.url) errors.push(`${label}.url がありません`);
@@ -117,6 +132,37 @@ export function validateConfig(cfg) {
     }
     if (cfg.news.persona && !(cfg.personas ?? []).some((p) => p?.id === cfg.news.persona)) {
       errors.push(`news.persona "${cfg.news.persona}" が personas に存在しません`);
+    }
+  }
+
+  // topics (Todoistなどの配信ネタ)
+  if (cfg.topics?.enabled) {
+    if (!Array.isArray(cfg.topics.sources) || !cfg.topics.sources.length) {
+      const hasLegacyTodoist = (cfg.news?.sources ?? []).some((src) => src?.type === "todoist");
+      if (!hasLegacyTodoist) errors.push("topics.enabled が true ですが topics.sources が空です");
+    } else {
+      cfg.topics.sources.forEach((src, i) => {
+        const label = src?.name ? `topics.sources[${src.name}]` : `topics.sources[${i}]`;
+        if (!src || typeof src !== "object") {
+          errors.push(`topics.sources[${i}] がオブジェクトではありません`);
+          return;
+        }
+        if (!src.name) warnings.push(`${label}.name がありません。ログ表示用の名前を付けることを推奨します`);
+        if (!src.type) errors.push(`${label}.type がありません`);
+        else if (!KNOWN_TOPIC_SOURCE_TYPES.includes(src.type)) {
+          errors.push(`${label}.type "${src.type}" は未対応です (対応: ${KNOWN_TOPIC_SOURCE_TYPES.join(", ")})`);
+        }
+        if (src.type === "todoist") {
+          if (!src.token) errors.push(`${label}.token がありません (Todoist の個人アクセストークン)`);
+          if (!src.projectId) errors.push(`${label}.projectId がありません`);
+        }
+      });
+    }
+    if (cfg.topics.trigger && !cfg.triggers?.[cfg.topics.trigger]) {
+      warnings.push(`topics.trigger "${cfg.topics.trigger}" が triggers に存在しません`);
+    }
+    if (cfg.topics.persona && !(cfg.personas ?? []).some((p) => p?.id === cfg.topics.persona)) {
+      errors.push(`topics.persona "${cfg.topics.persona}" が personas に存在しません`);
     }
   }
 
@@ -198,6 +244,20 @@ export function validateConfig(cfg) {
 }
 
 export function applyDefaults(cfg) {
+  const { newsSources, legacyTopicSources } = splitNewsAndLegacyTopics(cfg);
+  const { topicIntro, topicStyle, sources: _legacyNewsSources, ...newsRest } = cfg.news ?? {};
+  const legacyTopicsEnabled = !!cfg.news?.enabled && legacyTopicSources.some((src) => src.enabled !== false);
+  const explicitTopicSources = Array.isArray(cfg.topics?.sources) ? cfg.topics.sources : null;
+  const legacyTopicDefaults = legacyTopicSources.length
+    ? {
+        enabled: legacyTopicsEnabled,
+        trigger: cfg.news?.trigger ?? "",
+        persona: cfg.news?.persona ?? "",
+        maxItems: cfg.news?.maxItems ?? 3,
+        intro: topicIntro ?? DEFAULT_TOPIC_INTRO,
+        style: topicStyle ?? DEFAULT_TOPIC_STYLE,
+      }
+    : {};
   const personas = (cfg.personas ?? []).map((p) => ({
     enabled: true,
     triggers: [],
@@ -252,7 +312,32 @@ export function applyDefaults(cfg) {
       ignoreUsers: [],
       ...(cfg.commentReader ?? {}),
     },
-    news: cfg.news ? { maxItems: 3, mode: "topic", dedupe: true, ...cfg.news } : { enabled: false, mode: "topic", dedupe: true },
+    news: cfg.news
+      ? {
+          maxItems: 3,
+          mode: "topic",
+          dedupe: true,
+          ...newsRest,
+          enabled: newsSources.length ? !!cfg.news.enabled : false,
+          sources: newsSources,
+        }
+      : {
+          enabled: false,
+          mode: "topic",
+          dedupe: true,
+          sources: [],
+        },
+    topics: {
+      enabled: false,
+      sources: [],
+      maxItems: 3,
+      dedupe: true,
+      intro: DEFAULT_TOPIC_INTRO,
+      style: DEFAULT_TOPIC_STYLE,
+      ...legacyTopicDefaults,
+      ...(cfg.topics ?? {}),
+      sources: explicitTopicSources ?? legacyTopicSources,
+    },
     commentSources: {
       ...(cfg.commentSources ?? {}),
       twitch: {

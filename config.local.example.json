@@ -141,6 +141,10 @@
     "news_every_30min": {
       "type": "interval",
       "minutes": 30
+    },
+    "topics_every_15min": {
+      "type": "interval",
+      "minutes": 15
     }
   },
   "router": {
@@ -163,5 +167,23 @@
     "maxItems": 3,
     "dedupe": true,
     "style": "配信の合間に自然に読める短いニュース紹介にする"
+  },
+  "topics": {
+    "enabled": false,
+    "trigger": "topics_every_15min",
+    "persona": "partner_ai",
+    "sources": [
+      {
+        "name": "配信ネタ (Todoist)",
+        "type": "todoist",
+        "enabled": true,
+        "token": "your_todoist_personal_api_token",
+        "projectId": "your_todoist_project_id"
+      }
+    ],
+    "maxItems": 3,
+    "dedupe": true,
+    "intro": "上のお題について、あなたのキャラクターとして自由にコメントしてください。",
+    "style": "雑談のお題として、自然な自分の言葉で自由にコメントする"
   }
 }

@@ -30,20 +30,21 @@ export class ContextBuilder {
   // comment: 返答対象のコメント (nullなら「流れへの反応」)
   // includeScreen: "auto" (新鮮なら入れる) | "never"
   // news: ニュース読み上げ時の対象アイテム { title, description }
-  // task: comment/news がない場合の依頼文の上書き
-  build({ persona, comment = null, includeScreen = "auto", news = null, task = null }) {
+  // topic: Todoist 等から拾った話題 { title, description }
+  // task: comment/news/topic がない場合の依頼文の上書き
+  build({ persona, comment = null, includeScreen = "auto", news = null, topic = null, task = null }) {
     const ctx = this.config.context ?? {};
     const maxChars = ctx.maxPromptChars ?? 4000;
 
     const system = `${persona.systemPrompt ?? ""}\n\n# 共通ルール\n${COMMON_RULES}`.trim();
 
-    let recentCount = news ? 0 : (ctx.includeRecentComments ?? 20);
-    let userContent = this.#compose({ recentCount, includeScreen, news, comment, task });
+    let recentCount = news || topic ? 0 : (ctx.includeRecentComments ?? 20);
+    let userContent = this.#compose({ recentCount, includeScreen, news, topic, comment, task });
 
     // 長すぎる場合はコメント履歴を古い側から削って収める
     while (userContent.length > maxChars && recentCount > 3) {
       recentCount = Math.max(3, Math.floor(recentCount / 2));
-      userContent = this.#compose({ recentCount, includeScreen, news, comment, task });
+      userContent = this.#compose({ recentCount, includeScreen, news, topic, comment, task });
     }
     if (userContent.length > maxChars) {
       userContent = userContent.slice(0, maxChars) + "\n(文脈を切り詰めました)";
@@ -57,7 +58,7 @@ export class ContextBuilder {
     return { messages, debugText };
   }
 
-  #compose({ recentCount, includeScreen, news, comment, task }) {
+  #compose({ recentCount, includeScreen, news, topic, comment, task }) {
     const ctx = this.config.context ?? {};
     const parts = [];
 
@@ -81,19 +82,33 @@ export class ContextBuilder {
       }
     }
 
-    if (news) {
+    const topicItem = topic ?? (news?.kind === "topic" ? news : null);
+    const newsItem = topicItem ? null : news;
+
+    if (topicItem) {
       const meta = [
-        `タイトル: ${news.title}`,
-        news.sourceName ? `ソース: ${news.sourceName}` : null,
-        news.publishedAt ? `日時: ${news.publishedAt}` : null,
-        news.link ? `URL: ${news.link}` : null,
-        `概要: ${news.description || "(概要なし)"}`,
+        `話題: ${topicItem.title}`,
+        topicItem.description ? `メモ: ${topicItem.description}` : null,
+        topicItem.sourceName ? `ソース: ${topicItem.sourceName}` : null,
+      ].filter(Boolean);
+      parts.push(`# 拾った話題\n${meta.join("\n")}`);
+    } else if (newsItem) {
+      const meta = [
+        `タイトル: ${newsItem.title}`,
+        newsItem.sourceName ? `ソース: ${newsItem.sourceName}` : null,
+        newsItem.publishedAt ? `日時: ${newsItem.publishedAt}` : null,
+        newsItem.link ? `URL: ${newsItem.link}` : null,
+        `概要: ${newsItem.description || "(概要なし)"}`,
       ].filter(Boolean);
       parts.push(`# 読み上げるニュース\n${meta.join("\n")}`);
     }
 
     let instruction;
-    if (news) {
+    if (topicItem) {
+      const intro = this.config.topics?.intro ?? "上のお題について、あなたのキャラクターとして自由にコメントしてください。";
+      const style = this.config.topics?.style ?? "雑談のお題として、自然な自分の言葉で自由にコメントする";
+      instruction = [intro, `方針: ${style}`].join("\n");
+    } else if (newsItem) {
       const mode = this.config.news?.mode ?? "topic";
       const modeInstruction = NEWS_MODE_INSTRUCTIONS[mode] ?? NEWS_MODE_INSTRUCTIONS.topic;
       const style = this.config.news?.style ?? "配信の合間に自然に読める短いニュース紹介にする";
