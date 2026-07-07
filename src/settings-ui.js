@@ -22,6 +22,7 @@ const clone = (v) => JSON.parse(JSON.stringify(v ?? null));
 // 壊れた/手編集された config.local.json で配列であるべき値が文字列などになっていても
 // .join() でクラッシュしないようにする (クラッシュするとタブ全体が描画されず入力欄ごと消える)。
 const asArray = (v) => (Array.isArray(v) ? v : []);
+const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
 export class SettingsUI {
   constructor({ getCurrent = () => null, onApply = () => {}, log = () => {} } = {}) {
@@ -32,6 +33,15 @@ export class SettingsUI {
     this.activeTab = "connectors";
     this.root = null;
     this._built = false;
+    this._voices = [];
+    this._voiceSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+    if (this._voiceSupported) {
+      this.#refreshVoices();
+      speechSynthesis.addEventListener?.("voiceschanged", () => {
+        this.#refreshVoices();
+        if (this.root?.open) this.#render();
+      });
+    }
   }
 
   open() {
@@ -49,6 +59,68 @@ export class SettingsUI {
 
   close() {
     if (this.root?.open) this.root.close();
+  }
+
+  #refreshVoices() {
+    try { this._voices = speechSynthesis.getVoices() ?? []; } catch { this._voices = []; }
+  }
+
+  // webspeech の voice.name 用セレクト肢。ブラウザにインストール済みの音声一覧 + default。
+  // 現在の値がこのブラウザに無い音声名でも (別環境で設定された等) 選択肢に残して消さない。
+  #voiceNameOptions(current) {
+    const opts = [{ value: "default", label: "default (自動選択: 日本語音声)" }];
+    const sorted = [...this._voices].sort((a, b) => {
+      const aJa = a.lang?.startsWith("ja") ? 0 : 1;
+      const bJa = b.lang?.startsWith("ja") ? 0 : 1;
+      return aJa !== bJa ? aJa - bJa : a.name.localeCompare(b.name);
+    });
+    for (const v of sorted) opts.push({ value: v.name, label: `${v.name} (${v.lang})` });
+    if (current && current !== "default" && !this._voices.some((v) => v.name === current)) {
+      opts.push({ value: current, label: `${current} (未検出)` });
+    }
+    return opts;
+  }
+
+  // voice.name の select フィールドに「試聴」ボタンを付け足す (select と同じ行に並べる)。
+  // getContext() は試聴時点の { rate, pitch } を返す (draft の最新値を毎回読むため関数で渡す)。
+  #withTestVoiceButton(fieldWrap, getContext) {
+    const sel = fieldWrap.querySelector("select");
+    const row = document.createElement("div");
+    row.className = "field-row";
+    sel.replaceWith(row);
+    row.append(sel);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-test-voice";
+    btn.textContent = "▶ 試聴";
+    btn.title = this._voiceSupported ? "選択中の音声でテスト再生" : "このブラウザは音声合成 (Web Speech API) に対応していません";
+    btn.disabled = !this._voiceSupported;
+    btn.addEventListener("click", () => {
+      const { rate, pitch } = getContext();
+      this.#testSpeakVoice({ name: sel.value, rate, pitch });
+    });
+    row.append(btn);
+    return fieldWrap;
+  }
+
+  #testSpeakVoice({ name, rate, pitch } = {}) {
+    if (!this._voiceSupported) {
+      this.log("このブラウザは音声合成 (Web Speech API) に対応していません", "warn");
+      return;
+    }
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance("こんにちは、これはテスト音声です。");
+    const hit = name && name !== "default"
+      ? this._voices.find((v) => v.name === name) ?? this._voices.find((v) => v.name.includes(name))
+      : null;
+    const voice = hit ?? this._voices.find((v) => v.lang?.startsWith("ja"));
+    if (voice) u.voice = voice;
+    u.lang = voice?.lang ?? "ja-JP";
+    const rateNum = Number(rate);
+    const pitchNum = Number(pitch);
+    u.rate = clamp(Number.isFinite(rateNum) ? rateNum : 1, 0.5, 2);
+    u.pitch = clamp(Number.isFinite(pitchNum) ? pitchNum : 1, 0, 2);
+    speechSynthesis.speak(u);
   }
 
   #ensureBuilt() {
@@ -213,8 +285,9 @@ export class SettingsUI {
     const sel = document.createElement("select");
     for (const opt of options) {
       const o = document.createElement("option");
-      o.value = opt;
-      o.textContent = opt;
+      const isObj = typeof opt === "object" && opt !== null;
+      o.value = isObj ? opt.value : opt;
+      o.textContent = isObj ? opt.label : opt;
       sel.append(o);
     }
     sel.value = value ?? "";
@@ -351,8 +424,9 @@ export class SettingsUI {
     const sel = document.createElement("select");
     for (const opt of options) {
       const o = document.createElement("option");
-      o.value = opt;
-      o.textContent = opt;
+      const isObj = typeof opt === "object" && opt !== null;
+      o.value = isObj ? opt.value : opt;
+      o.textContent = isObj ? opt.label : opt;
       sel.append(o);
     }
     sel.value = value ?? "";
@@ -559,7 +633,13 @@ export class SettingsUI {
       voiceGrid.className = "card-grid";
       voiceGrid.append(this.#arrCheckbox("voice.enabled", "personas", i, "voice.enabled", { value: v.enabled }));
       voiceGrid.append(this.#arrSelect("voice.engine", VOICE_ENGINES, "personas", i, "voice.engine", { value: v.engine ?? "webspeech" }));
-      voiceGrid.append(this.#arrField("voice.name (webspeech)", "personas", i, "voice.name", { value: v.name ?? "" }));
+      voiceGrid.append(this.#withTestVoiceButton(
+        this.#arrSelect("voice.name (webspeech)", this.#voiceNameOptions(v.name), "personas", i, "voice.name", { value: v.name ?? "default" }),
+        () => {
+          const voice = this.#getArr("personas")[i]?.voice ?? {};
+          return { rate: voice.rate ?? voice.speed, pitch: voice.pitch };
+        },
+      ));
       voiceGrid.append(this.#arrField("voice.speaker (voicevox)", "personas", i, "voice.speaker", { type: "number", value: v.speaker ?? "" }));
       // webspeech は voice.rate、voicevox は voice.speed を見る (src/speech-queue.js)。
       // 1つの入力欄で両方に同じ値を書き込み、エンジンを切り替えても効くようにする。
@@ -729,7 +809,10 @@ export class SettingsUI {
       const g = document.createElement("div");
       g.className = "card-grid";
       g.append(this.#pathSelect("engine", VOICE_ENGINES, "commentReader.engine", { value: cr.engine ?? "webspeech" }));
-      g.append(this.#pathField("name (webspeech音声名)", "commentReader.name", { value: cr.name ?? "default", attrs: { spellcheck: "false" } }));
+      g.append(this.#withTestVoiceButton(
+        this.#pathSelect("name (webspeech音声名)", this.#voiceNameOptions(cr.name), "commentReader.name", { value: cr.name ?? "default" }),
+        () => ({ rate: this.draft.commentReader?.rate, pitch: this.draft.commentReader?.pitch }),
+      ));
       g.append(this.#pathField("rate", "commentReader.rate", { type: "number", value: cr.rate ?? 1.0, attrs: { step: "0.1" } }));
       g.append(this.#pathField("pitch", "commentReader.pitch", { type: "number", value: cr.pitch ?? 1.0, attrs: { step: "0.1" } }));
       g.append(this.#pathField("speaker (voicevox話者ID)", "commentReader.speaker", { type: "number", value: cr.speaker ?? "" }));

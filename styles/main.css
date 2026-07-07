@@ -730,6 +730,26 @@ body.obs.transparent { background: transparent; }
   align-items: center;
   gap: 8px;
 }
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.field-row select { flex: 1 1 auto; min-width: 0; }
+.btn-test-voice {
+  flex: none;
+  background: transparent;
+  border: 1px solid var(--panel-edge);
+  color: var(--ink-dim);
+  padding: 7px 10px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.btn-test-voice:hover { border-color: var(--ok); color: var(--ink); }
+.btn-test-voice:disabled { opacity: 0.4; cursor: not-allowed; }
 .field-label {
   font-family: var(--mono);
   font-size: 10px;
