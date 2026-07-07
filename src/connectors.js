@@ -28,10 +28,24 @@ export class ConnectorError extends Error {
   }
 }
 
-export function createConnector(id, cfg) {
+export function createConnector(id, cfg, { log = () => {} } = {}) {
   if (cfg.provider === "mock") return new MockConnector(id, cfg);
-  if (cfg.provider === "minimax") return new MiniMaxConnector(id, cfg);
-  return new OpenAICompatibleConnector(id, cfg);
+  if (cfg.provider === "minimax") return new MiniMaxConnector(id, cfg, { log });
+  return new OpenAICompatibleConnector(id, cfg, { log });
+}
+
+// タイムアウトのみ即座に再試行する (issue #31)。認証/レート制限/不正リクエストは
+// リトライしても結果が変わらないため対象外。cfg.retries が試行回数の上乗せ分。
+async function chatWithRetry(id, retries, log, chatOnce, ...args) {
+  const maxAttempts = 1 + (Number(retries) > 0 ? Number(retries) : 0);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await chatOnce(...args);
+    } catch (e) {
+      if (e.kind !== "timeout" || attempt === maxAttempts) throw e;
+      log(`${id}: タイムアウトのため再試行します (${attempt}/${maxAttempts - 1})`);
+    }
+  }
 }
 
 function dataUrlToAnthropicSource(url) {
@@ -75,12 +89,14 @@ class OpenAICompatibleConnector {
   // APIキーはprivateフィールドに閉じ、describe()やJSON化で漏れないようにする
   #apiKey;
 
-  constructor(id, cfg) {
+  constructor(id, cfg, { log = () => {} } = {}) {
     this.id = id;
     this.provider = cfg.provider;
     this.model = cfg.model;
     this.baseUrl = (cfg.baseUrl ?? BASE_URLS[cfg.provider] ?? BASE_URLS.openai).replace(/\/$/, "");
     this.timeoutMs = cfg.timeoutMs ?? 30000;
+    this.retries = cfg.retries ?? 1;
+    this.log = log;
     this.#apiKey = cfg.apiKey ?? "";
   }
 
@@ -99,7 +115,11 @@ class OpenAICompatibleConnector {
     return headers;
   }
 
-  async chat(messages, { maxTokens = 300, temperature } = {}) {
+  async chat(messages, opts = {}) {
+    return chatWithRetry(this.id, this.retries, this.log, (...args) => this.#chatOnce(...args), messages, opts);
+  }
+
+  async #chatOnce(messages, { maxTokens = 300, temperature } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let res;
@@ -160,12 +180,14 @@ class OpenAICompatibleConnector {
 class MiniMaxConnector {
   #apiKey;
 
-  constructor(id, cfg) {
+  constructor(id, cfg, { log = () => {} } = {}) {
     this.id = id;
     this.provider = "minimax";
     this.model = cfg.model;
     this.baseUrl = (cfg.baseUrl ?? BASE_URLS.minimax).replace(/\/$/, "");
     this.timeoutMs = cfg.timeoutMs ?? 30000;
+    this.retries = cfg.retries ?? 1;
+    this.log = log;
     this.#apiKey = cfg.apiKey ?? "";
   }
 
@@ -173,7 +195,11 @@ class MiniMaxConnector {
     return { id: this.id, provider: this.provider, model: this.model, apiKeyMasked: maskApiKey(this.#apiKey) };
   }
 
-  async chat(messages, { maxTokens = 300, temperature } = {}) {
+  async chat(messages, opts = {}) {
+    return chatWithRetry(this.id, this.retries, this.log, (...args) => this.#chatOnce(...args), messages, opts);
+  }
+
+  async #chatOnce(messages, { maxTokens = 300, temperature } = {}) {
     const { system, messages: anthropicMessages } = toAnthropicMessages(messages);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);

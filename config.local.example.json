@@ -45,13 +45,24 @@
     "baseUrl": "http://127.0.0.1:50021",
     "defaultSpeaker": 3,
     "maxChars": 200,
-    "timeoutMs": 30000
+    "timeoutMs": 30000,
+    "retries": 1
   },
   "micMonitor": {
     "enabled": true,
     "threshold": 0.05,
     "minSpeechMs": 150,
     "silenceHoldMs": 800
+  },
+  "commentReader": {
+    "enabled": true,
+    "engine": "webspeech",
+    "name": "default",
+    "rate": 1.0,
+    "pitch": 1.0,
+    "includeAuthor": true,
+    "skipEmotes": false,
+    "ignoreUsers": ["nightbot", "streamelements"]
   },
   "commentSources": {
     "twitch": {

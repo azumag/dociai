@@ -13,7 +13,7 @@ import { VoiceVoxClient } from "./voicevox.js";
 import { ScreenContext } from "./screen-capture.js";
 import { MicMonitor } from "./mic-monitor.js";
 import { NewsReader } from "./news-reader.js";
-import { ManualCommentSource, TwitchChatSource } from "./comment-sources.js";
+import { ManualCommentSource, TwitchChatSource, stripEmotes } from "./comment-sources.js";
 import { scrubSecrets, collectApiKeys, checkSecretStorage } from "./security.js";
 import { SettingsUI } from "./settings-ui.js";
 
@@ -44,11 +44,16 @@ const state = {
 
 const scrub = (text) => scrubSecrets(text, state.secrets);
 const hhmmss = (d = new Date()) => new Date(d).toTimeString().slice(0, 8);
+// 実在しないペルソナID (コメント読み上げ等) にはニュートラル色を割り当てる。
 const personaHue = (id) => {
-  const i = state.config?.personas.findIndex((p) => p.id === id) ?? 0;
-  return (Math.max(i, 0) * 67 + 145) % 360;
+  const i = state.config?.personas.findIndex((p) => p.id === id) ?? -1;
+  return i < 0 ? null : (i * 67 + 145) % 360;
 };
-const personaColor = (id) => `hsl(${personaHue(id)} 65% 62%)`;
+const personaColor = (id) => {
+  const hue = personaHue(id);
+  return hue == null ? "hsl(0 0% 70%)" : `hsl(${hue} 65% 62%)`;
+};
+const COMMENT_READER_ID = "__comment_reader__";
 
 function broadcast(type, payload) {
   try {
@@ -98,8 +103,23 @@ function appendReply({ persona, text = null, error = null, triggerId, newsTitle 
 function addComment(raw) {
   const comment = state.commentStore.add(raw);
   broadcast("comment", { author: comment.author, text: comment.text, time: Date.now() });
+  readCommentAloud(comment);
   state.triggerEngine?.handleComment(comment);
   return comment;
+}
+
+// コメント本文をそのまま読み上げる (issue #31)。AIペルソナの応答読み上げ (respond()) とは
+// 独立で、トリガー条件を問わず届いた全コメントが対象。同じ speechQueue に積むため、
+// トリガーで応答が生成された場合は自然に「コメント読み上げ→AI応答」の順になる。
+function readCommentAloud(comment) {
+  const cr = state.config?.commentReader;
+  if (!cr?.enabled || !state.speechQueue) return;
+  if ((cr.ignoreUsers ?? []).some((u) => String(u).trim().toLowerCase() === comment.author.toLowerCase())) return;
+
+  const body = cr.skipEmotes && comment.emotes ? stripEmotes(comment.text, comment.emotes) : comment.text;
+  if (!body.trim()) return;
+  const text = cr.includeAuthor === false ? body : `${comment.author}: ${body}`;
+  state.speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice: cr });
 }
 
 function handleTrigger(triggerId, { comment = null, personaId = null, manual = false } = {}) {
@@ -194,7 +214,7 @@ async function applyLoaded({ config, warnings, source }) {
   state.connectors = new Map();
   for (const [id, c] of Object.entries(config.connectors)) {
     try {
-      state.connectors.set(id, createConnector(id, c));
+      state.connectors.set(id, createConnector(id, c, { log: (m) => logEvent(m) }));
     } catch (e) {
       logEvent(`コネクタ "${id}" の初期化に失敗: ${scrub(e.message)}`, "error");
     }
@@ -215,6 +235,7 @@ async function applyLoaded({ config, warnings, source }) {
       ? new VoiceVoxClient({
           baseUrl: config.voicevox.baseUrl,
           timeoutMs: config.voicevox.timeoutMs,
+          retries: config.voicevox.retries,
           log: (m) => logEvent(m),
         })
       : null,

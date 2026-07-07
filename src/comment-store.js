@@ -12,8 +12,8 @@ export class CommentStore {
     this.listeners = new Set();
   }
 
-  add({ author = "名無し", text, source = "manual", timestamp = new Date() }) {
-    const comment = { id: `c${++seq}`, author, text: String(text), source, timestamp };
+  add({ author = "名無し", text, source = "manual", timestamp = new Date(), emotes = null }) {
+    const comment = { id: `c${++seq}`, author, text: String(text), source, timestamp, emotes };
     this.comments.push(comment);
     if (this.comments.length > this.limit) {
       this.comments.splice(0, this.comments.length - this.limit);

@@ -87,6 +87,7 @@ export class SettingsUI {
       ["context", "画面・文脈", "vision / 履歴"],
       ["voicevox", "VOICEVOX", "音声合成エンジン"],
       ["micMonitor", "マイク監視", "発話で読み上げを保留"],
+      ["commentReader", "コメント読み上げ", "全コメントを音声で読み上げ"],
       ["news", "ニュース", "RSS / 要約"],
       ["sources", "コメントソース", "Twitch 等"],
     ];
@@ -155,6 +156,7 @@ export class SettingsUI {
     else if (tab === "context") this.#renderContext();
     else if (tab === "voicevox") this.#renderVoicevox();
     else if (tab === "micMonitor") this.#renderMicMonitor();
+    else if (tab === "commentReader") this.#renderCommentReader();
     else if (tab === "news") this.#renderNews();
     else if (tab === "sources") this.#renderSources();
     this._body.scrollTop = 0;
@@ -710,6 +712,36 @@ export class SettingsUI {
     const note = document.createElement("p");
     note.className = "muted settings-note";
     note.textContent = "配信者の発話を検知するとAI音声キューを保留し、無音に戻ると再開します (中断された発話は最初から読み上げ直されます)。スピーカー環境ではAI自身の声を誤検知することがあるため、ヘッドホンや仮想オーディオデバイスでの分離を推奨します (docs/obs-mode.md 参照)。";
+    this._body.append(note);
+  }
+
+  // ---- commentReader (issue #31) ----
+  #renderCommentReader() {
+    const cr = this.draft.commentReader ?? {};
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = "コメント読み上げ";
+    const { card, body: cardBody } = this.#card([title]);
+    const enabledField = this.#pathCheckbox("commentReader.enabled", "commentReader.enabled", { value: cr.enabled });
+    enabledField.querySelector("input").addEventListener("change", () => this.#render());
+    cardBody.append(enabledField);
+    if (cr.enabled) {
+      const g = document.createElement("div");
+      g.className = "card-grid";
+      g.append(this.#pathSelect("engine", VOICE_ENGINES, "commentReader.engine", { value: cr.engine ?? "webspeech" }));
+      g.append(this.#pathField("name (webspeech音声名)", "commentReader.name", { value: cr.name ?? "default", attrs: { spellcheck: "false" } }));
+      g.append(this.#pathField("rate", "commentReader.rate", { type: "number", value: cr.rate ?? 1.0, attrs: { step: "0.1" } }));
+      g.append(this.#pathField("pitch", "commentReader.pitch", { type: "number", value: cr.pitch ?? 1.0, attrs: { step: "0.1" } }));
+      g.append(this.#pathField("speaker (voicevox話者ID)", "commentReader.speaker", { type: "number", value: cr.speaker ?? "" }));
+      cardBody.append(g);
+      cardBody.append(this.#pathCheckbox("ユーザー名を読み上げる", "commentReader.includeAuthor", { value: cr.includeAuthor !== false }));
+      cardBody.append(this.#pathCheckbox("エモートを読み上げない", "commentReader.skipEmotes", { value: !!cr.skipEmotes }));
+      cardBody.append(this.#pathField("読み上げを無視するユーザー (カンマ区切り)", "commentReader.ignoreUsers", { value: asArray(cr.ignoreUsers).join(", "), csv: true, attrs: { spellcheck: "false" } }));
+    }
+    this._body.append(card);
+    const note = document.createElement("p");
+    note.className = "muted settings-note";
+    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。エモート除去はTwitchの emotes タグ (正確な文字範囲) を使うため、Twitch経由のコメントのみ対象です。";
     this._body.append(note);
   }
 

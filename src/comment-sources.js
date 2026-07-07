@@ -77,7 +77,34 @@ export function parseTwitchIrcLine(line) {
     author: tags["display-name"] || login,
     text,
     channel: normalizeChannel(channel),
+    emotes: tags.emotes || null,
   };
+}
+
+// Twitchの emotes タグ ("id:start-end,start-end/id2:start-end") が指す文字範囲を
+// 本文から取り除く。範囲はUTF-16コード単位・両端含む (Twitch IRC仕様)。
+export function stripEmotes(text, emotesTag) {
+  const s = String(text ?? "");
+  if (!emotesTag) return s;
+  const ranges = [];
+  for (const part of String(emotesTag).split("/")) {
+    const rangesStr = part.split(":")[1];
+    if (!rangesStr) continue;
+    for (const r of rangesStr.split(",")) {
+      const [start, end] = r.split("-").map(Number);
+      if (Number.isFinite(start) && Number.isFinite(end) && end >= start) ranges.push([start, end]);
+    }
+  }
+  if (!ranges.length) return s;
+  ranges.sort((a, b) => a[0] - b[0]);
+  let out = "";
+  let cursor = 0;
+  for (const [start, end] of ranges) {
+    if (start > cursor) out += s.slice(cursor, start);
+    cursor = Math.max(cursor, end + 1);
+  }
+  out += s.slice(cursor);
+  return out.replace(/\s+/g, " ").trim();
 }
 
 export class TwitchChatSource {
@@ -139,6 +166,7 @@ export class TwitchChatSource {
         text: parsed.text,
         source: this.id,
         channel: parsed.channel,
+        emotes: parsed.emotes,
       });
     }
   }

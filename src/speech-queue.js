@@ -134,7 +134,10 @@ export class SpeechQueue {
   }
 
   // VOICEVOX: テキストをチャンクに分けて合成し、<audio> で順次再生する。
-  // 1チャンクでも失敗したらアイテム全体を failed にする (soviet_now の fallback 設計相当)。
+  // チャンク[i]の再生中にチャンク[i+1]の合成を並走させる (1つ先読みパイプライン)。
+  // 全チャンクを合成してから再生していた旧実装は、長文だと最初の音が出るまでの
+  // 待ち時間が合成回数分積み上がっていた。合成はチャンク単位でタイムアウト・
+  // リトライする (#synthChunk) ため、1チャンクの失敗が他チャンクへ波及しない。
   async #speakVoiceVox(item) {
     const v = item.voice ?? {};
     const maxChars = Number(v.maxChars) > 0 ? Number(v.maxChars) : 200;
@@ -148,59 +151,84 @@ export class SpeechQueue {
 
     const audio = new Audio();
     item._audio = audio;
-    const blobs = [];
+    const blobUrls = [];
+    item._blobUrls = blobUrls;
+    // チャンクごとの合成Promiseをキャッシュする (二重合成防止・先読みと再生の疎結合化)。
+    const synthesizing = [];
+    const ensureSynth = (i) => {
+      if (i < 0 || i >= chunks.length) return null;
+      if (!synthesizing[i]) {
+        synthesizing[i] = this.#synthChunk(chunks[i], v).then((url) => {
+          // 先読み完了までにキャンセル/保留で次のアイテムに移っていたら即解放する
+          // (そうしないとBlob URLが再生も破棄もされず残り続ける)。
+          if (this.current === item) blobUrls[i] = url;
+          else try { URL.revokeObjectURL(url); } catch {}
+          return url;
+        });
+      }
+      return synthesizing[i];
+    };
+
     audio.addEventListener("ended", () => {
-      item.chunkIndex += 1;
       if (this.cancelling) {
         this.#finish(item, "skipped");
         return;
       }
-      if (item.chunkIndex >= chunks.length) {
+      const next = item.chunkIndex + 1;
+      if (next >= chunks.length) {
         this.#finish(item, "done");
         return;
       }
-      this.#playChunk(item, audio, blobs[item.chunkIndex]);
+      advanceTo(next);
     });
     audio.addEventListener("error", () => {
       if (this.cancelling) this.#finish(item, "skipped");
       else this.#finish(item, "failed");
     });
 
-    // 事前に全チャンク合成する (再生と並走させると engine の推論が途切れない)。
-    // 合成中は item.state は speaking のままだが chunkIndex を進めて進捗を示す。
-    try {
-      for (let i = 0; i < chunks.length; i++) {
-        if (this.cancelling) {
-          this.#finish(item, "skipped");
-          return;
-        }
-        const blob = await this.voicevox.synth(chunks[i], {
+    const advanceTo = async (i) => {
+      item.chunkIndex = i;
+      this.onUpdate(this.items, this);
+      let url;
+      try {
+        url = await ensureSynth(i);
+      } catch (e) {
+        if (this.cancelling) { this.#finish(item, "skipped"); return; }
+        item.error = `VOICEVOX 読み上げ失敗 (${i + 1}/${chunks.length}チャンク目): ${e.message}`;
+        this.#finish(item, "failed");
+        return;
+      }
+      if (this.cancelling) { this.#finish(item, "skipped"); return; }
+      ensureSynth(i + 1)?.catch(() => {}); // 次チャンクを先読み合成 (失敗は次のadvanceToで再取得・再送出)
+      this.#playChunk(item, audio, url);
+    };
+
+    await advanceTo(0);
+  }
+
+  // 1チャンク分の合成。タイムアウトのみ即座に再試行する (issue #31)。
+  // voicevox.retries が試行回数の上乗せ分。キャンセル/保留中は再試行を打ち切る。
+  async #synthChunk(text, v) {
+    const maxAttempts = 1 + (Number(this.voicevox.retries) > 0 ? Number(this.voicevox.retries) : 0);
+    let lastErr;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (this.cancelling) throw lastErr ?? new VoiceVoxError("キャンセルされました", "network");
+      try {
+        const blob = await this.voicevox.synth(text, {
           speaker: v.speaker,
           pitch: v.pitch,
           speed: v.speed ?? v.rate,
           intonation: v.intonation,
           volume: v.volume,
         });
-        const url = URL.createObjectURL(blob);
-        blobs.push(url);
-        item.chunkIndex = i + 1;
-        this.onUpdate(this.items, this);
+        return URL.createObjectURL(blob);
+      } catch (e) {
+        lastErr = e instanceof VoiceVoxError ? e : new VoiceVoxError(e.message, "server");
+        if (lastErr.kind !== "timeout" || attempt === maxAttempts) throw lastErr;
+        this.log(`VOICEVOX タイムアウトのため再試行します (${attempt}/${maxAttempts - 1})`);
       }
-    } catch (e) {
-      for (const url of blobs) URL.revokeObjectURL(url);
-      item._audio = null;
-      throw e instanceof VoiceVoxError ? e : new VoiceVoxError(e.message, "server");
     }
-
-    if (this.cancelling) {
-      for (const url of blobs) URL.revokeObjectURL(url);
-      this.#finish(item, "skipped");
-      return;
-    }
-    item.chunkIndex = 0;
-    this.#playChunk(item, audio, blobs[0]);
-    // 再生終了後に Blob URL を解放するため保持
-    item._blobUrls = blobs;
+    throw lastErr;
   }
 
   #playChunk(item, audio, url) {

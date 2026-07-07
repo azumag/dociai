@@ -34,6 +34,9 @@ export function validateConfig(cfg) {
       if (c.timeoutMs != null && Number(c.timeoutMs) > 0 && Number(c.timeoutMs) < 1000) {
         warnings.push(`connectors.${id}.timeoutMs は${c.timeoutMs}(ミリ秒)です。秒のつもりの値だと即座にタイムアウトします (例: 30秒 → 30000)`);
       }
+      if (c.retries != null && !(Number(c.retries) >= 0)) {
+        errors.push(`connectors.${id}.retries は0以上の数値にしてください`);
+      }
     }
   }
 
@@ -146,6 +149,9 @@ export function validateConfig(cfg) {
     if (v.timeoutMs != null && Number(v.timeoutMs) > 0 && Number(v.timeoutMs) < 1000) {
       warnings.push(`voicevox.timeoutMs は${v.timeoutMs}(ミリ秒)です。秒のつもりの値だと即座にタイムアウトします (例: 30秒 → 30000)`);
     }
+    if (v.retries != null && !(Number(v.retries) >= 0)) {
+      errors.push("voicevox.retries は0以上の数値にしてください");
+    }
   }
 
   // micMonitor (issue #32)
@@ -159,6 +165,20 @@ export function validateConfig(cfg) {
     }
     if (m.silenceHoldMs != null && !(Number(m.silenceHoldMs) >= 0)) {
       errors.push("micMonitor.silenceHoldMs は0以上の数値にしてください");
+    }
+  }
+
+  // commentReader (issue #31)
+  if (cfg.commentReader?.enabled) {
+    const cr = cfg.commentReader;
+    if (cr.engine && !["webspeech", "voicevox"].includes(cr.engine)) {
+      errors.push(`commentReader.engine "${cr.engine}" は未対応です (対応: webspeech, voicevox)`);
+    }
+    if (cr.engine === "voicevox" && !cfg.voicevox?.enabled) {
+      warnings.push("commentReader.engine が voicevox ですが voicevox.enabled が true ではありません。Web Speech API にフォールバックします");
+    }
+    if (cr.ignoreUsers != null && !Array.isArray(cr.ignoreUsers)) {
+      errors.push("commentReader.ignoreUsers は配列で指定してください");
     }
   }
 
@@ -211,6 +231,7 @@ export function applyDefaults(cfg) {
       defaultSpeaker: 3,
       maxChars: 200,
       timeoutMs: 30000,
+      retries: 1,
       ...(cfg.voicevox ?? {}),
     },
     micMonitor: {
@@ -219,6 +240,17 @@ export function applyDefaults(cfg) {
       minSpeechMs: 150,
       silenceHoldMs: 800,
       ...(cfg.micMonitor ?? {}),
+    },
+    commentReader: {
+      enabled: false,
+      engine: "webspeech",
+      name: "default",
+      rate: 1.0,
+      pitch: 1.0,
+      includeAuthor: true,
+      skipEmotes: false,
+      ignoreUsers: [],
+      ...(cfg.commentReader ?? {}),
     },
     news: cfg.news ? { maxItems: 3, mode: "topic", dedupe: true, ...cfg.news } : { enabled: false, mode: "topic", dedupe: true },
     commentSources: {

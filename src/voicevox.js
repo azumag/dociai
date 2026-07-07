@@ -15,9 +15,10 @@ const DEFAULT_BASE_URL = "http://127.0.0.1:50021";
 const DEFAULT_MAX_CHARS = 200;
 
 export class VoiceVoxClient {
-  constructor({ baseUrl = DEFAULT_BASE_URL, timeoutMs = 30000, log = () => {} } = {}) {
+  constructor({ baseUrl = DEFAULT_BASE_URL, timeoutMs = 30000, retries = 1, log = () => {} } = {}) {
     this.baseUrl = String(baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeoutMs = Number(timeoutMs) || 30000;
+    this.retries = Number(retries) >= 0 ? Number(retries) : 1;
     this.log = log;
     this._cachedSpeakers = null;
   }
