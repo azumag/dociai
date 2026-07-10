@@ -33,6 +33,18 @@ async function waitForJson(url, timeoutMs = 15_000) {
   throw new Error(`Timed out waiting for ${url}: ${lastError?.message ?? "no response"}\n--- child logs ---\n${logs.join("")}`);
 }
 
+async function waitForConsolePage(browser, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pages = await browser.pages();
+    const page = pages.find((candidate) => candidate.url().includes("/index.html"));
+    if (page) return page;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const pages = await browser.pages();
+  throw new Error(`Console window was not loaded. pages=${pages.map((page) => page.url()).join(",")}\n--- child logs ---\n${logs.join("")}`);
+}
+
 try {
   const electronArgs = [
     `--remote-debugging-port=${port}`,
@@ -51,9 +63,7 @@ try {
 
   await waitForJson(`http://127.0.0.1:${port}/json/version`);
   browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}` });
-  const pages = await browser.pages();
-  consolePage = pages.find((page) => page.url().includes("/index.html"));
-  if (!consolePage) throw new Error(`Console window was not loaded. pages=${pages.map((page) => page.url()).join(",")}\n--- child logs ---\n${logs.join("")}`);
+  consolePage = await waitForConsolePage(browser);
   await consolePage.waitForSelector("body", { timeout: 10_000 });
   const checks = await consolePage.evaluate(async () => ({
     platform: await window.dociai.platform.getInfo(),

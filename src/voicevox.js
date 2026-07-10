@@ -23,11 +23,14 @@ export class VoiceVoxClient {
     this._cachedSpeakers = null;
   }
 
-  async #fetch(pathname, { method = "GET", query = null, body = null, expect = "json" } = {}) {
+  async #fetch(pathname, { method = "GET", query = null, body = null, expect = "json", signal: parentSignal = null } = {}) {
     const url = new URL(`${this.baseUrl}${pathname}`);
     if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const abortParent = () => controller.abort(parentSignal?.reason ?? new DOMException("Aborted", "AbortError"));
+    if (parentSignal?.aborted) abortParent();
+    else parentSignal?.addEventListener("abort", abortParent, { once: true });
+    const timer = setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), this.timeoutMs);
     let res;
     try {
       res = await fetch(url.toString(), {
@@ -38,10 +41,12 @@ export class VoiceVoxClient {
         credentials: "omit",
       });
     } catch (e) {
-      if (e.name === "AbortError") throw new VoiceVoxError(`${this.baseUrl} が ${Math.round(this.timeoutMs / 1000)}秒でタイムアウトしました`, "timeout");
+      if (parentSignal?.aborted) throw new VoiceVoxError("VOICEVOX 合成はキャンセルされました", "cancelled");
+      if (e.name === "AbortError" || controller.signal.aborted) throw new VoiceVoxError(`${this.baseUrl} が ${Math.round(this.timeoutMs / 1000)}秒でタイムアウトしました`, "timeout");
       throw new VoiceVoxError(`VOICEVOX エンジンに接続できません (${e.message})`, "network");
     } finally {
       clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", abortParent);
     }
     if (!res.ok) {
       let detail = "";
@@ -67,7 +72,7 @@ export class VoiceVoxClient {
 
   // audio_query → pitch/speed/intonation 適用 → synthesis でWAV Blob を返す。
   // ピッチ・テンポ・抑揚は soviet_now 通りクエリJSONの scale 系フィールドに加算/上書きする。
-  async synth(text, { speaker, pitch = 0, speed = 1.0, intonation = 1.0, volume = 1.0 } = {}) {
+  async synth(text, { speaker, pitch = 0, speed = 1.0, intonation = 1.0, volume = 1.0, signal = null } = {}) {
     const sp = Number(speaker);
     if (!Number.isFinite(sp) || sp < 0) throw new VoiceVoxError(`speaker ID が不正です: ${speaker}`, "bad_request");
     const clean = String(text ?? "").replace(/[#＃]/g, "");
@@ -76,6 +81,7 @@ export class VoiceVoxClient {
     const query = await this.#fetch("/audio_query", {
       method: "POST",
       query: { text: clean, speaker: sp },
+      signal,
     });
     if (!query || !Array.isArray(query.accent_phrases)) {
       throw new VoiceVoxError("audio_query の応答が想定外です", "server");
@@ -90,6 +96,7 @@ export class VoiceVoxClient {
       query: { speaker: sp },
       body: query,
       expect: "blob",
+      signal,
     });
     if (!(wav instanceof Blob) || wav.size === 0) {
       throw new VoiceVoxError("synthesis が空の音声を返しました", "server");

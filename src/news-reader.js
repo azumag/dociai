@@ -2,7 +2,8 @@
 // RSSからニュース候補を取得し、AIで配信向けの読み上げ文に要約して SpeechQueue に入れる。
 // 既読はメモリ上の guid セットで管理し、同じニュースを繰り返し読まない。
 
-import { fetchFeedThroughElectron, hasElectronFeedService } from "./platform/electron-services.js";
+import { cancelElectronFeedRequest, fetchFeedThroughElectron, hasElectronFeedService } from "./platform/electron-services.js";
+import { RequestCancelledError, isCancellation } from "./runtime/request-registry.js";
 
 const MOCK_NEWS = [
   { title: "ローカルPoCが初起動", description: "配信AIコンパニオンのローカルPoCが初めて起動し、コメントへの音声応答に成功した。", guid: "mock-1", publishedAt: "2026-07-01T09:00:00+09:00", sourceName: "mock" },
@@ -49,7 +50,7 @@ export class NewsReader {
   }
 
   // トリガー (interval/manual) から呼ばれるエントリポイント
-  async run() {
+  async run(context = {}) {
     const news = this.config.news;
     if (!news?.enabled) {
       this.log("ニュース機能は無効です (news.enabled: false)");
@@ -62,7 +63,8 @@ export class NewsReader {
     this.busy = true;
     this.lastRunAt = new Date();
     try {
-      const items = await this.fetchAll();
+      this.#guard(context);
+      const items = await this.fetchAll(context);
       const unread = items.filter((i) => !this.readGuids.has(i.guid));
       const picks = unread.slice(0, news.maxItems ?? 3);
       this.log(`ニュース候補 ${items.length}件 (未読 ${unread.length}件、読み上げ ${picks.length}件)`);
@@ -77,14 +79,18 @@ export class NewsReader {
       const connector = this.getConnector(persona.connector);
 
       for (const item of picks) {
+        this.#guard(context);
         const { messages, debugText } = this.contextBuilder.build({ persona, news: item, includeScreen: "never" });
         try {
-          const { text } = await connector.chat(messages);
+          const { text } = await connector.chat(messages, { signal: context.signal, requestId: `${context.requestId ?? "news"}:summary:${item.guid}`, generation: context.generation });
+          this.#guard(context);
           this.readGuids.add(item.guid);
+          this.#guard(context);
           this.onRead({ persona, item, text, debugText });
+          this.#guard(context);
           this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice });
         } catch (e) {
-          this.readGuids.add(item.guid);
+          if (isCancellation(e)) throw e;
           this.log(`ニュース1件の読み上げ失敗 [${item.title}]: ${e.message}`, "error");
         }
       }
@@ -93,13 +99,14 @@ export class NewsReader {
     }
   }
 
-  async fetchAll() {
+  async fetchAll(context = {}) {
     const out = [];
     const sources = (this.config.news?.sources ?? []).map((src, index) => ({ src, index })).filter(({ src }) => src.enabled !== false);
     for (const { src, index } of sources) {
       try {
-        out.push(...(await this.fetchSource(src, index)));
+        out.push(...(await this.fetchSource(src, index, context)));
       } catch (e) {
+        if (isCancellation(e)) throw e;
         const corsHint = e.name === "TypeError" || /Failed to fetch/i.test(e.message)
           ? " (ブラウザのCORS制限の可能性があります。news.corsProxy の設定を検討してください)"
           : "";
@@ -109,20 +116,27 @@ export class NewsReader {
     return this.refineItems(out);
   }
 
-  async fetchSource(src, sourceIndex) {
+  async fetchSource(src, sourceIndex, context = {}) {
     if (src.type === "mock") return [...MOCK_NEWS];
     if (src.type !== "rss") throw new Error(`未対応のソース種別 "${src.type}"`);
 
     if (hasElectronFeedService()) {
-      const result = await fetchFeedThroughElectron({ sourceIndex, ownerId: "console" });
-      if (!result?.ok) throw new Error(result?.error?.message ?? "Main processからニュースを取得できませんでした");
+      const requestId = `${context.requestId ?? "news"}:feed:${sourceIndex}`;
+      const cancel = () => { void cancelElectronFeedRequest(requestId); };
+      context.signal?.addEventListener("abort", cancel, { once: true });
+      const result = await fetchFeedThroughElectron({ sourceIndex, requestId, ownerId: "console" }).finally(() => context.signal?.removeEventListener("abort", cancel));
+      if (!result?.ok) {
+        if (result?.error?.code === "CANCELLED") throw new RequestCancelledError();
+        throw new Error(result?.error?.message ?? "Main processからニュースを取得できませんでした");
+      }
+      this.#guard(context);
       return result.value.items;
     }
 
     const proxy = this.config.news?.corsProxy ?? "";
     if (proxy) this.log("news.corsProxy はBrowser版の互換設定です。Electron版ではMain process通信へ移行済みのため使用されません", "warn");
     const url = proxy ? proxy + encodeURIComponent(src.url) : src.url;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: context.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const xml = new DOMParser().parseFromString(await res.text(), "text/xml");
     if (xml.querySelector("parsererror")) throw new Error("RSS/XMLの解析に失敗しました");
@@ -168,5 +182,10 @@ export class NewsReader {
       readCount: this.readGuids.size,
       lastRunAt: this.lastRunAt,
     };
+  }
+
+  #guard(context) {
+    if (context.signal?.aborted) throw context.signal.reason instanceof Error ? context.signal.reason : new RequestCancelledError();
+    if (context.isCurrent && !context.isCurrent()) throw new RequestCancelledError("ニュース処理は設定変更で停止しました", "stale-generation");
   }
 }

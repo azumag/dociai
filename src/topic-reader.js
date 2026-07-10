@@ -1,7 +1,8 @@
 // 話題リーダー
 // Todoistなどの「配信ネタ」ソースから話題を取得し、AIコメントとして読み上げキューに入れる。
 
-import { completeTopicThroughElectron, fetchTopicsThroughElectron, hasElectronTopicService } from "./platform/electron-services.js";
+import { cancelElectronTopicRequest, completeTopicThroughElectron, fetchTopicsThroughElectron, hasElectronTopicService } from "./platform/electron-services.js";
+import { RequestCancelledError, isCancellation } from "./runtime/request-registry.js";
 
 function normalizeTitle(title) {
   return (title ?? "")
@@ -34,7 +35,7 @@ export class TopicReader {
     return !!this.config.topics?.enabled;
   }
 
-  async run() {
+  async run(context = {}) {
     const topics = this.config.topics;
     if (!topics?.enabled) {
       this.log("話題機能は無効です (topics.enabled: false)");
@@ -47,7 +48,8 @@ export class TopicReader {
     this.busy = true;
     this.lastRunAt = new Date();
     try {
-      const items = await this.fetchAll();
+      this.#guard(context);
+      const items = await this.fetchAll(context);
       const unread = items.filter((i) => !this.readGuids.has(i.guid));
       const picks = unread.slice(0, topics.maxItems ?? 3);
       this.log(`話題候補 ${items.length}件 (未読 ${unread.length}件、読み上げ ${picks.length}件)`);
@@ -62,14 +64,19 @@ export class TopicReader {
       const connector = this.getConnector(persona.connector);
 
       for (const item of picks) {
+        this.#guard(context);
         const { messages, debugText } = this.contextBuilder.build({ persona, topic: item, includeScreen: "never" });
         try {
-          const { text } = await connector.chat(messages);
+          const { text } = await connector.chat(messages, { signal: context.signal, requestId: `${context.requestId ?? "topics"}:summary:${item.guid}`, generation: context.generation });
+          this.#guard(context);
           this.readGuids.add(item.guid);
+          this.#guard(context);
           this.onRead({ persona, item, text, debugText });
+          this.#guard(context);
           this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice });
-          await this.completeTodoistTask(item);
+          await this.completeTodoistTask(item, context);
         } catch (e) {
+          if (isCancellation(e)) throw e;
           this.log(`話題1件の読み上げ失敗 [${item.title}]: ${e.message}`, "error");
         }
       }
@@ -78,36 +85,44 @@ export class TopicReader {
     }
   }
 
-  async fetchAll() {
+  async fetchAll(context = {}) {
     const out = [];
     const sources = (this.config.topics?.sources ?? []).map((src, index) => ({ src, index })).filter(({ src }) => src.enabled !== false);
     for (const { src, index } of sources) {
       try {
-        out.push(...(await this.fetchSource(src, index)));
+        out.push(...(await this.fetchSource(src, index, context)));
       } catch (e) {
+        if (isCancellation(e)) throw e;
         this.log(`話題取得失敗 [${src.name}]: ${e.message}`, "error");
       }
     }
     return this.refineItems(out);
   }
 
-  async fetchSource(src, sourceIndex) {
+  async fetchSource(src, sourceIndex, context = {}) {
     if (src.type === "todoist") {
       if (hasElectronTopicService()) {
-        const result = await fetchTopicsThroughElectron({ sourceIndex, ownerId: "console" });
-        if (!result?.ok) throw new Error(result?.error?.message ?? "Main processから話題を取得できませんでした");
+        const requestId = `${context.requestId ?? "topics"}:fetch:${sourceIndex}`;
+        const cancel = () => { void cancelElectronTopicRequest(requestId); };
+        context.signal?.addEventListener("abort", cancel, { once: true });
+        const result = await fetchTopicsThroughElectron({ sourceIndex, requestId, ownerId: "console" }).finally(() => context.signal?.removeEventListener("abort", cancel));
+        if (!result?.ok) {
+          if (result?.error?.code === "CANCELLED") throw new RequestCancelledError();
+          throw new Error(result?.error?.message ?? "Main processから話題を取得できませんでした");
+        }
+        this.#guard(context);
         return result.value.items;
       }
-      return this.fetchTodoist(src, sourceIndex);
+      return this.fetchTodoist(src, sourceIndex, context);
     }
     throw new Error(`未対応の話題ソース種別 "${src.type}"`);
   }
 
   // Todoist API v1 は project_id クエリでの絞り込みに完全に依存せず、
   // 念のためレスポンス側でも project_id を突き合わせて絞り込む。
-  async fetchTodoist(src, sourceIndex) {
+  async fetchTodoist(src, sourceIndex, context = {}) {
     const res = await fetch(`https://api.todoist.com/api/v1/tasks?project_id=${encodeURIComponent(src.projectId)}`, {
-      headers: { Authorization: `Bearer ${src.token}` },
+      headers: { Authorization: `Bearer ${src.token}` }, signal: context.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} (Todoist token/projectIdを確認してください)`);
     const body = await res.json();
@@ -127,20 +142,28 @@ export class TopicReader {
   }
 
   // 読み上げに使えた話題だけ Todoist 側でも完了にする。
-  async completeTodoistTask(item) {
+  async completeTodoistTask(item, context = {}) {
     if (!item._todoistTaskId && !item.taskId) return;
     try {
       if (hasElectronTopicService()) {
-        const result = await completeTopicThroughElectron({ sourceIndex: item.sourceIndex ?? item._sourceIndex, taskId: String(item.taskId ?? item._todoistTaskId), ownerId: "console" });
-        if (!result?.ok) throw new Error(result?.error?.message ?? "Main processでTodoistタスクを完了できませんでした");
+        const requestId = `${context.requestId ?? "topics"}:complete:${item.taskId ?? item._todoistTaskId}`;
+        const cancel = () => { void cancelElectronTopicRequest(requestId); };
+        context.signal?.addEventListener("abort", cancel, { once: true });
+        const result = await completeTopicThroughElectron({ sourceIndex: item.sourceIndex ?? item._sourceIndex, taskId: String(item.taskId ?? item._todoistTaskId), requestId, ownerId: "console" }).finally(() => context.signal?.removeEventListener("abort", cancel));
+        if (!result?.ok) {
+          if (result?.error?.code === "CANCELLED") throw new RequestCancelledError();
+          throw new Error(result?.error?.message ?? "Main processでTodoistタスクを完了できませんでした");
+        }
+        this.#guard(context);
         return;
       }
       const res = await fetch(`https://api.todoist.com/api/v1/tasks/${encodeURIComponent(item._todoistTaskId)}/close`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${item._todoistToken}` },
+        headers: { Authorization: `Bearer ${item._todoistToken}` }, signal: context.signal,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (e) {
+      if (isCancellation(e)) throw e;
       this.log(`Todoistタスクの完了処理に失敗しました [${item.title}]: ${e.message}`, "warn");
     }
   }
@@ -172,5 +195,10 @@ export class TopicReader {
       readCount: this.readGuids.size,
       lastRunAt: this.lastRunAt,
     };
+  }
+
+  #guard(context) {
+    if (context.signal?.aborted) throw context.signal.reason instanceof Error ? context.signal.reason : new RequestCancelledError();
+    if (context.isCurrent && !context.isCurrent()) throw new RequestCancelledError("話題処理は設定変更で停止しました", "stale-generation");
   }
 }

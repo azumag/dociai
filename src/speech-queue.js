@@ -90,6 +90,7 @@ export class SpeechQueue {
     this.cancelling = true;
     // voicevox: 再生中の <audio> を止める。Web Speech: speechSynthesis.cancel()。
     const item = this.current;
+    item._abortController?.abort();
     if (item._audio) {
       try { item._audio.pause(); } catch {}
       // 事前合成中 (まだ src 未設定) は #speakVoiceVox 側の cancelling チェックが
@@ -116,13 +117,15 @@ export class SpeechQueue {
     }
 
     this.current = item;
+    item._abortController = new AbortController();
     this.#setState(item, "speaking");
 
     const engine = item.voice?.engine || (this.voicevox ? "voicevox" : "webspeech");
     if (engine === "bouyomi" && this.bouyomi) {
-      this.bouyomi.talk(item.text, item.voice).then(
+      this.bouyomi.talk(item.text, { ...item.voice, signal: item._abortController.signal }).then(
         () => this.#finish(item, "done"),
         (e) => {
+          if (this.cancelling || e?.kind === "cancelled") { this.#finish(item, "skipped"); return; }
           item.error = `棒読みちゃん送信失敗: ${e.message}`;
           this.#finish(item, "failed");
         },
@@ -131,6 +134,7 @@ export class SpeechQueue {
     }
     if (engine === "voicevox" && this.voicevox) {
       this.#speakVoiceVox(item).catch((e) => {
+        if (this.cancelling || e?.kind === "cancelled") { this.#finish(item, "skipped"); return; }
         item.error = `VOICEVOX 読み上げ失敗: ${e.message}`;
         this.#finish(item, "failed");
       });
@@ -171,7 +175,7 @@ export class SpeechQueue {
     const ensureSynth = (i) => {
       if (i < 0 || i >= chunks.length) return null;
       if (!synthesizing[i]) {
-        synthesizing[i] = this.#synthChunk(chunks[i], v).then((url) => {
+        synthesizing[i] = this.#synthChunk(chunks[i], v, item._abortController.signal).then((url) => {
           // 先読み完了までにキャンセル/保留で次のアイテムに移っていたら即解放する
           // (そうしないとBlob URLが再生も破棄もされず残り続ける)。
           if (this.current === item) blobUrls[i] = url;
@@ -221,11 +225,11 @@ export class SpeechQueue {
 
   // 1チャンク分の合成。タイムアウトのみ即座に再試行する (issue #31)。
   // voicevox.retries が試行回数の上乗せ分。キャンセル/保留中は再試行を打ち切る。
-  async #synthChunk(text, v) {
+  async #synthChunk(text, v, signal) {
     const maxAttempts = 1 + (Number(this.voicevox.retries) > 0 ? Number(this.voicevox.retries) : 0);
     let lastErr;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (this.cancelling) throw lastErr ?? new VoiceVoxError("キャンセルされました", "network");
+      if (this.cancelling || signal?.aborted) throw lastErr ?? new VoiceVoxError("キャンセルされました", "cancelled");
       try {
         const blob = await this.voicevox.synth(text, {
           speaker: v.speaker,
@@ -233,6 +237,7 @@ export class SpeechQueue {
           speed: v.speed ?? v.rate,
           intonation: v.intonation,
           volume: v.volume,
+          signal,
         });
         return URL.createObjectURL(blob);
       } catch (e) {
@@ -296,6 +301,7 @@ export class SpeechQueue {
       try { item._audio.pause(); } catch {}
       item._audio = null;
     }
+    item._abortController = null;
     this.#setState(item, state);
     // Chromeはcancel直後のspeakを取りこぼすことがあるため少し置いて次へ
     setTimeout(() => this.#pump(), 250);

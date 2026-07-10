@@ -32,14 +32,17 @@ export class BouyomiClient {
       volume: finiteOr(options.volume, finiteOr(this.defaults.volume, -1)),
       speed: finiteOr(options.speed ?? options.rate, finiteOr(this.defaults.speed, -1)),
       tone: finiteOr(options.tone, finiteOr(this.defaults.tone, -1)),
+      signal: options.signal ?? null,
     };
     if (!request.text.trim()) return { ok: true };
     if (this.bridge?.talk) {
-      const result = await this.bridge.talk(request);
+      const { signal, ...bridgeRequest } = request;
+      if (signal?.aborted) throw new BouyomiError("棒読みちゃん送信はキャンセルされました", "cancelled");
+      const result = await this.bridge.talk(bridgeRequest);
       if (result?.ok === false) throw new BouyomiError(result.error || "棒読みちゃんへの送信に失敗しました", result.kind);
       return result;
     }
-    return this.#request("Talk", request);
+    return this.#request("Talk", request, request.signal);
   }
 
   async clear() {
@@ -51,22 +54,27 @@ export class BouyomiClient {
     return this.#request("Clear", {});
   }
 
-  async #request(command, params) {
+  async #request(command, params, parentSignal = null) {
     const url = new URL(`${this.baseUrl}/${command}`);
     for (const [key, value] of Object.entries(params)) {
-      if (["baseUrl", "timeoutMs"].includes(key)) continue;
+      if (["baseUrl", "timeoutMs", "signal"].includes(key)) continue;
       url.searchParams.set(key, value);
     }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const abortParent = () => controller.abort(parentSignal?.reason ?? new DOMException("Aborted", "AbortError"));
+    if (parentSignal?.aborted) abortParent();
+    else parentSignal?.addEventListener("abort", abortParent, { once: true });
+    const timer = setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), this.timeoutMs);
     let response;
     try {
       response = await fetch(url, { method: "GET", signal: controller.signal });
     } catch (error) {
-      if (error.name === "AbortError") throw new BouyomiError(`棒読みちゃんが${this.timeoutMs}ms以内に応答しませんでした`, "timeout");
+      if (parentSignal?.aborted) throw new BouyomiError("棒読みちゃん送信はキャンセルされました", "cancelled");
+      if (error.name === "AbortError" || controller.signal.aborted) throw new BouyomiError(`棒読みちゃんが${this.timeoutMs}ms以内に応答しませんでした`, "timeout");
       throw new BouyomiError(`棒読みちゃんに接続できません (${error.message})`, "network");
     } finally {
       clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", abortParent);
     }
     if (!response.ok) {
       throw new BouyomiError(`棒読みちゃんがエラーを返しました (HTTP ${response.status})`, response.status >= 500 ? "server" : "bad_request");
