@@ -414,6 +414,7 @@ function renderAll() {
   renderPersonas();
   renderTriggers();
   renderSpeechQueue();
+  renderCommentReaderStatus();
   renderMicPanel();
   renderScreenPanel();
   renderNewsPanel();
@@ -588,6 +589,26 @@ function renderSpeechQueue() {
     chip.textContent = `待機 ${state.speechQueue.waitingCount()}`;
     chip.className = "chip";
   }
+}
+
+function renderCommentReaderStatus() {
+  const el = $("#comment-reader-status");
+  if (!el) return;
+  const reader = state.config?.commentReader;
+  if (!state.config) {
+    el.textContent = "設定を読み込むとコメント読み上げを開始できます";
+    el.className = "reader-status";
+    return;
+  }
+  if (!reader?.enabled) {
+    el.textContent = "読み上げ OFF · コメントは画面表示のみ";
+    el.className = "reader-status";
+    return;
+  }
+  const sourceNames = ["手動入力"];
+  if (state.config.commentSources?.twitch?.enabled) sourceNames.push("Twitch Chat");
+  el.textContent = `読み上げ ON · ${reader.engine ?? "webspeech"} · ${sourceNames.join(" + ")}`;
+  el.className = "reader-status is-active";
 }
 
 function renderMicPanel() {

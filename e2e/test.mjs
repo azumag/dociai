@@ -53,6 +53,16 @@ try {
   const tally = await page.$eval("#tally", (el) => el.textContent);
   check("タリーランプにペルソナ表示", tally.includes("相棒AI") && tally.includes("ツッコミAI"), tally);
 
+  // ---- issue #35: コメント読み上げ主体の画面構成 ----
+  const commentFirstUi = await page.evaluate(() => ({
+    heading: document.querySelector(".panel-comments-primary h1")?.textContent,
+    center: document.querySelector("#comment-log")?.closest(".col")?.classList.contains("col-center"),
+    readerStatus: document.querySelector("#comment-reader-status")?.textContent,
+    controlsLeft: document.querySelector("#speech-list")?.closest(".col")?.classList.contains("col-left"),
+  }));
+  check("コメント読み上げが中央の主画面", commentFirstUi.heading === "コメント読み上げ" && commentFirstUi.center, JSON.stringify(commentFirstUi));
+  check("読み上げ状態とキュー操作が左に集約", commentFirstUi.controlsLeft && commentFirstUi.readerStatus.includes("読み上げ"), commentFirstUi.readerStatus);
+
   // ---- issue #13: 永続ストレージにAPIキーなし ----
   const storage = await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }));
   check("localStorage/sessionStorageに保存なし", storage.local === 0 && storage.session === 0, JSON.stringify(storage));
