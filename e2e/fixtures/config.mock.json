@@ -1,0 +1,90 @@
+{
+  "connectors": {
+    "mock_main": {
+      "provider": "mock"
+    },
+    "vision_mock": {
+      "provider": "mock"
+    }
+  },
+  "context": {
+    "commentHistoryLimit": 80,
+    "includeRecentComments": 20,
+    "maxPromptChars": 4000,
+    "screenCapture": {
+      "enabled": true,
+      "connector": "vision_mock",
+      "maxAgeSeconds": 120
+    }
+  },
+  "commentReader": {
+    "enabled": true,
+    "engine": "webspeech",
+    "includeAuthor": true
+  },
+  "micMonitor": {
+    "enabled": true
+  },
+  "personas": [
+    {
+      "id": "partner_ai",
+      "name": "相棒AI",
+      "connector": "mock_main",
+      "systemPrompt": "あなたは配信者の相棒AIです。",
+      "triggers": ["mention_ai"],
+      "voice": {
+        "enabled": true,
+        "engine": "webspeech"
+      }
+    },
+    {
+      "id": "tsukkomi_ai",
+      "name": "ツッコミAI",
+      "connector": "mock_main",
+      "systemPrompt": "あなたは配信のツッコミ役です。",
+      "triggers": [],
+      "voice": {
+        "enabled": true,
+        "engine": "webspeech"
+      }
+    }
+  ],
+  "triggers": {
+    "mention_ai": {
+      "type": "keyword",
+      "keywords": ["AIさん", "どう思う", "解説して"]
+    },
+    "news_manual": {
+      "type": "manual"
+    }
+  },
+  "router": {
+    "defaultPersona": "partner_ai",
+    "maxRepliesPerComment": 1,
+    "cooldownSeconds": 8
+  },
+  "news": {
+    "enabled": true,
+    "trigger": "news_manual",
+    "persona": "partner_ai",
+    "mode": "topic",
+    "sources": [
+      {
+        "name": "mock",
+        "type": "mock"
+      }
+    ],
+    "maxItems": 2,
+    "dedupe": true
+  },
+  "topics": {
+    "enabled": false,
+    "sources": []
+  },
+  "commentSources": {
+    "twitch": {
+      "enabled": false,
+      "channels": []
+    }
+  }
+}
