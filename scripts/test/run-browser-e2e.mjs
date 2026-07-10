@@ -5,6 +5,7 @@ import { getFreePort } from "./free-port.mjs";
 import { ManagedProcess } from "./process-manager.mjs";
 import { createTestWorkspace } from "./test-workspace.mjs";
 import { waitForHttpReady } from "./wait-for-ready.mjs";
+import { persistArtifacts, writeFailureArtifact } from "./artifact.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
@@ -54,6 +55,18 @@ try {
   if (testProcess) {
     console.error("--- test logs ---");
     console.error(testProcess.logs());
+  }
+  await writeFailureArtifact(
+    workspace.artifactsDir,
+    "failure.log",
+    [error?.stack ?? error, "--- server logs ---", server.logs(), "--- test logs ---", testProcess?.logs() ?? ""].join("\n"),
+  );
+  if (process.env.KEEP_TEST_WORKSPACE !== "1") {
+    const diagnosticsDir = process.env.TEST_ARTIFACTS_DIR
+      ? path.resolve(process.env.TEST_ARTIFACTS_DIR, path.basename(workspace.root))
+      : path.join(repoRoot, "test-results", path.basename(workspace.root));
+    await persistArtifacts(workspace.artifactsDir, diagnosticsDir);
+    console.error(`INFO | failure artifacts saved: ${diagnosticsDir}`);
   }
   if (process.env.KEEP_TEST_WORKSPACE !== "1") {
     console.error(`INFO | Re-run with KEEP_TEST_WORKSPACE=1 to preserve ${workspace.root}`);

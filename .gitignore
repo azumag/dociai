@@ -1,8 +1,8 @@
 node_modules/
 dist/
+test-results/
 .env
 .env.*
 config.local.json
 *.log
 .DS_Store
-

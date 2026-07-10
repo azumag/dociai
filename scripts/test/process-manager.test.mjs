@@ -6,7 +6,7 @@ test("ManagedProcess captures output and observes an already-finished child", as
   const child = new ManagedProcess("quick", process.execPath, ["-e", "console.log('ready')"], {
     pipeOutput: false,
   }).start();
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await child.waitForOutput("ready");
   const result = await child.waitForExit();
   assert.equal(result.code, 0);
   assert.match(child.logs(), /ready/);
@@ -20,4 +20,14 @@ test("ManagedProcess stops a long-running process tree", async () => {
   await child.stop({ timeoutMs: 2_000 });
   const result = await child.waitForExit();
   assert.ok(result.signal || result.code !== 0);
+});
+
+test("ManagedProcess force kills a child that ignores SIGTERM", { skip: process.platform === "win32" }, async () => {
+  const child = new ManagedProcess("stubborn", process.execPath, ["-e", "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)"], {
+    pipeOutput: false,
+  }).start();
+  await child.waitForOutput("ready");
+  await child.stop({ timeoutMs: 50 });
+  const result = await child.waitForExit();
+  assert.equal(result.signal, "SIGKILL");
 });
