@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
+import assert from "node:assert/strict";
 import puppeteer from "puppeteer";
 import { getFreePort } from "../test/free-port.mjs";
 
@@ -50,14 +51,25 @@ try {
   const consolePage = pages.find((page) => page.url().includes("/index.html"));
   if (!consolePage) throw new Error(`Console window was not loaded. pages=${pages.map((page) => page.url()).join(",")}`);
   await consolePage.waitForSelector("body", { timeout: 10_000 });
-  const platform = await consolePage.evaluate(() => window.dociai?.platform?.getInfo?.());
-  if (platform?.runtime !== "electron") throw new Error(`Preload platform API unavailable: ${JSON.stringify(platform)}`);
+  const checks = await consolePage.evaluate(async () => ({
+    platform: await window.dociai.platform.getInfo(),
+    keys: Object.keys(window.dociai).sort(),
+    csp: (await fetch(location.href)).headers.get("content-security-policy"),
+    browserGlobals: { require: typeof window.require, process: typeof window.process, ipcRenderer: typeof window.ipcRenderer },
+    invalidExternal: await window.dociai.system.openExternal("javascript:alert(1)"),
+  }));
+  assert.equal(checks.platform.ok, true, JSON.stringify(checks.platform));
+  assert.equal(checks.platform.value.runtime, "electron");
+  assert.deepEqual(checks.keys, ["config", "events", "platform", "secrets", "system", "windows"]);
+  assert.match(checks.csp ?? "", /object-src 'none'/);
+  assert.deepEqual(checks.browserGlobals, { require: "undefined", process: "undefined", ipcRenderer: "undefined" });
+  assert.equal(checks.invalidExternal.ok, false);
   await consolePage.evaluate(() => window.dociai.windows.openObs());
   await waitForJson(`http://127.0.0.1:${port}/json/list`);
   const withObs = await browser.pages();
   if (!withObs.some((page) => page.url().includes("obs.html"))) throw new Error("OBS window was not opened");
   await consolePage.evaluate(() => window.dociai.windows.closeObs());
-  console.log(`PASS | Electron smoke | console + preload + OBS open/close (${platform.platform}/${platform.arch})`);
+  console.log(`PASS | Electron smoke | console + secure preload + CSP + OBS open/close (${checks.platform.value.platform}/${checks.platform.value.arch})`);
 } finally {
   if (browser) {
     try {

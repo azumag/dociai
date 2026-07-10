@@ -47,7 +47,9 @@ npm run electron:start
 ```
 
 Electron版は既存の`index.html` / `obs.html`をRendererとして再利用し、MainがConsole/OBS windowと
-アプリ用パスを管理します。RendererにはNode integrationを有効化せず、Preloadの限定APIだけを公開します。
+アプリ用パスを管理します。RendererにはNode integrationを有効化せず、Preloadの限定API（config、secrets、
+window、system、events）だけを公開します。IPCはMain側でsender/originと入力を検証し、外部オープンは
+HTTPSに限定します。CSP、navigation、permission policyもElectron側で適用されます。
 Browser版の`python3 scripts/serve.py`起動は引き続き利用できます。
 
 ### APIキーなしで試す

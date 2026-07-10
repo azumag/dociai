@@ -2,9 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { BrowserWindow, screen } from "electron";
 import type { AppPaths } from "./paths";
+import { registerWindowRole, unregisterWindowRole } from "./window-roles";
+import type { WindowRole } from "../shared/ipc-contract";
+import { installNavigationPolicy } from "./security/navigation";
 
 type WindowState = { x?: number; y?: number; width: number; height: number };
-type WindowControllerOptions = { appPath: string; preloadPath: string; paths: AppPaths; devServerUrl?: string };
+type WindowControllerOptions = { appPath: string; preloadPath: string; paths: AppPaths; devServerUrl?: string; isPackaged?: boolean };
 const DEFAULT_CONSOLE_STATE: WindowState = { width: 1440, height: 960 };
 
 function readWindowState(file: string): WindowState {
@@ -44,14 +47,21 @@ export function createWindowController(options: WindowControllerOptions) {
   const stateFile = path.join(options.paths.userDataDir, "window-state.json");
   let consoleWindow: BrowserWindow | null = null;
   let obsWindow: BrowserWindow | null = null;
-  const webPreferences = { preload: options.preloadPath, nodeIntegration: false, contextIsolation: true, sandbox: true };
+  const webPreferences = { preload: options.preloadPath, nodeIntegration: false, contextIsolation: true, sandbox: true, devTools: !options.isPackaged };
+
+  function prepareWindow(window: BrowserWindow, role: WindowRole): void {
+    registerWindowRole(window.webContents, role);
+    installNavigationPolicy(window, options.devServerUrl);
+  }
 
   function createConsoleWindow(): BrowserWindow {
     if (consoleWindow && !consoleWindow.isDestroyed()) { consoleWindow.focus(); return consoleWindow; }
     consoleWindow = new BrowserWindow({ ...fitToWorkArea(readWindowState(stateFile)), minWidth: 960, minHeight: 640, show: false, webPreferences });
+    prepareWindow(consoleWindow, "console");
     consoleWindow.once("ready-to-show", () => consoleWindow?.show());
     consoleWindow.on("close", () => saveWindowState(stateFile, consoleWindow));
-    consoleWindow.on("closed", () => { consoleWindow = null; });
+    const createdConsoleWindow = consoleWindow;
+    consoleWindow.on("closed", () => { unregisterWindowRole(createdConsoleWindow.webContents); if (consoleWindow === createdConsoleWindow) consoleWindow = null; });
     void consoleWindow.loadURL(pageUrl("index.html", options.devServerUrl));
     return consoleWindow;
   }
@@ -59,8 +69,10 @@ export function createWindowController(options: WindowControllerOptions) {
   function openObsWindow(): BrowserWindow {
     if (obsWindow && !obsWindow.isDestroyed()) { obsWindow.focus(); return obsWindow; }
     obsWindow = new BrowserWindow({ width: 960, height: 540, minWidth: 480, minHeight: 270, show: false, transparent: true, backgroundColor: "#00000000", webPreferences });
+    prepareWindow(obsWindow, "obs");
     obsWindow.once("ready-to-show", () => obsWindow?.show());
-    obsWindow.on("closed", () => { obsWindow = null; });
+    const createdObsWindow = obsWindow;
+    obsWindow.on("closed", () => { unregisterWindowRole(createdObsWindow.webContents); if (obsWindow === createdObsWindow) obsWindow = null; });
     void obsWindow.loadURL(pageUrl("obs.html?transparent=1", options.devServerUrl));
     return obsWindow;
   }
@@ -73,6 +85,9 @@ export function createWindowController(options: WindowControllerOptions) {
       if (!consoleWindow || consoleWindow.isDestroyed()) return;
       if (consoleWindow.isMinimized()) consoleWindow.restore();
       consoleWindow.focus();
+    },
+    getWindows() {
+      return { console: consoleWindow, obs: obsWindow };
     },
     dispose() {
       saveWindowState(stateFile, consoleWindow);
