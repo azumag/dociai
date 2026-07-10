@@ -1,0 +1,21 @@
+{
+  "name": "dociai",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.4.2",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "e2e"
+  ],
+  "scripts": {
+    "test": "npm run test:e2e:browser",
+    "test:e2e:browser": "node scripts/test/run-browser-e2e.mjs",
+    "test:e2e:browser:direct": "npm --workspace e2e test",
+    "test:e2e:list": "node scripts/test/list-e2e-scenarios.mjs"
+  },
+  "devDependencies": {
+    "puppeteer": "^24.0.0"
+  }
+}
