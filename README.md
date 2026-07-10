@@ -26,6 +26,9 @@ python3 scripts/serve.py 8080
 - `http://localhost:8080/` — 操作卓 (配信者用UI)
 - `http://localhost:8080/obs.html` — OBS/配信画面用の表示専用UI ([docs/obs-mode.md](docs/obs-mode.md))
 
+操作卓はコメント読み上げを主役にした構成です。中央にライブコメント、左に読み上げ状態と
+キュー操作、右にAIペルソナや各種自動化をまとめ、配信中に必要な情報から順に追えます。
+
 操作卓を開くと `config.local.json` を自動読込します (「サーバーから読込」「ファイルを選択」でも可)。
 APIキーを含む `config.local.json` はGit管理しません。公開デプロイにも含めません。読み込んだキーはメモリ保持のみで、LocalStorage等には保存されません。
 

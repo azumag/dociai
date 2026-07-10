@@ -11,7 +11,7 @@
   <header class="console-header">
     <div class="brand">
       <span class="brand-mark">DOCIAI</span>
-      <span class="brand-sub">配信AI操作卓</span>
+      <span class="brand-sub">コメント読み上げコンソール</span>
     </div>
     <div class="tally" id="tally" aria-label="ペルソナ状態ランプ"></div>
     <div class="config-controls">
@@ -26,49 +26,16 @@
 
   <main class="console">
     <div class="col col-left">
-      <section class="panel">
-        <h2>コメント</h2>
-        <form id="comment-form" autocomplete="off">
-          <input id="comment-author" placeholder="名前 (省略可)" aria-label="コメントの名前">
-          <div class="comment-row">
-            <input id="comment-text" placeholder="コメントを入力…" aria-label="コメント本文" required>
-            <button type="submit">送信</button>
-          </div>
-        </form>
-        <ol id="comment-log" class="log comment-log" aria-live="polite"></ol>
-      </section>
-      <section class="panel">
-        <h2>システムログ</h2>
-        <ol id="event-log" class="log event-log"></ol>
-      </section>
-    </div>
-
-    <div class="col col-center">
-      <section class="panel panel-replies">
-        <h2>AI応答</h2>
-        <ol id="reply-log" class="log reply-log" aria-live="polite"></ol>
-      </section>
-      <section class="panel">
-        <h2>プロンプトデバッグ</h2>
-        <div id="debug-meta" class="muted">まだAI呼び出しはありません</div>
-        <pre id="debug-prompt" class="debug-pre"></pre>
-      </section>
-    </div>
-
-    <div class="col col-right">
-      <section class="panel">
-        <h2>ペルソナ</h2>
-        <ul id="persona-list" class="rack-list"></ul>
-      </section>
-      <section class="panel">
-        <h2>音声キュー <span id="speech-state" class="chip"></span></h2>
-        <div class="btn-row">
-          <button id="btn-speech-stop" type="button">停止</button>
+      <section class="panel panel-reader-controls">
+        <h2>読み上げコントロール <span id="speech-state" class="chip"></span></h2>
+        <div id="comment-reader-status" class="reader-status" aria-live="polite"></div>
+        <div class="btn-row speech-actions">
+          <button id="btn-speech-stop" type="button">一時停止</button>
           <button id="btn-speech-resume" type="button">再開</button>
           <button id="btn-speech-skip" type="button">スキップ</button>
           <button id="btn-speech-clear" type="button">全消去</button>
         </div>
-        <ul id="speech-list" class="rack-list"></ul>
+        <ul id="speech-list" class="rack-list speech-list"></ul>
       </section>
       <section class="panel">
         <h2>マイク監視</h2>
@@ -78,6 +45,47 @@
         </div>
         <div class="mic-meter"><div id="mic-meter-fill" class="mic-meter-fill"></div></div>
         <div id="mic-status" class="muted"></div>
+      </section>
+    </div>
+
+    <div class="col col-center">
+      <section class="panel panel-comments-primary">
+        <div class="panel-kicker">LIVE COMMENTS</div>
+        <h1>コメント読み上げ</h1>
+        <p class="panel-lead">届いたコメントを中心に、読み上げとAI応答の流れを確認できます。</p>
+        <form id="comment-form" autocomplete="off">
+          <input id="comment-author" placeholder="名前 (省略可)" aria-label="コメントの名前">
+          <div class="comment-row">
+            <input id="comment-text" placeholder="コメントを入力…" aria-label="コメント本文" required>
+            <button type="submit">送信</button>
+          </div>
+        </form>
+        <ol id="comment-log" class="log comment-log" aria-live="polite"></ol>
+      </section>
+      <section class="panel panel-replies">
+        <h2>コメントへのAI応答</h2>
+        <ol id="reply-log" class="log reply-log" aria-live="polite"></ol>
+      </section>
+      <details class="panel panel-diagnostics">
+        <summary>システムログとプロンプト</summary>
+        <div class="diagnostic-grid">
+          <div>
+            <h2>システムログ</h2>
+            <ol id="event-log" class="log event-log"></ol>
+          </div>
+          <div>
+            <h2>プロンプトデバッグ</h2>
+            <div id="debug-meta" class="muted">まだAI呼び出しはありません</div>
+            <pre id="debug-prompt" class="debug-pre"></pre>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div class="col col-right">
+      <section class="panel">
+        <h2>ペルソナ</h2>
+        <ul id="persona-list" class="rack-list"></ul>
       </section>
       <section class="panel">
         <h2>トリガー</h2>
