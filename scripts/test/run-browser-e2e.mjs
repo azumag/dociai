@@ -1,13 +1,17 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveBrowserExecutable } from "./browser-executable.mjs";
+import { getFreePort } from "./free-port.mjs";
 import { ManagedProcess } from "./process-manager.mjs";
 import { createTestWorkspace } from "./test-workspace.mjs";
 import { waitForHttpReady } from "./wait-for-ready.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
-const port = Number(process.env.TEST_PORT ?? 18080);
+const port = process.env.TEST_PORT ? Number(process.env.TEST_PORT) : await getFreePort();
+if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+  throw new Error(`Invalid TEST_PORT: ${process.env.TEST_PORT}`);
+}
 const baseUrl = `http://127.0.0.1:${port}`;
 const workspace = await createTestWorkspace(repoRoot);
 const browserExecutable = resolveBrowserExecutable();
