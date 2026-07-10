@@ -31,6 +31,10 @@ const api: DociaiApi = {
     set: (input) => invoke(CHANNELS.SECRET_SET, input),
     remove: (key) => invoke(CHANNELS.SECRET_REMOVE, key),
   },
+  ai: {
+    chat: (input) => invoke(CHANNELS.AI_CHAT, input),
+    cancel: (requestId) => invoke(CHANNELS.AI_CANCEL, requestId),
+  },
   windows: {
     openObs: () => invoke(CHANNELS.WINDOW_OBS_OPEN),
     closeObs: () => invoke(CHANNELS.WINDOW_OBS_CLOSE),
