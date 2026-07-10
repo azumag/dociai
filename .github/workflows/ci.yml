@@ -101,6 +101,8 @@ jobs:
       - name: Electron smoke
         env:
           TEST_ARTIFACTS_DIR: ${{ github.workspace }}/test-results/electron
+          # GitHub's unprivileged runner cannot preserve Electron's SUID helper mode after npm ci.
+          ELECTRON_SMOKE_NO_SANDBOX: "1"
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" node scripts/ci/run-electron-smoke.mjs
       - name: Assert process cleanup
         if: always()

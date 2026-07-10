@@ -34,12 +34,14 @@ async function waitForJson(url, timeoutMs = 15_000) {
 }
 
 try {
-  child = spawn(electronBinary, [
+  const electronArgs = [
     `--remote-debugging-port=${port}`,
     "--headless",
     `--user-data-dir=${userDataDir}`,
     path.join(repoRoot, "dist/electron/main.cjs"),
-  ], {
+  ];
+  if (process.env.ELECTRON_SMOKE_NO_SANDBOX === "1") electronArgs.splice(3, 0, "--no-sandbox", "--disable-setuid-sandbox");
+  child = spawn(electronBinary, electronArgs, {
     cwd: repoRoot,
     env: { ...process.env, ELECTRON_ENABLE_LOGGING: "1" },
     stdio: ["ignore", "pipe", "pipe"],
