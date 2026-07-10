@@ -35,6 +35,15 @@ const api: DociaiApi = {
     chat: (input) => invoke(CHANNELS.AI_CHAT, input),
     cancel: (requestId) => invoke(CHANNELS.AI_CANCEL, requestId),
   },
+  feeds: {
+    fetch: (input) => invoke(CHANNELS.FEED_FETCH, input),
+    cancel: (requestId) => invoke(CHANNELS.FEED_CANCEL, requestId),
+  },
+  topics: {
+    fetch: (input) => invoke(CHANNELS.TOPIC_FETCH, input),
+    complete: (input) => invoke(CHANNELS.TOPIC_COMPLETE, input),
+    cancel: (requestId) => invoke(CHANNELS.TOPIC_CANCEL, requestId),
+  },
   windows: {
     openObs: () => invoke(CHANNELS.WINDOW_OBS_OPEN),
     closeObs: () => invoke(CHANNELS.WINDOW_OBS_CLOSE),

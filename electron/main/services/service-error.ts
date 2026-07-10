@@ -1,7 +1,7 @@
 import type { RequestContext } from "../../shared/services/service-contract";
 import type { ServiceErrorCode, ServiceErrorShape } from "../../shared/services/service-errors";
 
-const STATUS_CODES: Record<number, ServiceErrorCode> = { 400: "BAD_REQUEST", 401: "AUTH", 403: "AUTH", 408: "TIMEOUT", 409: "CONFLICT", 429: "RATE_LIMIT" };
+const STATUS_CODES: Record<number, ServiceErrorCode> = { 400: "BAD_REQUEST", 401: "AUTH", 403: "AUTH", 404: "BAD_REQUEST", 408: "TIMEOUT", 409: "CONFLICT", 429: "RATE_LIMIT" };
 
 export class ServiceError extends Error {
   readonly retryable: boolean;

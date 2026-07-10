@@ -2,6 +2,8 @@
 // RSSからニュース候補を取得し、AIで配信向けの読み上げ文に要約して SpeechQueue に入れる。
 // 既読はメモリ上の guid セットで管理し、同じニュースを繰り返し読まない。
 
+import { fetchFeedThroughElectron, hasElectronFeedService } from "./platform/electron-services.js";
+
 const MOCK_NEWS = [
   { title: "ローカルPoCが初起動", description: "配信AIコンパニオンのローカルPoCが初めて起動し、コメントへの音声応答に成功した。", guid: "mock-1", publishedAt: "2026-07-01T09:00:00+09:00", sourceName: "mock" },
   { title: "モックニュース機能のテスト", description: "APIキーなしで動作確認できるモックニュースソースが追加された。", guid: "mock-2", publishedAt: "2026-07-01T09:05:00+09:00", sourceName: "mock" },
@@ -93,10 +95,10 @@ export class NewsReader {
 
   async fetchAll() {
     const out = [];
-    const sources = (this.config.news?.sources ?? []).filter((src) => src.enabled !== false);
-    for (const src of sources) {
+    const sources = (this.config.news?.sources ?? []).map((src, index) => ({ src, index })).filter(({ src }) => src.enabled !== false);
+    for (const { src, index } of sources) {
       try {
-        out.push(...(await this.fetchSource(src)));
+        out.push(...(await this.fetchSource(src, index)));
       } catch (e) {
         const corsHint = e.name === "TypeError" || /Failed to fetch/i.test(e.message)
           ? " (ブラウザのCORS制限の可能性があります。news.corsProxy の設定を検討してください)"
@@ -107,11 +109,18 @@ export class NewsReader {
     return this.refineItems(out);
   }
 
-  async fetchSource(src) {
+  async fetchSource(src, sourceIndex) {
     if (src.type === "mock") return [...MOCK_NEWS];
     if (src.type !== "rss") throw new Error(`未対応のソース種別 "${src.type}"`);
 
+    if (hasElectronFeedService()) {
+      const result = await fetchFeedThroughElectron({ sourceIndex, ownerId: "console" });
+      if (!result?.ok) throw new Error(result?.error?.message ?? "Main processからニュースを取得できませんでした");
+      return result.value.items;
+    }
+
     const proxy = this.config.news?.corsProxy ?? "";
+    if (proxy) this.log("news.corsProxy はBrowser版の互換設定です。Electron版ではMain process通信へ移行済みのため使用されません", "warn");
     const url = proxy ? proxy + encodeURIComponent(src.url) : src.url;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

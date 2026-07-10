@@ -11,9 +11,12 @@ import type { SecretStore } from "../../shared/secret-contract";
 import { parseSecretKey } from "../secrets/secret-keys";
 import { AiService } from "../services/ai/ai-service";
 import type { AiChatInput, AiMessage } from "../../shared/services/ai-contract";
+import { FeedService } from "../services/feeds/feed-service";
+import { TopicService } from "../services/topics/topic-service";
+import type { FeedFetchInput } from "../../shared/services/feed-contract";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -24,6 +27,19 @@ function parseAiMessages(value: unknown): AiMessage[] {
     if (!("content" in message)) throw new PublicIpcError("INVALID_INPUT", "message contentが必要です");
     return { role: message.role, content: message.content };
   });
+}
+
+function requestMetadata(payload: Record<string, unknown>): Pick<FeedFetchInput, "requestId" | "generation" | "ownerId"> {
+  return {
+    ...(typeof payload.requestId === "string" ? { requestId: payload.requestId } : {}),
+    ...(typeof payload.generation === "number" && Number.isSafeInteger(payload.generation) ? { generation: payload.generation } : {}),
+    ...(typeof payload.ownerId === "string" ? { ownerId: payload.ownerId } : {}),
+  };
+}
+
+function sourceIndex(payload: Record<string, unknown>): number {
+  if (typeof payload.sourceIndex !== "number" || !Number.isSafeInteger(payload.sourceIndex) || payload.sourceIndex < 0 || payload.sourceIndex > 1_000) throw new PublicIpcError("INVALID_INPUT", "sourceIndexが不正です");
+  return payload.sourceIndex;
 }
 
 function register<T>(channel: string, handler: Handler<T>, options: RegisterOptions, roles = ["console"] as const): void {
@@ -84,6 +100,20 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     return options.aiService.chat({ connectorId, messages, ...(optionsValue ? { options: optionsValue as AiChatInput["options"] } : {}), ...(typeof payload.requestId === "string" ? { requestId: payload.requestId } : {}), ...(typeof payload.generation === "number" && Number.isSafeInteger(payload.generation) ? { generation: payload.generation } : {}), ...(typeof payload.ownerId === "string" ? { ownerId: payload.ownerId } : {}) });
   }, options);
   register(CHANNELS.AI_CANCEL, (event, input) => ({ cancelled: options.aiService.cancel(expectString(input, "requestId", 256)) }), options);
+  register(CHANNELS.FEED_FETCH, (event, input) => {
+    const payload = expectRecord(input, "feed request");
+    return options.feedService.fetch({ sourceIndex: sourceIndex(payload), ...requestMetadata(payload) });
+  }, options);
+  register(CHANNELS.FEED_CANCEL, (event, input) => ({ cancelled: options.feedService.cancel(expectString(input, "requestId", 256)) }), options);
+  register(CHANNELS.TOPIC_FETCH, (event, input) => {
+    const payload = expectRecord(input, "topic request");
+    return options.topicService.fetchTopics({ sourceIndex: sourceIndex(payload), ...requestMetadata(payload) });
+  }, options);
+  register(CHANNELS.TOPIC_COMPLETE, (event, input) => {
+    const payload = expectRecord(input, "topic completion");
+    return options.topicService.completeTask({ sourceIndex: sourceIndex(payload), taskId: expectString(payload.taskId, "taskId", 256), ...requestMetadata(payload) });
+  }, options);
+  register(CHANNELS.TOPIC_CANCEL, (event, input) => ({ cancelled: options.topicService.cancel(expectString(input, "requestId", 256)) }), options);
   register(CHANNELS.WINDOW_OBS_OPEN, (event, input) => { expectNoInput(input); options.controller.openObsWindow(); return { opened: true }; }, options);
   register(CHANNELS.WINDOW_OBS_CLOSE, (event, input) => { expectNoInput(input); options.controller.closeObsWindow(); return { closed: true }; }, options);
   register(CHANNELS.WINDOW_STATE_GET, (event, input) => {

@@ -1,6 +1,8 @@
 // 話題リーダー
 // Todoistなどの「配信ネタ」ソースから話題を取得し、AIコメントとして読み上げキューに入れる。
 
+import { completeTopicThroughElectron, fetchTopicsThroughElectron, hasElectronTopicService } from "./platform/electron-services.js";
+
 function normalizeTitle(title) {
   return (title ?? "")
     .normalize("NFKC")
@@ -78,10 +80,10 @@ export class TopicReader {
 
   async fetchAll() {
     const out = [];
-    const sources = (this.config.topics?.sources ?? []).filter((src) => src.enabled !== false);
-    for (const src of sources) {
+    const sources = (this.config.topics?.sources ?? []).map((src, index) => ({ src, index })).filter(({ src }) => src.enabled !== false);
+    for (const { src, index } of sources) {
       try {
-        out.push(...(await this.fetchSource(src)));
+        out.push(...(await this.fetchSource(src, index)));
       } catch (e) {
         this.log(`話題取得失敗 [${src.name}]: ${e.message}`, "error");
       }
@@ -89,14 +91,21 @@ export class TopicReader {
     return this.refineItems(out);
   }
 
-  async fetchSource(src) {
-    if (src.type === "todoist") return this.fetchTodoist(src);
+  async fetchSource(src, sourceIndex) {
+    if (src.type === "todoist") {
+      if (hasElectronTopicService()) {
+        const result = await fetchTopicsThroughElectron({ sourceIndex, ownerId: "console" });
+        if (!result?.ok) throw new Error(result?.error?.message ?? "Main processから話題を取得できませんでした");
+        return result.value.items;
+      }
+      return this.fetchTodoist(src, sourceIndex);
+    }
     throw new Error(`未対応の話題ソース種別 "${src.type}"`);
   }
 
   // Todoist API v1 は project_id クエリでの絞り込みに完全に依存せず、
   // 念のためレスポンス側でも project_id を突き合わせて絞り込む。
-  async fetchTodoist(src) {
+  async fetchTodoist(src, sourceIndex) {
     const res = await fetch(`https://api.todoist.com/api/v1/tasks?project_id=${encodeURIComponent(src.projectId)}`, {
       headers: { Authorization: `Bearer ${src.token}` },
     });
@@ -113,13 +122,19 @@ export class TopicReader {
       kind: "topic",
       _todoistToken: src.token,
       _todoistTaskId: t.id,
+      _sourceIndex: sourceIndex,
     })).filter((t) => t.title);
   }
 
   // 読み上げに使えた話題だけ Todoist 側でも完了にする。
   async completeTodoistTask(item) {
-    if (!item._todoistTaskId) return;
+    if (!item._todoistTaskId && !item.taskId) return;
     try {
+      if (hasElectronTopicService()) {
+        const result = await completeTopicThroughElectron({ sourceIndex: item.sourceIndex ?? item._sourceIndex, taskId: String(item.taskId ?? item._todoistTaskId), ownerId: "console" });
+        if (!result?.ok) throw new Error(result?.error?.message ?? "Main processでTodoistタスクを完了できませんでした");
+        return;
+      }
       const res = await fetch(`https://api.todoist.com/api/v1/tasks/${encodeURIComponent(item._todoistTaskId)}/close`, {
         method: "POST",
         headers: { Authorization: `Bearer ${item._todoistToken}` },

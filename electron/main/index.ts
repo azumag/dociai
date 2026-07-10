@@ -7,6 +7,8 @@ import { ConfigRepository } from "./config/config-repository";
 import { SafeStorageSecretStore } from "./secrets/safe-storage-secret-store";
 import { parseSecretKey } from "./secrets/secret-keys";
 import { AiService } from "./services/ai/ai-service";
+import { FeedService } from "./services/feeds/feed-service";
+import { TopicService } from "./services/topics/topic-service";
 import { installCspPolicy, securityHeaders } from "./security/csp";
 import { installPermissionPolicy } from "./security/permissions";
 import { registerIpcHandlers } from "./ipc/register";
@@ -36,6 +38,20 @@ function moveConnectorSecrets(config: JsonRecord): { publicConfig: JsonRecord; s
     connectors[id] = connector;
   }
   publicConfig.connectors = connectors;
+  const topics = object(publicConfig.topics);
+  const sources = Array.isArray(topics.sources) ? topics.sources : [];
+  topics.sources = sources.map((value, index) => {
+    const source = object(value);
+    if (typeof source.token === "string" && source.token) {
+      const key = `topics.sources.${index}.token`;
+      secretEntries.push({ key, value: source.token });
+      delete source.token;
+      source.tokenConfigured = true;
+      source.tokenSecretRef = key;
+    }
+    return source;
+  });
+  if ("topics" in publicConfig) publicConfig.topics = topics;
   return { publicConfig, secretEntries };
 }
 
@@ -56,11 +72,11 @@ async function seedAiConnectorConfig(configRepository: ConfigRepository, secretS
   const raw = await readJsonRecord(source);
   if (!raw) return source;
   const migrated = moveConnectorSecrets(raw);
-  // #69 owns only AI provider credentials. Other service credentials stay untouched until their Main migrations.
+  // Mainへ移管済みの資格情報だけをsafeStorageへ移し、次のサービス移管までは他の値を触らない。
   for (const entry of migrated.secretEntries) await secretStore.set(parseSecretKey(entry.key), entry.value);
-  if (!await exists(paths.configRepositoryFile)) {
-    const config = { schemaVersion: raw.schemaVersion ?? 1, connectors: migrated.publicConfig.connectors ?? {} };
-    const current = await configRepository.getPublic();
+  const current = await configRepository.getPublic();
+  if (!await exists(paths.configRepositoryFile) || !("news" in current.config) || !("topics" in current.config)) {
+    const config = { ...current.config, schemaVersion: raw.schemaVersion ?? 1, connectors: migrated.publicConfig.connectors ?? {}, ...(migrated.publicConfig.news === undefined ? {} : { news: migrated.publicConfig.news }), ...(migrated.publicConfig.topics === undefined ? {} : { topics: migrated.publicConfig.topics }) };
     await configRepository.save(config, current.revision);
   }
   if (source === paths.configFile && migrated.secretEntries.length) await writePublicConfig(source, migrated.publicConfig);
@@ -119,9 +135,13 @@ if (!hasLock) {
 
     controller = createWindowController({ appPath, preloadPath: path.join(appPath, "preload.cjs"), paths, devServerUrl, isPackaged: app.isPackaged });
     const aiService = new AiService(configRepository, secretStore, fetch, (event) => controller?.emitToConsole("ai:token", event));
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, devServerUrl });
+    const feedService = new FeedService(configRepository);
+    const topicService = new TopicService(configRepository, secretStore);
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
+    app.once("before-quit", () => feedService.dispose());
+    app.once("before-quit", () => topicService.dispose());
     controller.createConsoleWindow();
     app.on("activate", () => controller?.createConsoleWindow());
   }).catch((error) => { logError("startup", error); if (!quitting) app.quit(); });
