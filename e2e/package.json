@@ -11,6 +11,7 @@
     "test:voicevox": "node test-voicevox-chunk.mjs",
     "test:voicevox:engine": "node test-voicevox-engine.mjs",
     "test:voicevox:e2e": "node test-voicevox-e2e.mjs",
+    "test:bouyomi": "node test-bouyomi.mjs",
     "test:settings": "node test-settings-ui.mjs",
     "test:crosstab": "node test-crosstab.mjs"
   },

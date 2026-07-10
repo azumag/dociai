@@ -200,6 +200,15 @@ export function validateConfig(cfg) {
     }
   }
 
+  // bouyomi (issue #30)
+  if (cfg.bouyomi?.enabled) {
+    const b = cfg.bouyomi;
+    if (!b.baseUrl) errors.push("bouyomi.enabled が true ですが bouyomi.baseUrl がありません");
+    if (b.timeoutMs != null && !(Number(b.timeoutMs) > 0)) {
+      errors.push("bouyomi.timeoutMs は正の数にしてください");
+    }
+  }
+
   // micMonitor (issue #32)
   if (cfg.micMonitor?.enabled) {
     const m = cfg.micMonitor;
@@ -217,11 +226,14 @@ export function validateConfig(cfg) {
   // commentReader (issue #31)
   if (cfg.commentReader?.enabled) {
     const cr = cfg.commentReader;
-    if (cr.engine && !["webspeech", "voicevox"].includes(cr.engine)) {
-      errors.push(`commentReader.engine "${cr.engine}" は未対応です (対応: webspeech, voicevox)`);
+    if (cr.engine && !["webspeech", "voicevox", "bouyomi"].includes(cr.engine)) {
+      errors.push(`commentReader.engine "${cr.engine}" は未対応です (対応: webspeech, voicevox, bouyomi)`);
     }
     if (cr.engine === "voicevox" && !cfg.voicevox?.enabled) {
       warnings.push("commentReader.engine が voicevox ですが voicevox.enabled が true ではありません。Web Speech API にフォールバックします");
+    }
+    if (cr.engine === "bouyomi" && !cfg.bouyomi?.enabled) {
+      warnings.push("commentReader.engine が bouyomi ですが bouyomi.enabled が true ではありません。Web Speech API にフォールバックします");
     }
     if (cr.ignoreUsers != null && !Array.isArray(cr.ignoreUsers)) {
       errors.push("commentReader.ignoreUsers は配列で指定してください");
@@ -232,11 +244,14 @@ export function validateConfig(cfg) {
   for (const [i, p] of (cfg.personas ?? []).entries()) {
     const label = p?.id ? `personas[${p.id}]` : `personas[${i}]`;
     const engine = p?.voice?.engine;
-    if (engine && !["webspeech", "voicevox"].includes(engine)) {
-      errors.push(`${label}.voice.engine "${engine}" は未対応です (対応: webspeech, voicevox)`);
+    if (engine && !["webspeech", "voicevox", "bouyomi"].includes(engine)) {
+      errors.push(`${label}.voice.engine "${engine}" は未対応です (対応: webspeech, voicevox, bouyomi)`);
     }
     if (engine === "voicevox" && !cfg.voicevox?.enabled) {
       warnings.push(`${label}.voice.engine が voicevox ですが voicevox.enabled が true ではありません。Web Speech API にフォールバックします`);
+    }
+    if (engine === "bouyomi" && !cfg.bouyomi?.enabled) {
+      warnings.push(`${label}.voice.engine が bouyomi ですが bouyomi.enabled が true ではありません。Web Speech API にフォールバックします`);
     }
   }
 
@@ -293,6 +308,16 @@ export function applyDefaults(cfg) {
       timeoutMs: 30000,
       retries: 1,
       ...(cfg.voicevox ?? {}),
+    },
+    bouyomi: {
+      enabled: false,
+      baseUrl: "http://127.0.0.1:50080",
+      timeoutMs: 5000,
+      voice: 0,
+      volume: -1,
+      speed: -1,
+      tone: -1,
+      ...(cfg.bouyomi ?? {}),
     },
     micMonitor: {
       enabled: false,

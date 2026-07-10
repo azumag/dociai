@@ -80,7 +80,7 @@ MiniMax 公式の Anthropic Messages 互換APIを使う場合は `provider: "min
 ```
 
 - `triggers` — このペルソナが反応するトリガーIDの配列
-- `voice.engine` — `webspeech` (既定, ブラウザ内蔵) または `voicevox` (issue #17)
+- `voice.engine` — `webspeech` (既定, ブラウザ内蔵)、`voicevox`、`bouyomi` のいずれか
 - `voice.name` — Web Speech APIの音声名。`default` なら日本語音声を自動選択
 - `voice.speaker` — VOICEVOX の話者ID (数値)。`/speakers` の style id。省略時は `voicevox.defaultSpeaker`
 - `voice.speed` / `voice.pitch` / `voice.intonation` / `voice.volume` — VOICEVOX の各 Scale (soviet_now 互換)。`pitch` は現在の pitchScale に加算、それ以外は上書き
@@ -124,6 +124,31 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
 `Access-Control-Allow-Origin` を返します。`http://localhost:8080` からのリクエストは
 そのまま通るので追加設定不要です。別ホストに置く場合は engine 側で
 `--cors_policy_mode all` を指定してください。
+
+## bouyomi
+
+棒読みちゃんの HTTP 連携 (issue #30)。棒読みちゃん側で「HTTP連携」を有効にし、
+`commentReader.engine` または `personas[].voice.engine` に `"bouyomi"` を指定します。
+
+```json
+{
+  "bouyomi": {
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:50080",
+    "timeoutMs": 5000,
+    "voice": 0,
+    "volume": -1,
+    "speed": -1,
+    "tone": -1
+  }
+}
+```
+
+`voice` は 0 が棒読みちゃん側の既定話者、`volume` / `speed` / `tone` は -1 で
+棒読みちゃん側の設定を使います。読み上げは `/Talk` に投入され、その後の順番は
+棒読みちゃん自身のキューが管理します。「全消去」は `/Clear` にも送られます。
+ブラウザ版で CORS に阻まれる場合は Electron 版を使うと、限定された preload API 経由で
+メインプロセスからローカル HTTP API を呼び出せます。
 
 ## micMonitor
 
@@ -181,10 +206,11 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 | フィールド | 既定 | 説明 |
 |---|---|---|
 | `enabled` | false | コメント読み上げを有効化 |
-| `engine` | webspeech | `webspeech` または `voicevox` (personas の `voice.engine` と同じ選択肢) |
+| `engine` | webspeech | `webspeech` / `voicevox` / `bouyomi` (personas の `voice.engine` と同じ選択肢) |
 | `name` | default | webspeech使用時の音声名。省略時は日本語音声を自動選択 |
 | `rate` / `pitch` | 1.0 / 1.0 | 読み上げ速度・音高 |
 | `speaker` | (voicevox.defaultSpeakerを使用) | voicevox使用時の話者ID。省略可 |
+| `voice` | 0 | bouyomi使用時の話者ID。0 は棒読みちゃん側の既定 |
 | `includeAuthor` | true | falseにすると「author: 本文」ではなく本文のみ読み上げる |
 | `skipEmotes` | false | trueにするとTwitchのエモートを読み上げから除去する。Twitchが送るIRCの `emotes` タグ (エモートの正確な文字範囲) を使うため、手動入力コメントなど emotes 情報がないソースには影響しない |
 | `ignoreUsers` | `[]` | このユーザー名 (大文字小文字区別なし、前後空白は無視) からのコメントは読み上げをスキップする。AI応答のトリガー判定自体には影響しない |
@@ -192,9 +218,8 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 コメントは `AIConnector` を経由せずそのまま読み上げキューに積まれるため、APIキーなし
 (モック接続すら不要) で動作する。AIペルソナがトリガーで応答する場合、同じキューに
 「コメント読み上げ」→「AI応答」の順で積まれるため、視聴者のコメントとAIの返答を
-両方音声で聞ける。読み上げに使うエンジンは `voicevox`/`webspeech` のいずれも選べ、
-将来 issue #30 (棒読みちゃん連携) が入った場合はここに `engine: "bouyomi"` 相当の
-選択肢が追加される想定。
+両方音声で聞ける。読み上げに使うエンジンは `voicevox` / `webspeech` / `bouyomi`
+から選べます。
 
 ## triggers
 

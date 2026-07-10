@@ -48,6 +48,15 @@
     "timeoutMs": 30000,
     "retries": 1
   },
+  "bouyomi": {
+    "enabled": false,
+    "baseUrl": "http://127.0.0.1:50080",
+    "timeoutMs": 5000,
+    "voice": 0,
+    "volume": -1,
+    "speed": -1,
+    "tone": -1
+  },
   "micMonitor": {
     "enabled": true,
     "threshold": 0.05,
