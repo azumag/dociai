@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "test": "npm run test:unit && npm run test:contract && npm run test:e2e:browser",
-    "test:unit": "node --test scripts/test/artifact.test.mjs scripts/test/config-security.test.mjs scripts/test/process-manager.test.mjs scripts/test/test-workspace.test.mjs",
+    "test:unit": "node --test scripts/test/artifact.test.mjs scripts/test/config-security.test.mjs scripts/test/process-manager.test.mjs scripts/test/service-runtime.test.mjs scripts/test/test-workspace.test.mjs",
     "test:contract": "node --test scripts/test/mock-services.test.mjs",
     "lint": "node scripts/ci/lint.mjs",
     "test:e2e:browser": "node scripts/test/run-browser-e2e.mjs",
