@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import puppeteer from "puppeteer";
 import { getFreePort } from "../test/free-port.mjs";
+import { writeFailureArtifact } from "../test/artifact.mjs";
 
 const require = createRequire(import.meta.url);
 const electronBinary = require("electron");
@@ -14,6 +15,8 @@ const port = await getFreePort();
 const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "dociai-electron-smoke-"));
 let browser;
 let child;
+let consolePage;
+const logs = [];
 
 async function waitForJson(url, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
@@ -41,14 +44,13 @@ try {
     env: { ...process.env, ELECTRON_ENABLE_LOGGING: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  const logs = [];
   child.stdout.on("data", (chunk) => logs.push(String(chunk)));
   child.stderr.on("data", (chunk) => logs.push(String(chunk)));
 
   await waitForJson(`http://127.0.0.1:${port}/json/version`);
   browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}` });
   const pages = await browser.pages();
-  const consolePage = pages.find((page) => page.url().includes("/index.html"));
+  consolePage = pages.find((page) => page.url().includes("/index.html"));
   if (!consolePage) throw new Error(`Console window was not loaded. pages=${pages.map((page) => page.url()).join(",")}`);
   await consolePage.waitForSelector("body", { timeout: 10_000 });
   const checks = await consolePage.evaluate(async () => ({
@@ -70,6 +72,14 @@ try {
   if (!withObs.some((page) => page.url().includes("obs.html"))) throw new Error("OBS window was not opened");
   await consolePage.evaluate(() => window.dociai.windows.closeObs());
   console.log(`PASS | Electron smoke | console + secure preload + CSP + OBS open/close (${checks.platform.value.platform}/${checks.platform.value.arch})`);
+} catch (error) {
+  const artifactDirectory = process.env.TEST_ARTIFACTS_DIR;
+  if (artifactDirectory) {
+    await writeFailureArtifact(artifactDirectory, "electron-failure.log", [error?.stack ?? error, "--- electron logs ---", logs.join("")].join("\n"));
+    if (consolePage) await consolePage.screenshot({ path: path.join(artifactDirectory, "electron-console.png") }).catch(() => {});
+    console.error(`INFO | Electron failure artifacts saved: ${artifactDirectory}`);
+  }
+  throw error;
 } finally {
   if (browser) {
     try {
