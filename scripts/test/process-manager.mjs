@@ -6,6 +6,7 @@ export class ManagedProcess {
   #child;
   #exitPromise;
   #logs = [];
+  #logWaiters = new Set();
   #stopped = false;
 
   constructor(name, command, args = [], options = {}) {
@@ -29,7 +30,7 @@ export class ManagedProcess {
       stream.setEncoding("utf8");
       stream.on("data", (chunk) => {
         const text = String(chunk);
-        this.#logs.push(`${prefix}${text}`);
+        this.#appendLog(`${prefix}${text}`);
         if (this.options.pipeOutput !== false) process.stderr.write(`${prefix}${text}`);
       });
     };
@@ -38,7 +39,7 @@ export class ManagedProcess {
     collect(this.#child.stderr, `[${this.name}:err] `);
 
     this.#child.on("error", (error) => {
-      this.#logs.push(`[spawn-error] ${error.stack ?? error.message}\n`);
+      this.#appendLog(`[spawn-error] ${error.stack ?? error.message}\n`);
     });
     this.#exitPromise = new Promise((resolve, reject) => {
       this.#child.once("error", reject);
@@ -54,6 +55,30 @@ export class ManagedProcess {
 
   logs() {
     return this.#logs.join("");
+  }
+
+  waitForOutput(expected, { timeoutMs = 5_000 } = {}) {
+    const matches = (value) => {
+      if (!(expected instanceof RegExp)) return value.includes(String(expected));
+      expected.lastIndex = 0;
+      return expected.test(value);
+    };
+    if (matches(this.logs())) return Promise.resolve(this.logs());
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        matches,
+        resolve: () => {
+          clearTimeout(timer);
+          this.#logWaiters.delete(waiter);
+          resolve(this.logs());
+        },
+      };
+      const timer = setTimeout(() => {
+        this.#logWaiters.delete(waiter);
+        reject(new Error(`Timed out waiting for ${this.name} output: ${expected}`));
+      }, timeoutMs);
+      this.#logWaiters.add(waiter);
+    });
   }
 
   async waitForExit() {
@@ -79,6 +104,14 @@ export class ManagedProcess {
     if (timedOut && child.exitCode === null) {
       terminateTree(child, "SIGKILL");
       await exited;
+    }
+  }
+
+  #appendLog(text) {
+    this.#logs.push(text);
+    const allLogs = this.logs();
+    for (const waiter of [...this.#logWaiters]) {
+      if (waiter.matches(allLogs)) waiter.resolve();
     }
   }
 }

@@ -13,13 +13,15 @@
     "e2e"
   ],
   "scripts": {
-    "test": "npm run test:unit && npm run test:e2e:browser",
-    "test:unit": "node --test scripts/test/*.test.mjs",
+    "test": "npm run test:unit && npm run test:contract && npm run test:e2e:browser",
+    "test:unit": "node --test scripts/test/artifact.test.mjs scripts/test/process-manager.test.mjs scripts/test/test-workspace.test.mjs",
+    "test:contract": "node --test scripts/test/mock-services.test.mjs",
     "test:e2e:browser": "node scripts/test/run-browser-e2e.mjs",
     "test:e2e:browser:direct": "npm --workspace e2e test",
     "test:e2e:list": "node scripts/test/list-e2e-scenarios.mjs"
   },
   "devDependencies": {
-    "puppeteer": "^24.0.0"
+    "puppeteer": "^24.0.0",
+    "ws": "^8.18.3"
   }
 }

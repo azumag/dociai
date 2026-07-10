@@ -73,6 +73,8 @@ KEEP_TEST_WORKSPACE=1 npm run test:e2e:browser
 
 利用可能な個別シナリオは`npm run test:e2e:list`で確認できます。個別E2Eを直接実行する場合は、従来どおり別terminalでローカルserverを起動し、`npm --workspace e2e run <script>`を使用します。
 
+外部credentialや実serviceを使わないcontract test向けに、`e2e/mocks/`へscenario式mockを用意しています。AI、RSS/Atom、Todoist、VOICEVOX、棒読みちゃん、Twitch IRC、OAuth/Helix/EventSubをephemeral portで起動でき、`/__scenario`または`x-dociai-scenario`でsuccess・error・timeout等を切り替えられます。unit testではclock/randomを依存注入し、Browser E2Eでは実時間を使ってready endpointやprotocol eventを待つ方針です。固定sleepをservice readinessの代用にはしません。
+
 ## 中核コンセプト
 
 ```mermaid
