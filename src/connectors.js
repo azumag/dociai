@@ -5,6 +5,7 @@
 //   connector.describe() -> { id, provider, model, apiKeyMasked }
 
 import { maskApiKey } from "./security.js";
+import { cancelElectronAiRequest, chatThroughElectron, hasElectronAiService } from "./platform/electron-services.js";
 
 const BASE_URLS = {
   openai: "https://api.openai.com/v1",
@@ -28,7 +29,60 @@ export class ConnectorError extends Error {
   }
 }
 
+const SERVICE_ERROR_KINDS = {
+  AUTH: "auth",
+  RATE_LIMIT: "rate_limit",
+  TIMEOUT: "timeout",
+  NETWORK: "network",
+  SERVER: "server",
+  EMPTY: "empty",
+  BAD_REQUEST: "bad_request",
+  CANCELLED: "cancelled",
+};
+
+class ElectronMainConnector {
+  #sequence = 0;
+
+  constructor(id, cfg) {
+    this.id = id;
+    this.provider = cfg.provider;
+    this.model = cfg.model ?? (cfg.provider === "mock" ? "mock-1" : "");
+  }
+
+  describe() {
+    return { id: this.id, provider: this.provider, model: this.model, apiKeyMasked: this.provider === "mock" || this.provider === "ollama" ? "(不要)" : "(Main processで管理)" };
+  }
+
+  async chat(messages, opts = {}) {
+    const requestId = opts.requestId ?? `renderer-${Date.now()}-${++this.#sequence}`;
+    const result = await chatThroughElectron({
+      connectorId: this.id,
+      messages,
+      requestId,
+      generation: opts.generation,
+      ownerId: "console",
+      options: {
+        ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+        ...(opts.stream === true ? { stream: true } : {}),
+      },
+    });
+    if (result?.ok) return result.value;
+    const error = result?.error ?? { code: "UNKNOWN", message: "Main processから応答を取得できませんでした" };
+    throw new ConnectorError(`${this.id}: ${error.message}`, {
+      kind: SERVICE_ERROR_KINDS[error.code] ?? "unknown",
+      retryAfter: Number.isFinite(error.retryAfterMs) ? Math.ceil(error.retryAfterMs / 1000) : null,
+    });
+  }
+
+  async cancel(requestId) {
+    const result = await cancelElectronAiRequest(requestId);
+    return Boolean(result?.ok && result.value.cancelled);
+  }
+}
+
 export function createConnector(id, cfg, { log = () => {} } = {}) {
+  if (hasElectronAiService()) return new ElectronMainConnector(id, cfg);
   if (cfg.provider === "mock") return new MockConnector(id, cfg);
   if (cfg.provider === "minimax") return new MiniMaxConnector(id, cfg, { log });
   return new OpenAICompatibleConnector(id, cfg, { log });

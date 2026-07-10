@@ -1,5 +1,6 @@
 export function contentSecurityPolicy(devServerUrl?: string): string {
-  const connect = devServerUrl ? `${new URL(devServerUrl).origin} http: https: ws: wss:` : "'self' http: https: ws: wss:";
+  // Provider通信はMain processのみが担う。Rendererはアプリ自身と開発サーバー以外へ接続しない。
+  const connect = devServerUrl ? `${new URL(devServerUrl).origin} ws: wss:` : "'self'";
   return [
     "default-src 'self'",
     "base-uri 'none'",

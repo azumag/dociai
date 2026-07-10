@@ -5,6 +5,8 @@ export const CHANNELS = Object.freeze({
   SECRET_STATUS: "secrets:status",
   SECRET_SET: "secrets:set",
   SECRET_REMOVE: "secrets:remove",
+  AI_CHAT: "ai:chat",
+  AI_CANCEL: "ai:cancel",
   PLATFORM_GET_INFO: "platform:get-info",
   WINDOW_OBS_OPEN: "window:obs:open",
   WINDOW_OBS_CLOSE: "window:obs:close",

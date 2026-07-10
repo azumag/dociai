@@ -1,5 +1,6 @@
 import type { PlatformInfo } from "./platform";
 import type { PublicError } from "./errors";
+import type { AiChatInput, AiChatResponse } from "./services/ai-contract";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PublicError };
 export type WindowRole = "console" | "obs";
@@ -19,6 +20,10 @@ export type DociaiApi = {
     status(keys?: string[]): Promise<Result<SecretStatus[]>>;
     set(input: { key: string; value: string }): Promise<Result<{ saved: true; persistent: boolean }>>;
     remove(key: string): Promise<Result<{ removed: true }>>;
+  };
+  ai: {
+    chat(input: AiChatInput): Promise<Result<AiChatResponse>>;
+    cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
   };
   windows: {
     openObs(): Promise<Result<{ opened: true }>>;

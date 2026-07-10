@@ -5,6 +5,7 @@ import type { AppPaths } from "./paths";
 import { registerWindowRole, unregisterWindowRole } from "./window-roles";
 import type { WindowRole } from "../shared/ipc-contract";
 import { installNavigationPolicy } from "./security/navigation";
+import { CHANNELS } from "../shared/ipc-channels";
 
 type WindowState = { x?: number; y?: number; width: number; height: number };
 type WindowControllerOptions = { appPath: string; preloadPath: string; paths: AppPaths; devServerUrl?: string; isPackaged?: boolean };
@@ -88,6 +89,9 @@ export function createWindowController(options: WindowControllerOptions) {
     },
     getWindows() {
       return { console: consoleWindow, obs: obsWindow };
+    },
+    emitToConsole(type: string, event: unknown) {
+      if (consoleWindow && !consoleWindow.isDestroyed()) consoleWindow.webContents.send(CHANNELS.APP_EVENT, { type, event });
     },
     dispose() {
       saveWindowState(stateFile, consoleWindow);

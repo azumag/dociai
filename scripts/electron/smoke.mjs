@@ -59,19 +59,40 @@ try {
     platform: await window.dociai.platform.getInfo(),
     keys: Object.keys(window.dociai).sort(),
     csp: (await fetch(location.href)).headers.get("content-security-policy"),
+    rendererConfig: await (await fetch("./config.local.json")).text(),
     browserGlobals: { require: typeof window.require, process: typeof window.process, ipcRenderer: typeof window.ipcRenderer },
     invalidExternal: await window.dociai.system.openExternal("javascript:alert(1)"),
   }));
   assert.equal(checks.platform.ok, true, JSON.stringify(checks.platform));
   assert.equal(checks.platform.value.runtime, "electron");
-  assert.deepEqual(checks.keys, ["config", "events", "platform", "secrets", "system", "windows"]);
+  assert.deepEqual(checks.keys, ["ai", "config", "events", "platform", "secrets", "system", "windows"]);
   assert.match(checks.csp ?? "", /object-src 'none'/);
+  assert.match(checks.csp ?? "", /connect-src 'self'/);
+  assert.doesNotMatch(checks.csp ?? "", /connect-src[^;]*(?:https?:|wss?:)/);
+  assert.doesNotMatch(checks.rendererConfig, /sk-\.\.\.|or-\.\.\.|smoke-secret/);
   assert.deepEqual(checks.browserGlobals, { require: "undefined", process: "undefined", ipcRenderer: "undefined" });
   assert.equal(checks.invalidExternal.ok, false);
   const configResult = await consolePage.evaluate(() => window.dociai.config.get());
   assert.equal(configResult.ok, true, JSON.stringify(configResult));
   assert.equal(typeof configResult.value.revision, "string");
-  assert.doesNotMatch(JSON.stringify(configResult.value.config), /apiKey|access_token|secret-value/);
+  assert.doesNotMatch(JSON.stringify(configResult.value.config), /sk-\.\.\.|or-\.\.\.|secret-value/);
+  const configuredMock = await consolePage.evaluate(async ({ config, revision }) => {
+    const next = structuredClone(config);
+    next.connectors = { ...(next.connectors ?? {}), smoke: { provider: "mock", model: "mock-1" } };
+    const saved = await window.dociai.config.save({ config: next, expectedRevision: revision });
+    if (!saved.ok) return { saved };
+    const tokens = [];
+    const unsubscribe = window.dociai.events.subscribe("ai:token", (event) => tokens.push(event));
+    const chat = await window.dociai.ai.chat({ connectorId: "smoke", requestId: "smoke-request", messages: [{ role: "user", content: "smoke" }], options: { stream: true } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    unsubscribe();
+    return { saved, chat, tokens };
+  }, configResult.value);
+  assert.equal(configuredMock.saved.ok, true, JSON.stringify(configuredMock));
+  assert.equal(configuredMock.chat.ok, true, JSON.stringify(configuredMock));
+  assert.match(configuredMock.chat.value.text, /モック応答/);
+  assert.equal(configuredMock.tokens.length, 1, JSON.stringify(configuredMock.tokens));
+  assert.equal(configuredMock.tokens[0].requestId, "smoke-request");
   const secretSet = await consolePage.evaluate(() => window.dociai.secrets.set({ key: "connector.smoke.apiKey", value: "smoke-secret" }));
   assert.equal(secretSet.ok, true, JSON.stringify(secretSet));
   const secretStatus = await consolePage.evaluate(() => window.dociai.secrets.status(["connector.smoke.apiKey"]));

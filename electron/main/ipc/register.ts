@@ -9,10 +9,22 @@ import type { AppPaths } from "../paths";
 import { ConfigRepository } from "../config/config-repository";
 import type { SecretStore } from "../../shared/secret-contract";
 import { parseSecretKey } from "../secrets/secret-keys";
+import { AiService } from "../services/ai/ai-service";
+import type { AiChatInput, AiMessage } from "../../shared/services/ai-contract";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
+
+function parseAiMessages(value: unknown): AiMessage[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 64) throw new PublicIpcError("INVALID_INPUT", "messagesは1〜64件の配列で指定してください");
+  return value.map((raw) => {
+    const message = expectRecord(raw, "AI message");
+    if (message.role !== "system" && message.role !== "user" && message.role !== "assistant") throw new PublicIpcError("INVALID_INPUT", "message roleが不正です");
+    if (!("content" in message)) throw new PublicIpcError("INVALID_INPUT", "message contentが必要です");
+    return { role: message.role, content: message.content };
+  });
+}
 
 function register<T>(channel: string, handler: Handler<T>, options: RegisterOptions, roles = ["console"] as const): void {
   ipcMain.handle(channel, async (event, input): Promise<Result<T>> => {
@@ -63,6 +75,15 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     await options.secretStore.remove(key);
     return { removed: true };
   }, options);
+  register(CHANNELS.AI_CHAT, async (event, input) => {
+    const payload = expectRecord(input, "AI request");
+    const connectorId = expectString(payload.connectorId, "connectorId", 128);
+    const messages = parseAiMessages(payload.messages);
+    const optionsValue = payload.options === undefined ? undefined : expectRecord(payload.options, "AI options");
+    if (optionsValue && optionsValue.stream !== undefined && typeof optionsValue.stream !== "boolean") throw new PublicIpcError("INVALID_INPUT", "streamが不正です");
+    return options.aiService.chat({ connectorId, messages, ...(optionsValue ? { options: optionsValue as AiChatInput["options"] } : {}), ...(typeof payload.requestId === "string" ? { requestId: payload.requestId } : {}), ...(typeof payload.generation === "number" && Number.isSafeInteger(payload.generation) ? { generation: payload.generation } : {}), ...(typeof payload.ownerId === "string" ? { ownerId: payload.ownerId } : {}) });
+  }, options);
+  register(CHANNELS.AI_CANCEL, (event, input) => ({ cancelled: options.aiService.cancel(expectString(input, "requestId", 256)) }), options);
   register(CHANNELS.WINDOW_OBS_OPEN, (event, input) => { expectNoInput(input); options.controller.openObsWindow(); return { opened: true }; }, options);
   register(CHANNELS.WINDOW_OBS_CLOSE, (event, input) => { expectNoInput(input); options.controller.closeObsWindow(); return { closed: true }; }, options);
   register(CHANNELS.WINDOW_STATE_GET, (event, input) => {
