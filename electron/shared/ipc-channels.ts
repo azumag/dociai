@@ -1,6 +1,7 @@
 export const CHANNELS = Object.freeze({
   CONFIG_GET: "config:get",
   CONFIG_SAVE: "config:save",
+  CONFIG_IMPORT_LEGACY: "config:import-legacy",
   SECRET_STATUS: "secrets:status",
   SECRET_SET: "secrets:set",
   SECRET_REMOVE: "secrets:remove",

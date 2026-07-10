@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { app, protocol } from "electron";
+import { app, protocol, safeStorage } from "electron";
 import { ensureAppPaths, resolveAppPaths } from "./paths";
 import { createWindowController } from "./windows";
+import { ConfigRepository } from "./config/config-repository";
+import { SafeStorageSecretStore } from "./secrets/safe-storage-secret-store";
 import { installCspPolicy, securityHeaders } from "./security/csp";
 import { installPermissionPolicy } from "./security/permissions";
 import { registerIpcHandlers } from "./ipc/register";
@@ -31,6 +33,8 @@ if (!hasLock) {
     ensureAppPaths(paths);
     const appPath = app.getAppPath();
     const devServerUrl = process.env.DOCIAI_DEV_SERVER_URL;
+    const configRepository = new ConfigRepository(paths, path.join(appPath, "config.local.json"));
+    const secretStore = new SafeStorageSecretStore(safeStorage, paths.secretsFile, paths.secretsBackupFile);
     installCspPolicy(devServerUrl);
     installPermissionPolicy(devServerUrl);
 
@@ -59,7 +63,7 @@ if (!hasLock) {
     }
 
     controller = createWindowController({ appPath, preloadPath: path.join(appPath, "preload.cjs"), paths, devServerUrl, isPackaged: app.isPackaged });
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, devServerUrl });
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     controller.createConsoleWindow();
     app.on("activate", () => controller?.createConsoleWindow());

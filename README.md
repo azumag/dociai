@@ -52,6 +52,11 @@ window、system、events）だけを公開します。IPCはMain側でsender/ori
 HTTPSに限定します。CSP、navigation、permission policyもElectron側で適用されます。
 Browser版の`python3 scripts/serve.py`起動は引き続き利用できます。
 
+Electron版の一般設定はuserDataの`config.json`へ、秘密情報はOSの`safeStorage`で暗号化した
+`secrets.enc.json`へ分離します。暗号化が利用できない環境では平文保存せず、明示的なsession限定の
+memory storeへfallbackします。Rendererへはsecret実値を返さず、`window.dociai.secrets`はstatus/set/remove
+だけを提供します。legacy `config.local.json`はIPCのpreviewでsecret候補を確認してからimportできます。
+
 ### APIキーなしで試す
 
 `config.local.example.json` にはモックコネクタとテスト用ペルソナが入っているため、
