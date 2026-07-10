@@ -18,10 +18,18 @@
     "test:contract": "node --test scripts/test/mock-services.test.mjs",
     "test:e2e:browser": "node scripts/test/run-browser-e2e.mjs",
     "test:e2e:browser:direct": "npm --workspace e2e test",
-    "test:e2e:list": "node scripts/test/list-e2e-scenarios.mjs"
+    "test:e2e:list": "node scripts/test/list-e2e-scenarios.mjs",
+    "electron:build": "node scripts/electron/build.mjs",
+    "electron:start": "npm run electron:build && electron dist/electron/main.cjs",
+    "test:electron": "npm run electron:build && node scripts/electron/smoke.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.electron.json"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
+    "electron": "^43.1.0",
+    "esbuild": "^0.28.1",
     "puppeteer": "^24.0.0",
+    "typescript": "^7.0.2",
     "ws": "^8.18.3"
   }
 }
