@@ -30,15 +30,15 @@ async function waitForJson(url, timeoutMs = 15_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`Timed out waiting for ${url}: ${lastError?.message ?? "no response"}`);
+  throw new Error(`Timed out waiting for ${url}: ${lastError?.message ?? "no response"}\n--- child logs ---\n${logs.join("")}`);
 }
 
 try {
   child = spawn(electronBinary, [
-    path.join(repoRoot, "dist/electron/main.cjs"),
     `--remote-debugging-port=${port}`,
     "--headless",
     `--user-data-dir=${userDataDir}`,
+    path.join(repoRoot, "dist/electron/main.cjs"),
   ], {
     cwd: repoRoot,
     env: { ...process.env, ELECTRON_ENABLE_LOGGING: "1" },
