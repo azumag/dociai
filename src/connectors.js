@@ -29,6 +29,27 @@ export class ConnectorError extends Error {
   }
 }
 
+function cancelledError(id) { return new ConnectorError(`${id}: リクエストはキャンセルされました`, { kind: "cancelled" }); }
+
+function requestSignal(parent, timeoutMs) {
+  const controller = new AbortController();
+  const abortParent = () => controller.abort(parent?.reason ?? new DOMException("Aborted", "AbortError"));
+  if (parent?.aborted) abortParent();
+  else parent?.addEventListener("abort", abortParent, { once: true });
+  const timer = setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), timeoutMs);
+  return { signal: controller.signal, wasCancelled: () => Boolean(parent?.aborted), dispose: () => { clearTimeout(timer); parent?.removeEventListener("abort", abortParent); } };
+}
+
+function abortableDelay(ms, signal) {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+  if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
+    const onAbort = () => { clearTimeout(timer); reject(signal.reason ?? new DOMException("Aborted", "AbortError")); };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 const SERVICE_ERROR_KINDS = {
   AUTH: "auth",
   RATE_LIMIT: "rate_limit",
@@ -55,17 +76,22 @@ class ElectronMainConnector {
 
   async chat(messages, opts = {}) {
     const requestId = opts.requestId ?? `renderer-${Date.now()}-${++this.#sequence}`;
-    const result = await chatThroughElectron({
+    if (opts.signal?.aborted) throw cancelledError(this.id);
+    const response = chatThroughElectron({
       connectorId: this.id,
       messages,
       requestId,
-      generation: opts.generation,
       ownerId: "console",
       options: {
         ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
         ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
         ...(opts.stream === true ? { stream: true } : {}),
       },
+    });
+    const result = await new Promise((resolve, reject) => {
+      const cancel = () => { void cancelElectronAiRequest(requestId); reject(cancelledError(this.id)); };
+      opts.signal?.addEventListener("abort", cancel, { once: true });
+      response.then(resolve, reject).finally(() => opts.signal?.removeEventListener("abort", cancel));
     });
     if (result?.ok) return result.value;
     const error = result?.error ?? { code: "UNKNOWN", message: "Main processから応答を取得できませんでした" };
@@ -173,9 +199,8 @@ class OpenAICompatibleConnector {
     return chatWithRetry(this.id, this.retries, this.log, (...args) => this.#chatOnce(...args), messages, opts);
   }
 
-  async #chatOnce(messages, { maxTokens = 300, temperature } = {}) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+  async #chatOnce(messages, { maxTokens = 300, temperature, signal: parentSignal } = {}) {
+    const request = requestSignal(parentSignal, this.timeoutMs);
     let res;
     try {
       res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -187,15 +212,16 @@ class OpenAICompatibleConnector {
           max_tokens: maxTokens,
           ...(temperature != null ? { temperature } : {}),
         }),
-        signal: controller.signal,
+        signal: request.signal,
       });
     } catch (e) {
-      if (e.name === "AbortError") {
+      if (request.signal.aborted && request.wasCancelled()) throw cancelledError(this.id);
+      if (e.name === "AbortError" || request.signal.aborted) {
         throw new ConnectorError(`${this.id}: ${formatTimeout(this.timeoutMs)}でタイムアウトしました`, { kind: "timeout" });
       }
       throw new ConnectorError(`${this.id}: 接続できません (${e.message})`, { kind: "network" });
     } finally {
-      clearTimeout(timer);
+      request.dispose();
     }
 
     if (!res.ok) throw await this.#httpError(res);
@@ -253,10 +279,9 @@ class MiniMaxConnector {
     return chatWithRetry(this.id, this.retries, this.log, (...args) => this.#chatOnce(...args), messages, opts);
   }
 
-  async #chatOnce(messages, { maxTokens = 300, temperature } = {}) {
+  async #chatOnce(messages, { maxTokens = 300, temperature, signal: parentSignal } = {}) {
     const { system, messages: anthropicMessages } = toAnthropicMessages(messages);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const request = requestSignal(parentSignal, this.timeoutMs);
     let res;
     try {
       res = await fetch(`${this.baseUrl}/v1/messages`, {
@@ -273,15 +298,16 @@ class MiniMaxConnector {
           ...(system ? { system } : {}),
           ...(temperature != null ? { temperature } : {}),
         }),
-        signal: controller.signal,
+        signal: request.signal,
       });
     } catch (e) {
-      if (e.name === "AbortError") {
+      if (request.signal.aborted && request.wasCancelled()) throw cancelledError(this.id);
+      if (e.name === "AbortError" || request.signal.aborted) {
         throw new ConnectorError(`${this.id}: ${formatTimeout(this.timeoutMs)}でタイムアウトしました`, { kind: "timeout" });
       }
       throw new ConnectorError(`${this.id}: 接続できません (${e.message})`, { kind: "network" });
     } finally {
-      clearTimeout(timer);
+      request.dispose();
     }
 
     if (!res.ok) throw await this.#httpError(res);
@@ -340,8 +366,8 @@ class MockConnector {
     return { id: this.id, provider: this.provider, model: this.model, apiKeyMasked: "(不要)" };
   }
 
-  async chat(messages) {
-    await new Promise((r) => setTimeout(r, this.delayMs));
+  async chat(messages, { signal } = {}) {
+    try { await abortableDelay(this.delayMs, signal); } catch { throw cancelledError(this.id); }
     const last = [...messages].reverse().find((m) => m.role === "user");
     if (Array.isArray(last?.content) && last.content.some((p) => p.type === "image_url")) {
       return { text: "モック画面認識: エディタらしき画面が映っています。コードを書いている様子です。", usage: null };

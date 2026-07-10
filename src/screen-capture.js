@@ -2,6 +2,8 @@
 // getDisplayMedia で画面/ウィンドウ/タブを共有し、任意タイミングでフレームを
 // Visionモデルへ送って screenSummary を更新する。maxAgeSeconds を超えた説明は使わない。
 
+import { RequestCancelledError } from "./runtime/request-registry.js";
+
 export class ScreenContext {
   constructor({ config, getConnector, log = () => {} }) {
     this.cfg = config.context?.screenCapture ?? {};
@@ -55,7 +57,7 @@ export class ScreenContext {
   }
 
   // フレームを取り込み、Visionコネクタで説明文を生成して保持する
-  async updateContext() {
+  async updateContext(context = {}) {
     if (this.updating) throw new Error("画面の読み取りが進行中です");
     const connectorId = this.cfg.connector;
     if (!connectorId) throw new Error("context.screenCapture.connector が設定されていません");
@@ -76,14 +78,18 @@ export class ScreenContext {
           ],
         },
       ];
-      const { text } = await connector.chat(messages, { maxTokens: this.cfg.maxTokens ?? 768 });
+      const { text } = await connector.chat(messages, { maxTokens: this.cfg.maxTokens ?? 768, signal: context.signal, requestId: context.requestId, generation: context.generation });
+      if (context.signal?.aborted || (context.isCurrent && !context.isCurrent())) throw new RequestCancelledError("画面の読み取りは設定変更で停止しました", "stale-generation");
       this.summary = text;
       this.capturedAt = Date.now();
       this.log(`画面文脈を更新: ${text}`);
       return text;
     } finally {
-      this.updating = false;
-      this.#notify();
+      const stale = context.isCurrent && !context.isCurrent();
+      if (!stale) {
+        this.updating = false;
+        this.#notify();
+      }
     }
   }
 
