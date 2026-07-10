@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dociai-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PUPPETEER_CACHE_DIR: ~/.cache/puppeteer
+  ELECTRON_CACHE: ~/.cache/electron
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Contract tests
+        run: npm run test:contract
+
+  browser-e2e:
+    name: browser-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Cache managed Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: puppeteer-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install dependencies
+        run: npm ci
+      - name: Install managed Chromium
+        run: npx puppeteer browsers install chrome
+      - name: Browser E2E
+        env:
+          TEST_ARTIFACTS_DIR: ${{ github.workspace }}/test-results/browser
+        run: node scripts/ci/run-browser-e2e.mjs
+      - name: Assert process cleanup
+        if: always()
+        run: node scripts/ci/assert-no-process-leaks.mjs
+      - name: Collect diagnostics summary
+        if: failure()
+        env:
+          TEST_ARTIFACTS_DIR: ${{ github.workspace }}/test-results/browser
+        run: node scripts/ci/collect-diagnostics.mjs
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-e2e-diagnostics-${{ github.run_id }}
+          path: test-results
+          if-no-files-found: warn
+          retention-days: 14
+
+  electron-smoke:
+    name: electron-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install dependencies
+        run: npm ci
+      - name: Build Electron
+        run: npm run electron:build
+      - name: Electron smoke
+        env:
+          TEST_ARTIFACTS_DIR: ${{ github.workspace }}/test-results/electron
+          # GitHub's unprivileged runner cannot preserve Electron's SUID helper mode after npm ci.
+          ELECTRON_SMOKE_NO_SANDBOX: "1"
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" node scripts/ci/run-electron-smoke.mjs
+      - name: Assert process cleanup
+        if: always()
+        run: node scripts/ci/assert-no-process-leaks.mjs
+      - name: Collect diagnostics summary
+        if: failure()
+        env:
+          TEST_ARTIFACTS_DIR: ${{ github.workspace }}/test-results/electron
+        run: node scripts/ci/collect-diagnostics.mjs
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-smoke-diagnostics-${{ github.run_id }}
+          path: test-results
+          if-no-files-found: warn
+          retention-days: 14
