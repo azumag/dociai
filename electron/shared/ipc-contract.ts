@@ -1,6 +1,8 @@
 import type { PlatformInfo } from "./platform";
 import type { PublicError } from "./errors";
 import type { AiChatInput, AiChatResponse } from "./services/ai-contract";
+import type { FeedFetchInput, FeedFetchResponse } from "./services/feed-contract";
+import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./services/topic-contract";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PublicError };
 export type WindowRole = "console" | "obs";
@@ -23,6 +25,15 @@ export type DociaiApi = {
   };
   ai: {
     chat(input: AiChatInput): Promise<Result<AiChatResponse>>;
+    cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
+  };
+  feeds: {
+    fetch(input: FeedFetchInput): Promise<Result<FeedFetchResponse>>;
+    cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
+  };
+  topics: {
+    fetch(input: TopicFetchInput): Promise<Result<TopicFetchResponse>>;
+    complete(input: TopicCompleteInput): Promise<Result<{ completed: true; requestId: string }>>;
     cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
   };
   windows: {

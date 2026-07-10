@@ -53,7 +53,7 @@ try {
   browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}` });
   const pages = await browser.pages();
   consolePage = pages.find((page) => page.url().includes("/index.html"));
-  if (!consolePage) throw new Error(`Console window was not loaded. pages=${pages.map((page) => page.url()).join(",")}`);
+  if (!consolePage) throw new Error(`Console window was not loaded. pages=${pages.map((page) => page.url()).join(",")}\n--- child logs ---\n${logs.join("")}`);
   await consolePage.waitForSelector("body", { timeout: 10_000 });
   const checks = await consolePage.evaluate(async () => ({
     platform: await window.dociai.platform.getInfo(),
@@ -65,13 +65,16 @@ try {
   }));
   assert.equal(checks.platform.ok, true, JSON.stringify(checks.platform));
   assert.equal(checks.platform.value.runtime, "electron");
-  assert.deepEqual(checks.keys, ["ai", "config", "events", "platform", "secrets", "system", "windows"]);
+  assert.deepEqual(checks.keys, ["ai", "config", "events", "feeds", "platform", "secrets", "system", "topics", "windows"]);
   assert.match(checks.csp ?? "", /object-src 'none'/);
   assert.match(checks.csp ?? "", /connect-src 'self'/);
   assert.doesNotMatch(checks.csp ?? "", /connect-src[^;]*(?:https?:|wss?:)/);
   assert.doesNotMatch(checks.rendererConfig, /sk-\.\.\.|or-\.\.\.|smoke-secret/);
+  assert.doesNotMatch(checks.rendererConfig, /"(?:apiKey|token)"\s*:/);
   assert.deepEqual(checks.browserGlobals, { require: "undefined", process: "undefined", ipcRenderer: "undefined" });
   assert.equal(checks.invalidExternal.ok, false);
+  const serviceCancels = await consolePage.evaluate(async () => ({ feed: await window.dociai.feeds.cancel("no-feed-request"), topic: await window.dociai.topics.cancel("no-topic-request") }));
+  assert.deepEqual(serviceCancels, { feed: { ok: true, value: { cancelled: false } }, topic: { ok: true, value: { cancelled: false } } });
   const configResult = await consolePage.evaluate(() => window.dociai.config.get());
   assert.equal(configResult.ok, true, JSON.stringify(configResult));
   assert.equal(typeof configResult.value.revision, "string");
