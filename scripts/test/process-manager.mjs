@@ -4,6 +4,7 @@ const DEFAULT_STOP_TIMEOUT_MS = 5_000;
 
 export class ManagedProcess {
   #child;
+  #exitPromise;
   #logs = [];
   #stopped = false;
 
@@ -39,6 +40,10 @@ export class ManagedProcess {
     this.#child.on("error", (error) => {
       this.#logs.push(`[spawn-error] ${error.stack ?? error.message}\n`);
     });
+    this.#exitPromise = new Promise((resolve, reject) => {
+      this.#child.once("error", reject);
+      this.#child.once("exit", (code, signal) => resolve({ code, signal }));
+    });
 
     return this;
   }
@@ -52,11 +57,8 @@ export class ManagedProcess {
   }
 
   async waitForExit() {
-    if (!this.#child) throw new Error(`${this.name} has not been started`);
-    return await new Promise((resolve, reject) => {
-      this.#child.once("error", reject);
-      this.#child.once("exit", (code, signal) => resolve({ code, signal }));
-    });
+    if (!this.#exitPromise) throw new Error(`${this.name} has not been started`);
+    return await this.#exitPromise;
   }
 
   async stop({ timeoutMs = DEFAULT_STOP_TIMEOUT_MS } = {}) {
@@ -66,7 +68,7 @@ export class ManagedProcess {
     const child = this.#child;
     if (child.exitCode !== null) return;
 
-    const exited = new Promise((resolve) => child.once("exit", resolve));
+    const exited = this.#exitPromise.catch(() => undefined);
     terminateTree(child, "SIGTERM");
 
     const timedOut = await Promise.race([
