@@ -14,7 +14,7 @@ import { validateConfig } from "./config-loader.js";
 
 const PROVIDERS = ["openai", "openrouter", "openai-compatible", "ollama", "minimax", "mock"];
 const TRIGGER_TYPES = ["keyword", "hotkey", "interval", "random", "manual"];
-const VOICE_ENGINES = ["webspeech", "voicevox"];
+const VOICE_ENGINES = ["webspeech", "voicevox", "bouyomi"];
 const NEWS_MODES = ["topic", "current", "simple"];
 const NEWS_SOURCE_TYPES = ["rss", "mock"];
 const TOPIC_SOURCE_TYPES = ["todoist"];
@@ -159,6 +159,7 @@ export class SettingsUI {
       ["triggers", "トリガー", "発火条件"],
       ["context", "画面・文脈", "vision / 履歴"],
       ["voicevox", "VOICEVOX", "音声合成エンジン"],
+      ["bouyomi", "棒読みちゃん", "HTTP 読み上げ連携"],
       ["micMonitor", "マイク監視", "発話で読み上げを保留"],
       ["commentReader", "コメント読み上げ", "全コメントを音声で読み上げ"],
       ["news", "ニュース", "RSS / 要約"],
@@ -229,6 +230,7 @@ export class SettingsUI {
     else if (tab === "triggers") this.#renderTriggers();
     else if (tab === "context") this.#renderContext();
     else if (tab === "voicevox") this.#renderVoicevox();
+    else if (tab === "bouyomi") this.#renderBouyomi();
     else if (tab === "micMonitor") this.#renderMicMonitor();
     else if (tab === "commentReader") this.#renderCommentReader();
     else if (tab === "news") this.#renderNews();
@@ -774,6 +776,30 @@ export class SettingsUI {
     this._body.append(note);
   }
 
+  // ---- bouyomi (issue #30) ----
+  #renderBouyomi() {
+    const b = this.draft.bouyomi ?? {};
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = "棒読みちゃん HTTP 連携";
+    const { card, body: cardBody } = this.#card([title]);
+    cardBody.append(this.#pathCheckbox("bouyomi.enabled", "bouyomi.enabled", { value: b.enabled }));
+    const g = document.createElement("div");
+    g.className = "card-grid";
+    g.append(this.#pathField("baseUrl", "bouyomi.baseUrl", { value: b.baseUrl ?? "http://127.0.0.1:50080", attrs: { spellcheck: "false" } }));
+    g.append(this.#pathField("timeoutMs (ms)", "bouyomi.timeoutMs", { type: "number", value: b.timeoutMs ?? 5000 }));
+    g.append(this.#pathField("voice", "bouyomi.voice", { type: "number", value: b.voice ?? 0 }));
+    g.append(this.#pathField("volume", "bouyomi.volume", { type: "number", value: b.volume ?? -1 }));
+    g.append(this.#pathField("speed", "bouyomi.speed", { type: "number", value: b.speed ?? -1 }));
+    g.append(this.#pathField("tone", "bouyomi.tone", { type: "number", value: b.tone ?? -1 }));
+    cardBody.append(g);
+    this._body.append(card);
+    const note = document.createElement("p");
+    note.className = "muted settings-note";
+    note.textContent = "棒読みちゃんの「HTTP連携」を有効にし、通常は 127.0.0.1:50080 を使います。コメント読み上げまたはペルソナ音声の engine に bouyomi を選択してください。";
+    this._body.append(note);
+  }
+
   // ---- micMonitor (issue #32) ----
   #renderMicMonitor() {
     const m = this.draft.micMonitor ?? {};
@@ -820,6 +846,7 @@ export class SettingsUI {
       g.append(this.#pathField("rate", "commentReader.rate", { type: "number", value: cr.rate ?? 1.0, attrs: { step: "0.1" } }));
       g.append(this.#pathField("pitch", "commentReader.pitch", { type: "number", value: cr.pitch ?? 1.0, attrs: { step: "0.1" } }));
       g.append(this.#pathField("speaker (voicevox話者ID)", "commentReader.speaker", { type: "number", value: cr.speaker ?? "" }));
+      g.append(this.#pathField("voice (棒読みちゃん話者)", "commentReader.voice", { type: "number", value: cr.voice ?? this.draft.bouyomi?.voice ?? 0 }));
       cardBody.append(g);
       cardBody.append(this.#pathCheckbox("ユーザー名を読み上げる", "commentReader.includeAuthor", { value: cr.includeAuthor !== false }));
       cardBody.append(this.#pathCheckbox("エモートを読み上げない", "commentReader.skipEmotes", { value: !!cr.skipEmotes }));

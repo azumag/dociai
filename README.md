@@ -74,7 +74,7 @@ flowchart TD
 | `PersonaRouter` | `src/persona-router.js` | 反応するペルソナを選び、最大応答数とクールダウンを守る |
 | `AIConnector` | `src/connectors.js` | OpenAI / OpenRouter / OpenAI互換 / モックを抽象化する |
 | `ContextBuilder` | `src/context-builder.js` | コメント・画面・ニュース・話題文脈をプロンプトにまとめる |
-| `SpeechQueue` | `src/speech-queue.js` | Web Speech APIで順番に読み上げ、停止/スキップ/全消去を制御する |
+| `SpeechQueue` | `src/speech-queue.js` | Web Speech API / VOICEVOX / 棒読みちゃんで順番に読み上げ、停止/スキップ/全消去を制御する |
 | `MicMonitor` | `src/mic-monitor.js` | マイク入力の発話を検知し、発話中は音声キューを保留、無音に戻ると再開する (issue #32) |
 | `NewsReader` | `src/news-reader.js` | RSSからニュースを取得し、要約して読み上げキューへ入れる |
 | `TopicReader` | `src/topic-reader.js` | Todoistから話題を取得し、AIコメントとして読み上げキューへ入れる |

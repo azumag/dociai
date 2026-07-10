@@ -10,6 +10,7 @@ import { TriggerEngine } from "./trigger-engine.js";
 import { PersonaRouter } from "./persona-router.js";
 import { SpeechQueue } from "./speech-queue.js";
 import { VoiceVoxClient } from "./voicevox.js";
+import { BouyomiClient } from "./bouyomi.js";
 import { ScreenContext } from "./screen-capture.js";
 import { MicMonitor } from "./mic-monitor.js";
 import { NewsReader } from "./news-reader.js";
@@ -259,7 +260,17 @@ async function applyLoaded({ config, warnings, source }) {
           log: (m) => logEvent(m),
         })
       : null,
+    bouyomi: config.bouyomi?.enabled
+      ? new BouyomiClient({
+          baseUrl: config.bouyomi.baseUrl,
+          timeoutMs: config.bouyomi.timeoutMs,
+          defaults: config.bouyomi,
+        })
+      : null,
   });
+  if (config.bouyomi?.enabled) {
+    logEvent(`棒読みちゃん連携を有効化: ${config.bouyomi.baseUrl}`);
+  }
   if (config.voicevox?.enabled) {
     state.speechQueue.voicevox
       ?.speakers()

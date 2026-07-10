@@ -1,7 +1,8 @@
-// 音声読み上げキュー (issue #8, #17)
-// 2つのバックエンドを持つ:
+// 音声読み上げキュー (issue #8, #17, #30)
+// 3つのバックエンドを持つ:
 //   - webspeech: 従来の Web Speech API (ブラウザ内蔵)
 //   - voicevox : VOICEVOX engine (ローカル/リモート)。長文はチャンクに分けて順次再生する。
+//   - bouyomi  : 棒読みちゃん HTTP API。送信後の再生順は棒読みちゃん側のキューが管理する。
 // 状態: waiting -> speaking -> done | skipped | failed
 
 import { VoiceVoxClient, VoiceVoxError, chunkText } from "./voicevox.js";
@@ -11,7 +12,7 @@ let seq = 0;
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
 export class SpeechQueue {
-  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null } = {}) {
+  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null } = {}) {
     this.items = [];
     this.current = null;
     this.paused = false;
@@ -20,6 +21,7 @@ export class SpeechQueue {
     this.onUpdate = onUpdate;
     this.log = log;
     this.voicevox = voicevox ?? null; // VoiceVoxClient | null
+    this.bouyomi = bouyomi ?? null; // BouyomiClient | null
     this.supported = typeof window !== "undefined" && "speechSynthesis" in window;
     if (this.supported) {
       speechSynthesis.getVoices();
@@ -74,6 +76,7 @@ export class SpeechQueue {
       if (item.state === "waiting") this.#setState(item, "skipped");
     }
     this.#cancelCurrent();
+    this.bouyomi?.clear().catch((e) => this.log(`棒読みちゃんのキュー消去に失敗: ${e.message}`));
     this.log("音声キューを全消去しました");
     this.onUpdate(this.items, this);
   }
@@ -116,6 +119,16 @@ export class SpeechQueue {
     this.#setState(item, "speaking");
 
     const engine = item.voice?.engine || (this.voicevox ? "voicevox" : "webspeech");
+    if (engine === "bouyomi" && this.bouyomi) {
+      this.bouyomi.talk(item.text, item.voice).then(
+        () => this.#finish(item, "done"),
+        (e) => {
+          item.error = `棒読みちゃん送信失敗: ${e.message}`;
+          this.#finish(item, "failed");
+        },
+      );
+      return;
+    }
     if (engine === "voicevox" && this.voicevox) {
       this.#speakVoiceVox(item).catch((e) => {
         item.error = `VOICEVOX 読み上げ失敗: ${e.message}`;
