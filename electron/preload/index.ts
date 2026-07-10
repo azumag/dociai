@@ -24,6 +24,7 @@ const api: DociaiApi = {
   config: {
     get: () => invoke(CHANNELS.CONFIG_GET),
     save: (input) => invoke(CHANNELS.CONFIG_SAVE, input),
+    importLegacy: (confirm = false) => invoke(CHANNELS.CONFIG_IMPORT_LEGACY, { confirm }),
   },
   secrets: {
     status: (keys) => invoke(CHANNELS.SECRET_STATUS, keys),

@@ -68,6 +68,16 @@ try {
   assert.match(checks.csp ?? "", /object-src 'none'/);
   assert.deepEqual(checks.browserGlobals, { require: "undefined", process: "undefined", ipcRenderer: "undefined" });
   assert.equal(checks.invalidExternal.ok, false);
+  const configResult = await consolePage.evaluate(() => window.dociai.config.get());
+  assert.equal(configResult.ok, true, JSON.stringify(configResult));
+  assert.equal(typeof configResult.value.revision, "string");
+  assert.doesNotMatch(JSON.stringify(configResult.value.config), /apiKey|access_token|secret-value/);
+  const secretSet = await consolePage.evaluate(() => window.dociai.secrets.set({ key: "connector.smoke.apiKey", value: "smoke-secret" }));
+  assert.equal(secretSet.ok, true, JSON.stringify(secretSet));
+  const secretStatus = await consolePage.evaluate(() => window.dociai.secrets.status(["connector.smoke.apiKey"]));
+  assert.equal(secretStatus.ok, true, JSON.stringify(secretStatus));
+  assert.equal(secretStatus.value[0].configured, true);
+  await consolePage.evaluate(() => window.dociai.secrets.remove("connector.smoke.apiKey"));
   await consolePage.evaluate(() => window.dociai.windows.openObs());
   await waitForJson(`http://127.0.0.1:${port}/json/list`);
   const withObs = await browser.pages();

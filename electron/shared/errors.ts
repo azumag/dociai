@@ -1,6 +1,7 @@
 export type PublicErrorCode =
   | "INVALID_INPUT"
   | "FORBIDDEN"
+  | "CONFIG_CONFLICT"
   | "NOT_FOUND"
   | "NOT_IMPLEMENTED"
   | "INTERNAL_ERROR";
