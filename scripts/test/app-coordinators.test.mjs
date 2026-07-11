@@ -17,6 +17,15 @@ test("ResponseCoordinator delivers final text once to store, OBS, and speech", a
   assert.equal(coordinator.dispose(), true); assert.equal(coordinator.dispose(), false);
 });
 
+test("ResponseCoordinator commits a selected reservation and releases it when the connector is missing", () => {
+  const persona = { id: "p", name: "P", connector: "missing", voice: {} };
+  const selection = { persona, reservation: { id: "r" } };
+  const calls = [];
+  const coordinator = new ResponseCoordinator({ runtime: { createRequest() {} }, getGeneration: () => 1, getConnector: () => null, personaRouter: { select: () => ({ selected: [selection], skipped: [] }), releaseSelection: (value) => calls.push(value) }, contextBuilder: {}, speechQueue: {}, onError() {} });
+  assert.deepEqual(coordinator.handleTrigger("trigger"), [persona]);
+  assert.deepEqual(calls, [selection]);
+});
+
 test("SourceCoordinator stops old sources before starting new and ignores stale events", async () => {
   const order = [], comments = [];
   let current = true;

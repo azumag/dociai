@@ -1,14 +1,18 @@
 // ペルソナルーター (issue #4)
 // どのペルソナが反応するかを決め、maxRepliesPerComment と cooldownSeconds を守る。
 
+import { commentResponseBudgetKey } from "./personas/response-budget-key.js";
+import { ResponseBudgetTracker } from "./personas/response-budget-tracker.js";
+
 export class PersonaRouter {
-  constructor(personas, routerCfg = {}) {
+  constructor(personas, routerCfg = {}, { budgetTracker = null, clock = () => Date.now() } = {}) {
     this.personas = personas.map((p) => ({ ...p }));
     this.maxRepliesPerComment = routerCfg.maxRepliesPerComment ?? 1;
     this.cooldownSeconds = routerCfg.cooldownSeconds ?? 8;
     this.defaultPersonaId = routerCfg.defaultPersona ?? this.personas[0]?.id;
+    this.clock = clock;
+    this.budgetTracker = budgetTracker ?? new ResponseBudgetTracker({ ttlMs: (routerCfg.historyTtlSeconds ?? 7200) * 1000, maxEntries: routerCfg.historyMaxEntries ?? 2000, clock });
     this.lastReplyAt = new Map(); // personaId -> epoch ms
-    this.repliesByComment = new Map(); // commentId -> count
     this.listeners = new Set();
   }
 
@@ -40,6 +44,7 @@ export class PersonaRouter {
 
     const selected = [];
     const skipped = [];
+    const budgetKey = commentResponseBudgetKey(comment);
     for (const p of candidates) {
       if (!p.enabled) {
         skipped.push({ persona: p, reason: "無効化中" });
@@ -49,28 +54,43 @@ export class PersonaRouter {
         skipped.push({ persona: p, reason: `クールダウン中 (${this.cooldownSeconds}秒)` });
         continue;
       }
-      if (comment && (this.repliesByComment.get(comment.id) ?? 0) + selected.length >= this.maxRepliesPerComment) {
+      const reservation = budgetKey ? this.budgetTracker.reserve(budgetKey, this.maxRepliesPerComment, this.clock()) : null;
+      if (budgetKey && !reservation) {
         skipped.push({ persona: p, reason: `1コメント最大${this.maxRepliesPerComment}応答に到達` });
         continue;
       }
-      selected.push(p);
+      selected.push({ persona: p, reservation, budgetKey });
     }
     return { selected, skipped };
   }
 
-  // 応答開始時に呼ぶ。二重応答を防ぐため、AI呼び出しの完了を待たずに記録する。
+  // 応答開始時に呼ぶ。予約済みならcommitし、AI呼び出し前に上限を確定させる。
+  commitSelection(selection) {
+    const persona = selection?.persona ?? selection;
+    if (!persona) return false;
+    const committed = selection?.reservation ? this.budgetTracker.commit(selection.reservation, this.clock()) : true;
+    if (committed) this.lastReplyAt.set(persona.id, this.clock());
+    return committed;
+  }
+
+  releaseSelection(selection) { return selection?.reservation ? this.budgetTracker.release(selection.reservation) : false; }
+
+  // 後方互換: 直接呼び出す既存コードは応答開始を記録する。新規フローはcommitSelectionを使う。
   recordReply(persona, comment = null) {
-    this.lastReplyAt.set(persona.id, Date.now());
-    if (comment) {
-      this.repliesByComment.set(comment.id, (this.repliesByComment.get(comment.id) ?? 0) + 1);
-    }
+    const selection = { persona, reservation: null };
+    const key = commentResponseBudgetKey(comment);
+    if (key) selection.reservation = this.budgetTracker.reserve(key, this.maxRepliesPerComment, this.clock());
+    return selection.reservation === null && key ? false : this.commitSelection(selection);
   }
 
   cooldownRemaining(persona) {
     const last = this.lastReplyAt.get(persona.id);
     if (!last) return 0;
-    return Math.max(0, this.cooldownSeconds - (Date.now() - last) / 1000);
+    return Math.max(0, this.cooldownSeconds - (this.clock() - last) / 1000);
   }
+
+  budgetStats() { return this.budgetTracker.stats(); }
+  dispose() { this.budgetTracker.clear(); this.lastReplyAt.clear(); this.listeners.clear(); }
 
   onChange(fn) {
     this.listeners.add(fn);
