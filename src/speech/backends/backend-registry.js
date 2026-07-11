@@ -13,6 +13,7 @@ export class BackendRegistry {
     ]);
     this.seen = new Set();
     this.warnedMixedOrdering = false;
+    this.warnings = [];
   }
   resolve(id = "webspeech") {
     const backend = this.backends.get(id);
@@ -25,7 +26,7 @@ export class BackendRegistry {
     if (unique.has("bouyomi") && unique.size > 1) {
       const message = "棒読みちゃんと再生完了を報告するbackendの混在順序は保証できません";
       if (this.strictOrdering) throw new Error(message);
-      if (!this.warnedMixedOrdering) this.onWarning(message);
+      if (!this.warnedMixedOrdering) { this.warnings.push(message); this.onWarning(message); }
       this.warnedMixedOrdering = true;
       return message;
     }
@@ -33,6 +34,6 @@ export class BackendRegistry {
   }
   cancel(executionId = null) { for (const backend of this.backends.values()) backend.cancel(executionId); }
   async clear() { const backend = this.backends.get("bouyomi"); return backend.available() ? backend.clear() : null; }
-  dispose() { for (const backend of this.backends.values()) backend.dispose(); this.seen.clear(); this.warnedMixedOrdering = false; }
+  dispose() { for (const backend of this.backends.values()) backend.dispose(); this.seen.clear(); this.warnedMixedOrdering = false; this.warnings = []; }
   #track(id) { this.seen.add(id); this.validateMix(this.seen); }
 }

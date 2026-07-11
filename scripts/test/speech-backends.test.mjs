@@ -88,3 +88,44 @@ test("unavailable backend returns a terminal failure", async () => {
   await Promise.resolve();
   assert.equal(item.state, "failed");
 });
+
+test("multiple hold reasons resume only after every reason is released", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
+  const item = queue.enqueue({ text: "held", voice: { engine: "webspeech" } });
+  queue.hold("manual");
+  queue.hold("mic");
+  await Promise.resolve();
+  assert.deepEqual(queue.holdReasons, ["manual", "mic"]);
+  assert.equal(item.state, "waiting");
+  queue.release("manual");
+  assert.equal(item.state, "waiting");
+  queue.release("mic");
+  assert.equal(item.state, "speaking");
+  queue.dispose();
+});
+
+test("same-tick terminal races settle once and teardown cancels all work", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
+  const current = queue.enqueue({ text: "current", voice: { engine: "webspeech" } });
+  const oldUtterance = FakeUtterance.items.at(-1);
+  const pending = queue.enqueue({ text: "pending", voice: { engine: "webspeech" } });
+  queue.skip();
+  oldUtterance.onend();
+  await Promise.resolve();
+  assert.equal(current.state, "skipped");
+  assert.equal(queue.scheduler.history.items.filter((item) => item.id === current.id).length, 1);
+  queue.teardown();
+  await Promise.resolve();
+  assert.equal(pending.state, "cancelled");
+  assert.equal(queue.snapshot().activeExecution, null);
+});
+
+test("remote clear failures are retained in diagnostics", async () => {
+  const queue = new SpeechQueue({ bouyomi: { talk: async () => {}, clear: async () => { throw new Error("offline"); } } });
+  await queue.clearAll();
+  assert.deepEqual(queue.snapshot().remoteClear, { status: "failed", error: "offline" });
+});

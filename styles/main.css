@@ -234,6 +234,8 @@ a { color: var(--focus); }
 .speech-actions button:first-child { border-color: #5c3f27; color: var(--cue); }
 .speech-actions button:nth-child(2) { border-color: #234a3a; color: var(--ok); }
 .speech-list { max-height: 42vh; overflow-y: auto; }
+.speech-current, .speech-diagnostics { padding: 6px 0; }
+.panel-reader-controls h3 { margin: 10px 0 4px; font-size: 12px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: .08em; }
 
 .muted { color: var(--ink-dim); font-size: 12px; }
 
