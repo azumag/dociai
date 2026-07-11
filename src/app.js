@@ -318,18 +318,15 @@ async function applyLoaded({ config, warnings, source }) {
   state.micMonitor = config.micMonitor?.enabled
     ? new MicMonitor({ config, log: (m) => logEvent(m) })
     : null;
-  // マイクの発話検知でAI音声キューを保留/再開する。stop() は resume() と違い
-  // 「既にpaused」を弾く内部ガードが無いため、話している間ずっと呼び続けて
-  // イベントログが埋まらないよう明示的にガードする。手動の「停止」ボタン
-  // (state.manualSpeechHold) による保留はマイクの無音検知では解除しない。
+  // manual/mic holdは独立reasonとして管理し、両方解除された時だけ再開する。
   state.micMonitor?.onChange(() => {
     if (!state.runtime.isCurrent(generation)) return;
     renderMicPanel();
     if (!state.speechQueue) return;
     if (state.micMonitor.speaking) {
-      if (!state.speechQueue.paused) state.speechQueue.stop();
-    } else if (!state.manualSpeechHold) {
-      state.speechQueue.resume();
+      state.speechQueue.hold("mic");
+    } else {
+      state.speechQueue.release("mic");
     }
   });
 
@@ -416,8 +413,7 @@ function teardown(reason = "runtime teardown", preCancelled = 0) {
   state.triggerEngine?.stop();
   state.screenContext?.stop();
   state.micMonitor?.stop();
-  state.speechQueue?.clear();
-  state.speechQueue?.dispose();
+  state.speechQueue?.teardown();
   state.thinking.clear();
   state.speakingPersonaId = null;
   state.manualSpeechHold = false;
@@ -613,10 +609,10 @@ function renderTriggers() {
 }
 
 function renderSpeechQueue() {
-  const ul = $("#speech-list");
-  ul.replaceChildren();
-  const items = state.speechQueue?.items ?? [];
-  for (const item of [...items].reverse().slice(0, 8)) {
+  const snapshot = state.speechQueue?.snapshot();
+  const renderItems = (ul, items, empty) => {
+    ul.replaceChildren();
+    for (const item of items) {
     const li = document.createElement("li");
     const badge = document.createElement("span");
     badge.className = `badge state-${item.state}`;
@@ -627,18 +623,30 @@ function renderSpeechQueue() {
     grow.querySelector(".detail").textContent = `${item.personaName}: ${item.text.slice(0, 60)}${item.error ? ` (${item.error})` : ""}`;
     li.append(badge, grow);
     ul.append(li);
+    }
+    if (!items.length) ul.innerHTML = `<li class="detail">${empty}</li>`;
+  };
+  const current = $("#speech-current");
+  current.textContent = snapshot?.current ? `${snapshot.current.personaName}: ${snapshot.current.text}` : "再生中なし";
+  renderItems($("#speech-pending"), snapshot ? [...snapshot.pending] : [], "待機なし");
+  renderItems($("#speech-list"), snapshot ? [...snapshot.history].reverse().slice(0, 8) : [], "履歴なし");
+  const diagnostics = $("#speech-diagnostics");
+  if (snapshot) {
+    diagnostics.textContent = `待機 ${snapshot.pending.length} / 最古 ${Math.round(snapshot.oldestPendingAgeMs / 1000)}秒 / drop ${snapshot.metrics.dropped} / hold ${snapshot.holdReasons.join(", ") || "なし"}${snapshot.activeExecution ? ` / 実行 ${snapshot.activeExecution.id}` : ""}${snapshot.backendWarnings.length ? ` / 警告: ${snapshot.backendWarnings.join("; ")}` : ""}${snapshot.remoteClear.status === "failed" ? ` / remote clear失敗: ${snapshot.remoteClear.error}` : ""}`;
+  } else {
+    diagnostics.textContent = "キュー未初期化";
   }
-  if (!items.length) ul.innerHTML = `<li class="detail">キューは空です</li>`;
 
   const chip = $("#speech-state");
   if (!state.speechQueue) {
     chip.textContent = "";
   } else if (state.speechQueue.paused) {
-    chip.textContent = state.manualSpeechHold
+    const reasons = state.speechQueue.holdReasons;
+    chip.textContent = reasons.length === 1 && reasons[0] === "manual"
       ? "手動停止中"
-      : state.micMonitor?.speaking
+      : reasons.length === 1 && reasons[0] === "mic"
         ? "マイク検知で保留中"
-        : "停止中";
+        : `保留中: ${reasons.join(" + ")}`;
     chip.className = "chip is-warn";
   } else {
     chip.textContent = `待機 ${state.speechQueue.waitingCount()}`;
@@ -847,11 +855,11 @@ function bindUI() {
 
   $("#btn-speech-stop").addEventListener("click", () => {
     state.manualSpeechHold = true;
-    state.speechQueue?.stop();
+    state.speechQueue?.hold("manual");
   });
   $("#btn-speech-resume").addEventListener("click", () => {
     state.manualSpeechHold = false;
-    state.speechQueue?.resume();
+    state.speechQueue?.release("manual");
   });
   $("#btn-speech-skip").addEventListener("click", () => state.speechQueue?.skip());
   $("#btn-speech-clear").addEventListener("click", () => state.speechQueue?.clear());

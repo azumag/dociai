@@ -1,5 +1,7 @@
 // 音声読み上げキュー。順序・保持はSpeechScheduler、再生resourceは各SpeechBackendが所有する。
 import { BackendRegistry } from "./speech/backends/backend-registry.js";
+import { SpeechControls } from "./speech/speech-controls.js";
+import { SpeechExecution } from "./speech/speech-execution.js";
 import { SpeechScheduler } from "./speech/speech-scheduler.js";
 
 export class SpeechQueue {
@@ -7,7 +9,6 @@ export class SpeechQueue {
     this.scheduler = new SpeechScheduler(policy);
     this.onUpdate = onUpdate;
     this.log = log;
-    this.paused = false;
     this.executionSequence = 0;
     this.activeExecution = null;
     this.cancelMode = null;
@@ -21,11 +22,28 @@ export class SpeechQueue {
       onWarning: (message) => this.log(message),
       onHealth,
     });
+    this.controls = new SpeechControls({
+      onFirstHold: () => {
+        this.scheduler.held = true;
+        this.cancelMode = "hold";
+        this.#cancelActive();
+      },
+      onAllReleased: () => {
+        this.scheduler.held = false;
+        this.#pump();
+      },
+      onChange: () => this.onUpdate(this.items, this),
+    });
+    this.remoteClear = { status: "idle", error: null };
   }
 
   get current() { return this.scheduler.current; }
+  get paused() { return this.controls.held; }
+  get holdReasons() { return this.controls.snapshot(); }
   get items() { return [...this.scheduler.history.items, ...this.scheduler.pending, ...(this.current ? [this.current] : [])]; }
-  snapshot() { return this.scheduler.snapshot(); }
+  snapshot() {
+    return Object.freeze({ ...this.scheduler.snapshot(), holdReasons: this.holdReasons, activeExecution: this.activeExecution?.snapshot() ?? null, backendWarnings: Object.freeze([...this.backends.warnings]), remoteClear: Object.freeze({ ...this.remoteClear }) });
+  }
   waitingCount() { return this.scheduler.pending.length; }
 
   enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt }) {
@@ -37,24 +55,18 @@ export class SpeechQueue {
     return item;
   }
 
-  stop() {
-    if (this.paused) return;
-    this.paused = true;
-    this.scheduler.held = true;
-    this.cancelMode = "hold";
-    this.#cancelActive();
+  hold(reason = "manual") {
+    this.controls.hold(reason);
     this.log("読み上げを停止しました (キュー保留)");
-    this.onUpdate(this.items, this);
   }
 
-  resume() {
-    if (!this.paused) return;
-    this.paused = false;
-    this.scheduler.held = false;
+  release(reason = "manual") {
+    if (!this.controls.release(reason)) return;
     this.log("読み上げを再開しました");
-    this.onUpdate(this.items, this);
-    this.#pump();
   }
+
+  stop() { this.hold("manual"); }
+  resume() { this.release("manual"); }
 
   skip() {
     if (!this.current) return;
@@ -62,21 +74,52 @@ export class SpeechQueue {
     this.#cancelActive();
   }
 
+  cancelItem(itemId) {
+    if (this.current?.id === itemId) { this.cancelMode = "cancelled"; return this.#cancelActive(); }
+    const item = this.scheduler.pending.find((entry) => entry.id === itemId);
+    if (!item) return false;
+    const removed = this.scheduler.removePending(item, "cancelled");
+    this.onUpdate(this.items, this);
+    return removed;
+  }
+
   clear() {
+    return this.clearAll();
+  }
+
+  clearPending() {
     for (const item of [...this.scheduler.pending]) this.scheduler.removePending(item, "skipped");
+    this.onUpdate(this.items, this);
+  }
+
+  clearAll() {
+    this.clearPending();
     if (this.current) {
       this.cancelMode = "skipped";
       this.#cancelActive();
     }
-    this.backends.clear().catch((error) => this.log(`棒読みちゃんのキュー消去に失敗: ${error.message}`));
+    this.remoteClear = { status: "pending", error: null };
+    const remote = this.backends.clear().then(
+      () => { this.remoteClear = { status: "success", error: null }; this.onUpdate(this.items, this); },
+      (error) => { this.remoteClear = { status: "failed", error: error.message }; this.log(`棒読みちゃんのキュー消去に失敗: ${error.message}`); this.onUpdate(this.items, this); },
+    );
     this.log("音声キューを全消去しました");
-    this.onUpdate(this.items, this);
+    return remote;
   }
 
   dispose() {
     this.cancelMode = "cancelled";
     this.#cancelActive();
     this.backends.dispose();
+  }
+
+  teardown() {
+    for (const item of [...this.scheduler.pending]) this.scheduler.removePending(item, "cancelled");
+    this.controls.hold("runtime");
+    this.cancelMode = "cancelled";
+    this.#cancelActive();
+    this.backends.dispose();
+    this.onUpdate(this.items, this);
   }
 
   #defaultEngine() { return this.voicevox ? "voicevox" : "webspeech"; }
@@ -100,7 +143,7 @@ export class SpeechQueue {
     }
     const engine = item.voice?.engine ?? this.#defaultEngine();
     const backend = this.backends.resolve(engine);
-    const execution = { id: `speech-${++this.executionSequence}`, controller: new AbortController(), item, backend };
+    const execution = new SpeechExecution(`speech-${++this.executionSequence}`, item, backend);
     this.activeExecution = execution;
     this.#notify(item);
     backend.play(item, { executionId: execution.id, signal: execution.controller.signal }).then(
@@ -110,7 +153,7 @@ export class SpeechQueue {
   }
 
   #finish(execution, result) {
-    if (this.activeExecution !== execution || this.current !== execution.item) return;
+    if (!this.activeExecution?.matches(execution) || this.current !== execution.item || !execution.settle()) return;
     this.activeExecution = null;
     let state = result.state;
     if (this.cancelMode === "hold") {
