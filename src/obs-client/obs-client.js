@@ -10,10 +10,12 @@ export class ObsClient {
   start() { this.transport.start((message) => this.receive(message)); this.requestSnapshot(); return true; }
   stop() { return this.transport.stop(); }
   requestSnapshot() { this.deadline = this.clock() + this.handshakeTimeoutMs; this.transport.send(createEnvelope("hello", { clientId: this.clientId }, { serverInstanceId: "client", targetClientId: null })); this.transport.send(createEnvelope("snapshot-request", { clientId: this.clientId }, { serverInstanceId: "client", targetClientId: null })); }
+  heartbeat() { return this.transport.send(createEnvelope("heartbeat", { clientId: this.clientId }, { serverInstanceId: "client", targetClientId: null })); }
   receive(message) {
     const valid = validateEnvelope(message);
     if (!valid.ok) { this.setStatus(valid.reason === "protocol-version" ? "incompatible" : "error"); return; }
     if (message.targetClientId && message.targetClientId !== this.clientId) return;
+    if (message.type === "heartbeat") { this.deadline = this.clock() + this.handshakeTimeoutMs; this.setStatus("connected"); return; }
     const reduced = reduceObsMessage(this.snapshot, message);
     if (["gap", "server-changed", "new-generation"].includes(reduced.verdict)) { this.requestSnapshot(); return; }
     if (reduced.verdict === "snapshot" || reduced.verdict === "next") { this.snapshot = reduced.state; this.deadline = this.clock() + this.handshakeTimeoutMs; this.setStatus("connected"); this.onSnapshot(this.snapshot); }
