@@ -48,6 +48,7 @@ const state = {
   runtime: new BrowserRuntimeController(),
   generation: 0,
   lastTeardown: null,
+  twitchStatus: null,
 };
 
 const scrub = (text) => scrubSecrets(text, state.secrets);
@@ -416,6 +417,7 @@ function teardown(reason = "runtime teardown", preCancelled = 0) {
   state.thinking.clear();
   state.speakingPersonaId = null;
   state.manualSpeechHold = false;
+  state.twitchStatus = null;
   state.lastTeardown = {
     generation: state.generation,
     reason,
@@ -431,7 +433,14 @@ function startExternalCommentSources(config, generation = state.generation) {
   if (!twitch?.enabled) return;
 
   try {
-    const source = new TwitchChatSource(twitch, { log: (m, level) => logEvent(m, level) });
+    const source = new TwitchChatSource(twitch, {
+      log: (m, level) => logEvent(m, level),
+      onStatus: (status) => {
+        if (!state.runtime.isCurrent(generation)) return;
+        state.twitchStatus = status;
+        renderTwitchChatStatus();
+      },
+    });
     source.start((raw) => { if (state.runtime.isCurrent(generation)) addComment(raw); });
     state.externalCommentSources.push(source);
   } catch (e) {
@@ -456,6 +465,7 @@ function renderAll() {
   renderTriggers();
   renderSpeechQueue();
   renderCommentReaderStatus();
+  renderTwitchChatStatus();
   renderMicPanel();
   renderScreenPanel();
   renderNewsPanel();
@@ -650,6 +660,24 @@ function renderCommentReaderStatus() {
   if (state.config.commentSources?.twitch?.enabled) sourceNames.push("Twitch Chat");
   el.textContent = `読み上げ ON · ${reader.engine ?? "webspeech"} · ${sourceNames.join(" + ")}`;
   el.className = "reader-status is-active";
+}
+
+function renderTwitchChatStatus() {
+  const panel = $("#twitch-chat-panel");
+  const el = $("#twitch-chat-status");
+  const button = $("#btn-twitch-reconnect");
+  if (!panel || !el || !button) return;
+  const enabled = Boolean(state.config?.commentSources?.twitch?.enabled);
+  panel.hidden = !enabled;
+  button.disabled = !enabled;
+  if (!enabled) return;
+  const status = state.twitchStatus;
+  if (!status) { el.textContent = "Twitch: 接続準備中"; return; }
+  const channels = (status.channels ?? []).map((entry) => `#${entry.channel}:${entry.status}`).join(" / ");
+  const retrySeconds = status.nextRetryAt ? Math.max(0, Math.ceil((status.nextRetryAt - Date.now()) / 1000)) : null;
+  const health = status.health?.status ?? status.state;
+  const message = status.health?.message ?? "";
+  el.textContent = `Twitch: ${health}${channels ? ` · ${channels}` : ""}${retrySeconds !== null ? ` · ${retrySeconds}秒後に再接続` : ""}${message ? ` · ${message}` : ""}`;
 }
 
 function renderMicPanel() {
@@ -869,11 +897,17 @@ function bindUI() {
     renderTopicPanel();
     runTopics();
   });
+  $("#btn-twitch-reconnect").addEventListener("click", () => {
+    const source = state.externalCommentSources.find((candidate) => candidate.id === "twitch");
+    if (source?.reconnectNow()) logEvent("Twitchチャットを手動再接続します");
+    renderTwitchChatStatus();
+  });
 
   // クールダウン残り秒の表示だけを定期更新する
   setInterval(() => {
     if (state.personaRouter) renderPersonas();
     if (state.screenContext?.summary) renderScreenPanel();
+    if (state.twitchStatus?.nextRetryAt) renderTwitchChatStatus();
   }, 2000);
 }
 

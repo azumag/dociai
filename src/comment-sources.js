@@ -10,7 +10,7 @@
 // YouTube Live Chat / Twitch IRC の実装方針は docs/comment-sources.md を参照。
 
 import { parseIrcFrame } from "./twitch-chat/twitch-irc-parser.js";
-import { TwitchChatSession } from "./twitch-chat/twitch-chat-session.js";
+export { TwitchChatSource } from "./twitch-chat/twitch-chat-source.js";
 
 export class ManualCommentSource {
   id = "manual";
@@ -68,46 +68,6 @@ export function stripEmotes(text, emotesTag) {
   }
   out += s.slice(cursor);
   return out.replace(/\s+/g, " ").trim();
-}
-
-export class TwitchChatSource {
-  id = "twitch";
-  label = "Twitch";
-
-  constructor(config = {}, { WebSocketImpl = globalThis.WebSocket, log = () => {} } = {}) {
-    this.config = config;
-    this.WebSocketImpl = WebSocketImpl;
-    this.log = log;
-    this.ws = null;
-    this.onComment = null;
-    this.session = null;
-    this.status = null;
-  }
-
-  start(onComment) {
-    this.stop();
-    this.onComment = onComment;
-    const session = this.session = new TwitchChatSession(this.config, {
-      WebSocketImpl: this.WebSocketImpl,
-      log: this.log,
-      onComment: (raw) => {
-        if (this.session !== session) return;
-        const { sessionId, emotes, ...comment } = raw;
-        this.onComment?.({ ...comment, ...(emotes ? { emotes } : {}) });
-      },
-      onStatus: (status) => { if (this.session === session) this.status = status; },
-    });
-    session.start();
-    this.ws = session.socket;
-  }
-
-  stop() {
-    const session = this.session;
-    this.session = null;
-    this.ws = null;
-    this.onComment = null;
-    session?.stop();
-  }
 }
 
 // 将来のYouTubeアダプタもこの形で追加する:
