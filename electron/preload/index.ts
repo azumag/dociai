@@ -67,6 +67,7 @@ const api: DociaiApi = {
     openExternal: (url) => invoke(CHANNELS.SYSTEM_OPEN_EXTERNAL, url),
     showItemInFolder: (kind) => invoke(CHANNELS.SYSTEM_SHOW_ITEM, kind),
   },
+  shortcuts: { status: () => invoke(CHANNELS.SHORTCUT_STATUS) },
   events: {
     subscribe(type, listener) {
       if (typeof type !== "string" || type.length === 0 || type.length > 128 || typeof listener !== "function") return () => {};

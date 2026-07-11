@@ -13,8 +13,9 @@ test("Electron renderer adapters route every external service through Main IPC",
   assert.match(connectors, /hasElectronAiService\(\)/); assert.match(news, /hasElectronFeedService\(\)/); assert.match(topics, /hasElectronTopicService\(\)/);
   assert.match(voicevox, /hasElectronVoiceVoxService\(\)/); assert.match(bouyomi, /window\?\.dociai\?\.(?:bouyomi|speech)/); assert.match(app, /hasElectronTwitchService\(\)/);
   assert.match(platform, /globalThis\.dociai\.speech\.voicevox/); assert.match(platform, /globalThis\.dociai\.twitch/);
-  for (const channel of ["SPEECH_VOICEVOX_SPEAKERS", "SPEECH_VOICEVOX_SYNTHESIZE", "SPEECH_BOUYOMI_TALK", "SPEECH_BOUYOMI_CLEAR", "TWITCH_START", "TWITCH_STOP", "TWITCH_RECONNECT"]) { assert.match(preload, new RegExp(`CHANNELS\\.${channel}`)); assert.match(ipc, new RegExp(`CHANNELS\\.${channel}`)); }
+  for (const channel of ["SPEECH_VOICEVOX_SPEAKERS", "SPEECH_VOICEVOX_SYNTHESIZE", "SPEECH_BOUYOMI_TALK", "SPEECH_BOUYOMI_CLEAR", "TWITCH_START", "TWITCH_STOP", "TWITCH_RECONNECT", "SHORTCUT_STATUS"]) { assert.match(preload, new RegExp(`CHANNELS\\.${channel}`)); assert.match(ipc, new RegExp(`CHANNELS\\.${channel}`)); }
   assert.match(main, /new SpeechBackendService/); assert.match(main, /new TwitchChatService/);
+  assert.match(main, /new ShortcutService/);
 });
 
 test("packaged Electron CSP keeps provider connections out of Renderer", async () => {

@@ -28,6 +28,8 @@ export class TriggerEngine {
     this.log = log;
     this.timers = [];
     this.keyHandler = null;
+    this.unsubscribeGlobalShortcut = null;
+    this.unsubscribeShortcutStatus = null;
   }
 
   start() {
@@ -51,6 +53,19 @@ export class TriggerEngine {
       }
     };
     window.addEventListener("keydown", this.keyHandler);
+    const events = globalThis.dociai?.events;
+    if (typeof events?.subscribe === "function") {
+      this.unsubscribeGlobalShortcut = events.subscribe("shortcut:trigger", (event) => {
+        const triggerId = event?.triggerId;
+        const trigger = this.triggers[triggerId];
+        if (trigger?.type === "hotkey" && trigger.global === true) this.fire(triggerId, { reason: "global-hotkey" });
+      });
+      this.unsubscribeShortcutStatus = events.subscribe("shortcut:status", (status) => {
+        for (const entry of status?.entries ?? []) if (!entry.registered) this.log(`グローバルホットキー "${entry.triggerId}" を登録できません: ${entry.reason ?? "unknown"}`);
+      });
+    } else {
+      for (const [id, trigger] of Object.entries(this.triggers)) if (trigger.type === "hotkey" && trigger.global === true) this.log(`グローバルホットキー "${id}" はBrowser版では無視されます`);
+    }
   }
 
   stop() {
@@ -60,6 +75,10 @@ export class TriggerEngine {
       window.removeEventListener("keydown", this.keyHandler);
       this.keyHandler = null;
     }
+    this.unsubscribeGlobalShortcut?.();
+    this.unsubscribeShortcutStatus?.();
+    this.unsubscribeGlobalShortcut = null;
+    this.unsubscribeShortcutStatus = null;
   }
 
   // コメント1件をkeyword/randomトリガーに通し、発火したトリガーIDを返す

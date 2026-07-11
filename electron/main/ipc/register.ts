@@ -17,9 +17,10 @@ import { TopicService } from "../services/topics/topic-service";
 import type { FeedFetchInput } from "../../shared/services/feed-contract";
 import type { SpeechBackendService } from "../services/speech/speech-backend-service";
 import type { TwitchChatService } from "../services/twitch/twitch-chat-service";
+import type { ShortcutService } from "../services/shortcut-service";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -62,11 +63,13 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     return { runtime: "electron", platform: process.platform, arch: process.arch, appVersion: require("electron").app.getVersion(), isPackaged: require("electron").app.isPackaged };
   }, options);
   register(CHANNELS.CONFIG_GET, (event, input) => { expectNoInput(input); return options.configRepository.getPublic(); }, options);
-  register(CHANNELS.CONFIG_SAVE, (event, input) => {
+  register(CHANNELS.CONFIG_SAVE, async (event, input) => {
     const payload = expectRecord(input, "config save");
     const config = expectRecord(payload.config, "config");
     if (payload.expectedRevision !== undefined && typeof payload.expectedRevision !== "string") throw new PublicIpcError("INVALID_INPUT", "expectedRevisionが不正です");
-    return options.configRepository.save(config, payload.expectedRevision as string | undefined);
+    const saved = await options.configRepository.save(config, payload.expectedRevision as string | undefined);
+    options.shortcutService.sync((config.triggers ?? {}) as Record<string, unknown>);
+    return saved;
   }, options);
   register(CHANNELS.CONFIG_IMPORT_LEGACY, async (event, input) => {
     const payload = input === undefined || input === null ? {} : expectRecord(input, "legacy import");
@@ -75,6 +78,7 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     for (const entry of preview.secretEntries) await options.secretStore.set(parseSecretKey(entry.key), entry.value);
     const current = await options.configRepository.getPublic();
     const saved = await options.configRepository.save(preview.config, current.revision);
+    options.shortcutService.sync((preview.config.triggers ?? {}) as Record<string, unknown>);
     return { imported: true, secretKeys: preview.secretEntries.map((entry) => entry.key), revision: saved.revision };
   }, options);
   register(CHANNELS.SECRET_STATUS, (event, input) => {
@@ -143,6 +147,7 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     require("electron").shell.showItemInFolder(target);
     return { shown: true };
   }, options);
+  register(CHANNELS.SHORTCUT_STATUS, (event, input) => { expectNoInput(input); return options.shortcutService.status(); }, options);
   ipcMain.on(CHANNELS.OBS_MESSAGE, (event, message) => {
     try {
       assertTrustedSender(event, options.devServerUrl, ["console", "obs"]);

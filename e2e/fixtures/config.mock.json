@@ -56,6 +56,11 @@
     },
     "news_manual": {
       "type": "manual"
+    },
+    "hotkey_global": {
+      "type": "hotkey",
+      "keys": "Alt+1",
+      "global": false
     }
   },
   "router": {

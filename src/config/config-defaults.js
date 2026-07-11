@@ -10,6 +10,7 @@ export function applyConfigDefaults(config) {
   copy.news = { enabled: false, mode: "topic", maxItems: 3, dedupe: true, sources: [], ...(copy.news ?? {}), retry: { maxAttempts: 3, initialDelaySeconds: 30, maxDelaySeconds: 900, ...(copy.news?.retry ?? {}) } };
   copy.topics = { enabled: false, maxItems: 3, dedupe: true, sources: [], intro: "上のお題について、あなたのキャラクターとして自由にコメントしてください。", style: "雑談のお題として、自然な自分の言葉で自由にコメントする", ...(copy.topics ?? {}), retry: { maxAttempts: 3, initialDelaySeconds: 30, maxDelaySeconds: 900, ...(copy.topics?.retry ?? {}) } };
   copy.commentSources = { ...(copy.commentSources ?? {}), twitch: { enabled: false, ...(copy.commentSources?.twitch ?? {}) } };
+  copy.triggers = Object.fromEntries(Object.entries(copy.triggers ?? {}).map(([id, trigger]) => [id, { ...(trigger ?? {}), ...(trigger?.type === "hotkey" ? { global: Boolean(trigger.global) } : {}) }]));
   copy.personas = (copy.personas ?? []).map((persona) => ({ enabled: true, triggers: [], ...persona, voice: { enabled: true, engine: "webspeech", name: "default", rate: 1, pitch: 1, ...(persona.voice ?? {}) } }));
   return copy;
 }
