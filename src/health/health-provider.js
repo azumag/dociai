@@ -1,11 +1,14 @@
 import { createHealthEvent } from "./health-events.js";
 
 export class HealthProvider {
-  constructor({ id, critical = false, check = null, maxHistory = 32 } = {}) {
+  constructor({ id, critical = false, check = null, maxHistory = 32, paid = false, enabled = true, preflight = null } = {}) {
     if (!id || typeof id !== "string") throw new TypeError("health provider id is required");
     if (!Number.isSafeInteger(maxHistory) || maxHistory < 1) throw new RangeError("maxHistory must be positive");
     this.id = id;
     this.critical = Boolean(critical);
+    this.paid = Boolean(paid);
+    this.enabled = Boolean(enabled);
+    this.preflight = preflight;
     this.check = check;
     this.maxHistory = maxHistory;
     this.generation = 0;
