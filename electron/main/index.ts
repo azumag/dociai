@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { app, globalShortcut, protocol, safeStorage } from "electron";
+import { app, desktopCapturer, globalShortcut, protocol, safeStorage, session } from "electron";
 import { ensureAppPaths, resolveAppPaths } from "./paths";
 import { createWindowController } from "./windows";
 import { ConfigRepository } from "./config/config-repository";
@@ -15,6 +15,8 @@ import { registerIpcHandlers } from "./ipc/register";
 import { SpeechBackendService } from "./services/speech/speech-backend-service";
 import { TwitchChatService } from "./services/twitch/twitch-chat-service";
 import { ShortcutService } from "./services/shortcut-service";
+import { CaptureService } from "./services/capture/capture-service";
+import { installDisplayMediaHandler } from "./services/capture/display-media-handler";
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "dociai",
@@ -144,9 +146,13 @@ if (!hasLock) {
     const TwitchWebSocket = require("ws") as new (url: string) => { readyState?: number; send(data: string): void; close(): void; on(event: string, listener: (...args: any[]) => void): void };
     const twitchService = new TwitchChatService(TwitchWebSocket, (event) => controller?.emitToConsole(event.type, event.payload));
     const shortcutService = new ShortcutService(globalShortcut, (event) => controller?.emitToConsole("shortcut:status", event), (event) => controller?.emitToConsole("shortcut:trigger", event));
+    const captureService = new CaptureService(desktopCapturer);
+    const uninstallDisplayMediaHandler = installDisplayMediaHandler(session, captureService);
     const currentConfig = await configRepository.getPublic();
     shortcutService.sync((currentConfig.config.triggers ?? {}) as Record<string, unknown>);
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, shortcutService, devServerUrl });
+    const screenCapture = object(object(currentConfig.config.context).screenCapture);
+    captureService.setPreferredSourceName(screenCapture.sourceName);
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, shortcutService, captureService, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
     app.once("before-quit", () => feedService.dispose());
@@ -154,6 +160,7 @@ if (!hasLock) {
     app.once("before-quit", () => speechService.dispose());
     app.once("before-quit", () => twitchService.dispose());
     app.once("before-quit", () => shortcutService.dispose());
+    app.once("before-quit", () => { uninstallDisplayMediaHandler(); captureService.dispose(); });
     controller.createConsoleWindow();
     app.on("activate", () => controller?.createConsoleWindow());
   }).catch((error) => { logError("startup", error); if (!quitting) app.quit(); });

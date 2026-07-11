@@ -27,6 +27,9 @@ export const CHANNELS = Object.freeze({
   SYSTEM_OPEN_EXTERNAL: "system:open-external",
   SYSTEM_SHOW_ITEM: "system:show-item",
   SHORTCUT_STATUS: "shortcut:status",
+  CAPTURE_LIST_SOURCES: "capture:list-sources",
+  CAPTURE_SELECT_SOURCE: "capture:select-source",
+  CAPTURE_STATUS: "capture:status",
   APP_EVENT: "app:event",
   OBS_MESSAGE: "obs:message",
 });

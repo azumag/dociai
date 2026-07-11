@@ -17,6 +17,7 @@ import { NewsReader } from "./news-reader.js";
 import { TopicReader } from "./topic-reader.js";
 import { ManualCommentSource, TwitchChatSource, stripEmotes } from "./comment-sources.js";
 import { ElectronTwitchSource, hasElectronTwitchService } from "./platform/electron-services.js";
+import { hasElectronCaptureService, listCaptureSources, selectCaptureSource } from "./platform/capture-adapter.js";
 import { scrubSecrets, collectApiKeys, checkSecretStorage } from "./security.js";
 import { SettingsUI } from "./settings-ui.js";
 import { BrowserRuntimeController } from "./runtime/runtime-controller.js";
@@ -49,6 +50,7 @@ const consoleView = new ConsoleView(document);
 const obsBridge = new ObsBridge({ transport: state.obs, getGeneration: () => state.generation });
 let integrationPanel = null;
 let diagnosticExportDialog = null;
+let screenSources = [];
 
 const scrub = (text) => scrubSecrets(text, state.secrets);
 const hhmmss = (d = new Date()) => new Date(d).toTimeString().slice(0, 8);
@@ -384,6 +386,7 @@ function renderAll() {
   renderTwitchChatStatus();
   renderMicPanel();
   renderScreenPanel();
+  void renderScreenSources();
   renderNewsPanel();
   renderTopicPanel();
   renderComments();
@@ -621,6 +624,37 @@ function renderScreenPanel() {
   el.textContent = parts.join(" / ");
 }
 
+async function renderScreenSources() {
+  const controls = $("#screen-source-controls");
+  const select = $("#screen-source-select");
+  const refresh = $("#btn-screen-source-refresh");
+  const help = $("#screen-source-help");
+  if (!controls || !select || !refresh) return;
+  const available = hasElectronCaptureService();
+  controls.hidden = !available;
+  refresh.disabled = !available;
+  if (!available) return;
+  const result = await listCaptureSources();
+  if (!result?.ok) {
+    if (help) { help.hidden = false; help.textContent = "画面ソースを取得できません。macOS は「システム設定 > プライバシーとセキュリティ > 画面収録」で dociai を許可してから再試行してください。"; }
+    logEvent(`画面ソース一覧を取得できません: ${scrub(result?.error?.message ?? "unknown")}`, "warn");
+    return;
+  }
+  screenSources = result.value ?? [];
+  if (help) {
+    help.hidden = screenSources.length > 0;
+    help.textContent = "画面ソースがありません。macOS は「システム設定 > プライバシーとセキュリティ > 画面収録」で dociai を許可してから再試行してください。";
+  }
+  select.replaceChildren(new Option("メイン画面", ""));
+  for (const source of screenSources) {
+    const option = new Option(`${source.type === "window" ? "ウィンドウ" : "画面"}: ${source.name}`, source.id);
+    option.dataset.sourceName = source.name;
+    select.append(option);
+  }
+  const preferred = state.config?.context?.screenCapture?.sourceName ?? "";
+  select.value = screenSources.find((source) => source.name === preferred)?.id ?? "";
+}
+
 function renderNewsPanel() {
   const el = $("#news-status");
   const failures = $("#news-failures");
@@ -751,6 +785,14 @@ function createAppActions() {
     stopMic: () => { state.micMonitor?.stop(); renderMicPanel(); },
     startScreen: async () => { try { await state.screenContext.start(); } catch (e) { logEvent(`画面共有を開始できません: ${scrub(e.message)}`, "error"); } renderScreenPanel(); },
     stopScreen: () => state.screenContext?.stop(),
+    refreshScreenSources: () => renderScreenSources(),
+    selectScreenSource: async (id) => {
+      const source = screenSources.find((candidate) => candidate.id === id);
+      if (!source) return;
+      const result = await selectCaptureSource({ id: source.id, name: source.name });
+      if (result?.ok) logEvent(`画面キャプチャ対象を選択: ${source.name}`);
+      else logEvent(`画面キャプチャ対象を選択できません: ${scrub(result?.error?.message ?? "unknown")}`, "warn");
+    },
     readScreen: async () => {
       const screen = state.screenContext;
       const generation = state.generation;
@@ -778,6 +820,7 @@ function bindUI() {
     commentForm: "#comment-form", commentText: "#comment-text", commentAuthor: "#comment-author",
     speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
     micStart: "#btn-mic-start", micStop: "#btn-mic-stop", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
+    screenSourceRefresh: "#btn-screen-source-refresh", screenSourceSelect: "#screen-source-select",
     newsRead: "#btn-news-read", topicRead: "#btn-topic-read", twitchReconnect: "#btn-twitch-reconnect",
   });
   const actions = createAppActions();

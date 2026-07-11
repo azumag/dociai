@@ -18,9 +18,10 @@ import type { FeedFetchInput } from "../../shared/services/feed-contract";
 import type { SpeechBackendService } from "../services/speech/speech-backend-service";
 import type { TwitchChatService } from "../services/twitch/twitch-chat-service";
 import type { ShortcutService } from "../services/shortcut-service";
+import type { CaptureService } from "../services/capture/capture-service";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; captureService: CaptureService; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -69,6 +70,9 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     if (payload.expectedRevision !== undefined && typeof payload.expectedRevision !== "string") throw new PublicIpcError("INVALID_INPUT", "expectedRevisionが不正です");
     const saved = await options.configRepository.save(config, payload.expectedRevision as string | undefined);
     options.shortcutService.sync((config.triggers ?? {}) as Record<string, unknown>);
+    const context = config.context && typeof config.context === "object" && !Array.isArray(config.context) ? config.context as Record<string, unknown> : {};
+    const screenCapture = context.screenCapture && typeof context.screenCapture === "object" && !Array.isArray(context.screenCapture) ? context.screenCapture as Record<string, unknown> : {};
+    options.captureService.setPreferredSourceName(screenCapture.sourceName);
     return saved;
   }, options);
   register(CHANNELS.CONFIG_IMPORT_LEGACY, async (event, input) => {
@@ -79,6 +83,9 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     const current = await options.configRepository.getPublic();
     const saved = await options.configRepository.save(preview.config, current.revision);
     options.shortcutService.sync((preview.config.triggers ?? {}) as Record<string, unknown>);
+    const context = preview.config.context && typeof preview.config.context === "object" && !Array.isArray(preview.config.context) ? preview.config.context as Record<string, unknown> : {};
+    const screenCapture = context.screenCapture && typeof context.screenCapture === "object" && !Array.isArray(context.screenCapture) ? context.screenCapture as Record<string, unknown> : {};
+    options.captureService.setPreferredSourceName(screenCapture.sourceName);
     return { imported: true, secretKeys: preview.secretEntries.map((entry) => entry.key), revision: saved.revision };
   }, options);
   register(CHANNELS.SECRET_STATUS, (event, input) => {
@@ -148,6 +155,15 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     return { shown: true };
   }, options);
   register(CHANNELS.SHORTCUT_STATUS, (event, input) => { expectNoInput(input); return options.shortcutService.status(); }, options);
+  register(CHANNELS.CAPTURE_LIST_SOURCES, (event, input) => { expectNoInput(input); return options.captureService.listSources(); }, options);
+  register(CHANNELS.CAPTURE_SELECT_SOURCE, async (event, input) => {
+    const payload = expectRecord(input, "capture source");
+    const id = payload.id === undefined ? undefined : expectString(payload.id, "source id", 512);
+    const name = payload.name === undefined ? undefined : expectString(payload.name, "source name", 256);
+    if (!id && !name) throw new PublicIpcError("INVALID_INPUT", "source idまたはnameが必要です");
+    return options.captureService.selectSource({ ...(id ? { id } : {}), ...(name ? { name } : {}) });
+  }, options);
+  register(CHANNELS.CAPTURE_STATUS, (event, input) => { expectNoInput(input); return options.captureService.status(); }, options);
   ipcMain.on(CHANNELS.OBS_MESSAGE, (event, message) => {
     try {
       assertTrustedSender(event, options.devServerUrl, ["console", "obs"]);

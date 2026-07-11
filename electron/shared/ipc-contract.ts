@@ -12,6 +12,8 @@ export type ExternalOpenResult = { scheme: "https"; host: string };
 export type ShowItemKind = "logs" | "models" | "config";
 export type ShortcutRegistration = { triggerId: string; accelerator: string; registered: boolean; reason?: "occupied" | "invalid" | "registration_failed" };
 export type ShortcutStatus = { entries: ShortcutRegistration[]; updatedAt: number };
+export type CaptureSource = { id: string; name: string; type: "screen" | "window"; displayId: string; thumbnail: string };
+export type CaptureStatus = { selectedName: string; preferredName: string; sourceCount: number };
 export type VoiceVoxSynthesisInput = { text: string; speaker: number; baseUrl?: string; timeoutMs?: number; pitch?: number; speed?: number; intonation?: number; volume?: number; requestId?: string; ownerId?: string; generation?: number };
 
 export type DociaiApi = {
@@ -60,6 +62,11 @@ export type DociaiApi = {
     showItemInFolder(kind: ShowItemKind): Promise<Result<{ shown: true }>>;
   };
   shortcuts: { status(): Promise<Result<ShortcutStatus>> };
+  capture: {
+    listSources(): Promise<Result<CaptureSource[]>>;
+    selectSource(input: { id?: string; name?: string }): Promise<Result<{ selected: true; name: string; type: "screen" | "window" }>>;
+    status(): Promise<Result<CaptureStatus>>;
+  };
   events: {
     subscribe(type: string, listener: (event: unknown) => void): () => void;
   };
