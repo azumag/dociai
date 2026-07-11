@@ -5,10 +5,15 @@ export function bindConsoleUI(elements, actions, { setIntervalImpl = setInterval
     element.addEventListener(type, listener);
     removers.push(() => element.removeEventListener(type, listener));
   };
+  const optionalOn = (name, type, listener) => {
+    try { on(name, type, listener); } catch (error) { if (!String(error?.message ?? "").startsWith("Unknown DOM element:")) throw error; }
+  };
   on("loadServer", "click", () => actions.loadServer());
   on("loadFile", "click", () => elements.get("fileInput").click());
   on("fileInput", "change", (event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) actions.loadFile(file); });
   on("settings", "click", () => actions.openSettings());
+  optionalOn("integrationsOpen", "click", () => actions.openIntegrations());
+  optionalOn("integrationsOpenPanel", "click", () => actions.openIntegrationsPanel());
   on("commentForm", "submit", (event) => {
     event.preventDefault();
     const text = elements.get("commentText");

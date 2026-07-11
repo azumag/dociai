@@ -78,6 +78,14 @@ a { color: var(--focus); }
 }
 .brand-sub { color: var(--ink-dim); font-size: 12px; }
 
+.integration-health-quick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-dim);
+  font: 11px var(--mono);
+}
+
 /* シグネチャ: ON AIRタリー列。実際の発話状態がそのまま灯る */
 .tally {
   display: flex;
@@ -176,6 +184,59 @@ a { color: var(--focus); }
   align-items: center;
   gap: 8px;
 }
+
+.panel-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.panel-title-row h2 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.18em; color: var(--ink-dim); text-transform: uppercase; }
+.integration-summary { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.integration-summary-item, .integration-status {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--panel-edge);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font: 10px var(--mono);
+  white-space: nowrap;
+}
+.integration-summary-item.is-ready, .integration-status[data-status="ready"] { border-color: #234a3a; color: var(--ok); }
+.integration-summary-item.is-warn, .integration-status[data-status="degraded"], .integration-status[data-status="reconnecting"] { border-color: #4a3a23; color: var(--cue); }
+.integration-summary-item.is-error, .integration-status[data-status="error"], .integration-status[data-status="auth_required"], .integration-status[data-status="configuration_required"] { border-color: #5c2727; color: var(--onair); }
+.integration-summary-item.is-checking, .integration-status[data-status="checking"] { color: var(--focus); }
+.integration-mini-list, .integration-list { display: grid; gap: 6px; }
+.integration-mini-list .integration-card-actions button:first-child { display: none; }
+.integration-card { border: 1px solid var(--panel-edge); border-radius: 7px; padding: 7px 8px; background: #171c24; }
+.integration-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.integration-card-detail { color: var(--ink-dim); font-size: 11px; overflow-wrap: anywhere; }
+.integration-card-actions { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
+.integration-card-actions button { padding: 2px 7px; font-size: 11px; }
+.integration-retry { color: var(--cue); font: 10px var(--mono); }
+.integration-notice { border-left: 3px solid var(--onair); padding: 5px 7px; margin-top: 7px; font-size: 11px; }
+.integration-dialog:not([open]), .diagnostic-export-dialog:not([open]) { display: none; }
+.integration-dialog[open], .diagnostic-export-dialog[open] {
+  width: min(980px, 94vw);
+  max-height: 88vh;
+  border: 1px solid var(--panel-edge);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 18px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+  overflow: auto;
+}
+.integration-dialog::backdrop, .diagnostic-export-dialog::backdrop { background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); }
+.integration-dialog > h2, .diagnostic-export-dialog > h2 { margin: 0 0 12px; font-size: 16px; }
+.integration-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.integration-filters select { background: #10131a; border: 1px solid var(--panel-edge); border-radius: 6px; padding: 5px 8px; }
+.integration-filters label { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-dim); font-size: 12px; }
+.integration-panel-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, .8fr); gap: 12px; }
+.integration-details { border: 1px solid var(--panel-edge); border-radius: 8px; padding: 10px; background: var(--panel); min-width: 0; }
+.integration-details h3 { margin: 0 0 4px; }
+.integration-detail-status { color: var(--ink-dim); margin: 0 0 8px; }
+.integration-detail-metrics { display: grid; gap: 3px; margin: 10px 0; }
+.integration-detail-row { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid #252c36; font-size: 11px; }
+.integration-detail-row dt { color: var(--ink-dim); }
+.integration-detail-row dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.integration-timeline { padding-left: 18px; margin: 10px 0 0; color: var(--ink-dim); font: 10px var(--mono); }
+.diagnostic-export-preview { max-height: 56vh; overflow: auto; padding: 10px; border: 1px solid var(--panel-edge); border-radius: 7px; background: #10131a; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px var(--mono); }
 
 .panel-kicker {
   font-family: var(--mono);
@@ -992,6 +1053,12 @@ body.obs.transparent { background: transparent; }
   .settings-sidebar button { min-width: 96px; }
   .settings-title h2 { font-size: 14px; }
   .settings-close { min-width: 44px; min-height: 44px; }
+}
+
+@media (max-width: 720px) {
+  .integration-health-quick { width: 100%; order: 3; }
+  .integration-panel-columns { grid-template-columns: 1fr; }
+  .integration-dialog[open], .diagnostic-export-dialog[open] { width: 100vw; max-width: 100vw; max-height: 100dvh; margin: 0; border-radius: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

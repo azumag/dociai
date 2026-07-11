@@ -14,6 +14,10 @@
       <span class="brand-sub">コメント読み上げコンソール</span>
     </div>
     <div class="tally" id="tally" aria-label="ペルソナ状態ランプ"></div>
+    <div class="integration-health-quick" aria-live="polite">
+      <span id="integration-health-header-summary">連携ヘルス: 未確認</span>
+      <button id="btn-integrations-open" type="button">連携詳細</button>
+    </div>
     <div class="config-controls">
       <span class="chip" id="config-status">設定: 未読込</span>
       <button id="btn-load-server" type="button">サーバーから読込</button>
@@ -91,6 +95,15 @@
     </div>
 
     <div class="col col-right">
+      <section class="panel panel-integration-health" aria-labelledby="integration-health-heading">
+        <div class="panel-title-row">
+          <h2 id="integration-health-heading">連携ヘルス</h2>
+          <button id="btn-integrations-open-panel" type="button">詳細</button>
+        </div>
+        <div id="integration-health-summary" class="integration-summary" aria-live="polite"></div>
+        <div id="integration-health-mini-list" class="integration-mini-list"></div>
+        <div id="integration-health-notice" class="integration-notice" role="status" aria-live="polite" hidden></div>
+      </section>
       <section class="panel">
         <h2>ペルソナ</h2>
         <ul id="persona-list" class="rack-list"></ul>
@@ -130,6 +143,9 @@
       </section>
     </div>
   </main>
+
+  <dialog id="integration-health-dialog" class="integration-dialog"></dialog>
+  <dialog id="diagnostic-export-dialog" class="diagnostic-export-dialog"></dialog>
 
   <script type="module" src="./src/app.js"></script>
 </body>
