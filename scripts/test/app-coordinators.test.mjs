@@ -4,6 +4,7 @@ import { AutomationCoordinator } from "../../src/app/automation-coordinator.js";
 import { ResponseCoordinator } from "../../src/app/response-coordinator.js";
 import { SourceCoordinator } from "../../src/app/source-coordinator.js";
 import { ObsBridge } from "../../src/obs/obs-bridge.js";
+import { createEnvelope } from "../../src/obs/obs-protocol.js";
 
 const runtime = { createRequest: () => ({ context: { signal: new AbortController().signal, requestId: "r1" }, complete() {} }), isCurrent: () => true, guard() {} };
 
@@ -49,4 +50,14 @@ test("AutomationCoordinator suppresses duplicate runs and ObsBridge is bounded a
   assert.equal(bridge.publish("comment", { text: "x" }), true); assert.equal(messages[0].payload.generation, 3);
   assert.equal(bridge.snapshot().sequence, 1); assert.equal(bridge.snapshot().generation, 3);
   bridge.dispose(); assert.equal(bridge.publish("comment", {}), false);
+});
+
+test("ObsBridge replies to client snapshot requests and heartbeats", () => {
+  const messages = [];
+  const bridge = new ObsBridge({ transport: { postMessage: (message) => messages.push(message) }, getGeneration: () => 2 });
+  bridge.publish("comment", { text: "latest" });
+  assert.equal(bridge.receive(createEnvelope("snapshot-request", { clientId: "obs-a" }, { serverInstanceId: "client" })), true);
+  assert.equal(messages.at(-1).type, "snapshot"); assert.equal(messages.at(-1).targetClientId, "obs-a");
+  assert.equal(bridge.receive(createEnvelope("heartbeat", { clientId: "obs-a" }, { serverInstanceId: "client" })), true);
+  assert.equal(messages.at(-1).type, "heartbeat"); assert.equal(bridge.diagnostics().clients, 1);
 });

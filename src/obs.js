@@ -35,4 +35,4 @@ const client = new ObsClient({
   onSnapshot(snapshot) { if (snapshot.comment) render("comment", snapshot.comment); if (snapshot.reply) render("reply", snapshot.reply); if (snapshot.speech) render("speech", snapshot.speech); },
 });
 client.start();
-setInterval(() => client.tick(), 1_000);
+setInterval(() => { client.heartbeat(); client.tick(); }, 1_000);

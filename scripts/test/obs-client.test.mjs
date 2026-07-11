@@ -14,7 +14,9 @@ test("OBS client handshakes, applies snapshot, and requests again after a gap", 
   assert.equal(client.snapshot.comment.text, "latest"); assert.deepEqual(statuses, ["connected"]);
   transport.listener(createEnvelope("state", { kind: "comment", text: "gap" }, { serverInstanceId: "server", generation: 1, sequence: 5 }));
   assert.equal(transport.sent.length, 4);
+  client.heartbeat(); assert.equal(transport.sent.at(-1).type, "heartbeat");
   now = 6_000; client.tick(); assert.equal(client.status, "stale");
+  client.tick(); assert.equal(client.status, "disconnected");
 });
 
 test("connection state preserves prior content during disconnect", () => {
