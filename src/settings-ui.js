@@ -12,6 +12,12 @@
 
 import { validateConfig } from "./config-loader.js";
 import { registryIds } from "./config/config-registry.js";
+import { SettingsController } from "./settings/settings-controller.js";
+import { processConfig } from "./config/config-pipeline.js";
+import { validateConfigStructure } from "./config/config-validation.js";
+import { fieldMetadataForIssue } from "./settings/settings-field-registry.js";
+import { navigateToIssue } from "./settings/settings-navigation.js";
+import { showDiscardChangesDialog } from "./ui/dialogs/discard-changes-dialog.js";
 
 const PROVIDERS = registryIds("providers");
 const TRIGGER_TYPES = registryIds("triggerTypes");
@@ -27,6 +33,8 @@ const asArray = (v) => (Array.isArray(v) ? v : []);
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
 export class SettingsUI {
+  get dirty() { return Boolean(this.controller?.state.dirty); }
+
   constructor({ getCurrent = () => null, onApply = () => {}, log = () => {} } = {}) {
     this.getCurrent = getCurrent;
     this.onApply = onApply;
@@ -35,6 +43,10 @@ export class SettingsUI {
     this.activeTab = "connectors";
     this.root = null;
     this._built = false;
+    this.controller = new SettingsController({
+      confirmDiscard: async () => showDiscardChangesDialog(document),
+      save: async (draft) => { const { errors } = validateConfig(draft); if (errors.length) throw new Error(errors[0]); await this.onApply(clone(draft)); if (this.root?.open) this.root.close(); },
+    });
     this._voices = [];
     this._voiceSupported = typeof window !== "undefined" && "speechSynthesis" in window;
     if (this._voiceSupported) {
@@ -53,14 +65,17 @@ export class SettingsUI {
       return;
     }
     this.draft = clone(current);
+    this.controller.open(this.draft);
     this.activeTab = "connectors";
     this.#ensureBuilt();
     this.#render();
     if (!this.root.open) this.root.showModal();
   }
 
-  close() {
-    if (this.root?.open) this.root.close();
+  async close(reason = "close-button") {
+    const result = await this.controller.requestClose(reason);
+    if (result === "closed" && this.root?.open) this.root.close();
+    return result;
   }
 
   #refreshVoices() {
@@ -145,7 +160,7 @@ export class SettingsUI {
     closeBtn.className = "settings-close";
     closeBtn.innerHTML = "&times;";
     closeBtn.title = "閉じる";
-    closeBtn.addEventListener("click", () => this.close());
+    closeBtn.addEventListener("click", () => this.close("close-button"));
     header.append(closeBtn);
 
     // sidebar + main を包むシェル
@@ -202,7 +217,7 @@ export class SettingsUI {
     cancelBtn.type = "button";
     cancelBtn.className = "btn-ghost";
     cancelBtn.textContent = "キャンセル";
-    cancelBtn.addEventListener("click", () => this.close());
+    cancelBtn.addEventListener("click", () => this.close("cancel-button"));
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
     applyBtn.className = "btn-primary";
@@ -215,6 +230,9 @@ export class SettingsUI {
     main.append(body, footer);
     shell.append(nav, main);
     dlg.append(header, shell);
+    dlg.addEventListener("cancel", (event) => { event.preventDefault(); this.close("escape"); });
+    dlg.addEventListener("input", () => this.controller.changed(this.draft));
+    dlg.addEventListener("change", () => this.controller.changed(this.draft));
     this._body = body;
     this._errors = errors;
     this._built = true;
@@ -223,6 +241,11 @@ export class SettingsUI {
   #render() {
     for (const b of this.root.querySelectorAll(".settings-sidebar button")) {
       b.classList.toggle("is-active", b.dataset.tab === this.activeTab);
+      const issues = this.controller.state.issues.filter((issue) => issue.tabId === b.dataset.tab);
+      const errors = issues.filter((issue) => issue.severity === "error").length;
+      const warnings = issues.length - errors;
+      b.dataset.issueCount = issues.length ? String(issues.length) : "";
+      b.setAttribute("aria-label", `${b.querySelector(".tab-label")?.textContent ?? b.dataset.tab}${errors ? `、エラー${errors}件` : ""}${warnings ? `、警告${warnings}件` : ""}`);
     }
     this._body.replaceChildren();
     const tab = this.activeTab;
@@ -268,6 +291,7 @@ export class SettingsUI {
       input.type = type;
     }
     input.value = value ?? "";
+    input.dataset.configPath = path;
     if (placeholder) input.placeholder = placeholder;
     for (const [k, v] of Object.entries(attrs)) input[k] = v;
     const handler = () => {
@@ -289,6 +313,7 @@ export class SettingsUI {
     lab.className = "field-label";
     lab.textContent = label;
     const sel = document.createElement("select");
+    sel.dataset.configPath = path;
     for (const opt of options) {
       const o = document.createElement("option");
       const isObj = typeof opt === "object" && opt !== null;
@@ -307,6 +332,7 @@ export class SettingsUI {
     wrap.className = "field field-inline";
     const cb = document.createElement("input");
     cb.type = "checkbox";
+    cb.dataset.configPath = path;
     cb.checked = !!value;
     cb.addEventListener("change", () => this.#setPath(this.draft, path, cb.checked));
     const lab = document.createElement("span");
@@ -325,6 +351,7 @@ export class SettingsUI {
     lab.textContent = label;
     const input = document.createElement("input");
     input.type = type;
+    input.dataset.configPath = `${mapName}.${key}.${field === "__id__" ? "id" : field}`;
     input.value = value ?? "";
     for (const [k, v] of Object.entries(attrs)) input[k] = v;
     input.addEventListener("input", () => {
@@ -347,6 +374,7 @@ export class SettingsUI {
     lab.className = "field-label";
     lab.textContent = label;
     const sel = document.createElement("select");
+    sel.dataset.configPath = `${mapName}.${key}.${field}`;
     for (const opt of options) {
       const o = document.createElement("option");
       o.value = opt;
@@ -411,6 +439,7 @@ export class SettingsUI {
       input.type = type;
     }
     input.value = value ?? "";
+    input.dataset.configPath = `${arrPath}.${index}.${field}`;
     for (const [k, v] of Object.entries(attrs)) input[k] = v;
     input.addEventListener("input", () => {
       const arr = this.#getArr(arrPath);
@@ -429,6 +458,7 @@ export class SettingsUI {
     lab.className = "field-label";
     lab.textContent = label;
     const sel = document.createElement("select");
+    sel.dataset.configPath = `${arrPath}.${index}.${field}`;
     for (const opt of options) {
       const o = document.createElement("option");
       const isObj = typeof opt === "object" && opt !== null;
@@ -451,6 +481,7 @@ export class SettingsUI {
     wrap.className = "field field-inline";
     const cb = document.createElement("input");
     cb.type = "checkbox";
+    cb.dataset.configPath = `${arrPath}.${index}.${field}`;
     cb.checked = !!value;
     cb.addEventListener("change", () => {
       const arr = this.#getArr(arrPath);
@@ -978,16 +1009,31 @@ export class SettingsUI {
 
   // ---- 適用 / エクスポート ----
   async #apply() {
+    const processed = processConfig(this.draft);
+    const structured = processed.ok ? validateConfigStructure(processed.config) : processed;
     const { errors, warnings } = validateConfig(this.draft);
     this._errors.replaceChildren();
-    if (errors.length) {
+    const structuredIssues = structured.issues?.map(fieldMetadataForIssue) ?? [];
+    this.controller.state.issues = structuredIssues;
+    for (const issue of structuredIssues) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `settings-error is-${issue.severity}`;
+      button.textContent = `${issue.fieldId}: ${issue.message}`;
+      button.addEventListener("click", () => {
+        const found = navigateToIssue(this.root, issue, (tab) => { this.activeTab = tab; this.#render(); });
+        if (!found) this.log(`該当入力を表示できません: ${issue.fieldId}`, "warn");
+      });
+      this._errors.append(button);
+    }
+    if (errors.length || structuredIssues.some((issue) => issue.severity === "error")) {
       for (const e of errors) {
         const div = document.createElement("div");
         div.className = "settings-error";
         div.textContent = e;
         this._errors.append(div);
       }
-      this.log(`設定エディタ: ${errors.length}件のエラーで適用を中止`, "error");
+      this.log(`設定エディタ: ${errors.length + structuredIssues.filter((issue) => issue.severity === "error").length}件のエラーで適用を中止`, "error");
       return;
     }
     for (const w of warnings) this.log(`設定エディタの警告: ${w}`, "warn");
@@ -995,7 +1041,9 @@ export class SettingsUI {
     try {
       await this.onApply(clone(this.draft));
       this.log("設定を config.local.json に保存し、適用しました");
-      this.close();
+      this.controller.changed(this.draft);
+      this.controller.state.dirty = false;
+      this.close("saved");
     } catch (e) {
       const div = document.createElement("div");
       div.className = "settings-error";
