@@ -73,9 +73,35 @@ try {
   await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === true, { timeout: 3000 });
   check("設定エディタが開く", true);
 
+  const semantics = await page.evaluate(() => {
+    const dialog = document.querySelector("dialog.settings-modal");
+    const tabs = [...dialog.querySelectorAll('[role="tab"]')];
+    const panel = dialog.querySelector('[role="tabpanel"]');
+    const labelledFields = [...dialog.querySelectorAll("[data-config-path]")];
+    return {
+      dialogLabel: dialog.getAttribute("aria-labelledby"),
+      tablist: dialog.querySelector('[role="tablist"]')?.getAttribute("aria-orientation"),
+      tabs: tabs.every((tab) => tab.id && tab.getAttribute("aria-controls") && tab.getAttribute("aria-selected") != null),
+      panel: panel?.id && panel.getAttribute("aria-labelledby"),
+      fields: labelledFields.length > 0 && labelledFields.every((field) => {
+        const label = dialog.querySelector(`label[for="${CSS.escape(field.id)}"]`);
+        return field.id && label && field.getAttribute("aria-labelledby") === label.id;
+      }),
+      live: !!dialog.querySelector("#settings-status-live[aria-live=polite]") && !!dialog.querySelector("#settings-error-live[aria-live=assertive]"),
+    };
+  });
+  check("dialog/tab/field/live region のアクセシビリティ構造", Boolean(semantics.dialogLabel && semantics.tablist === "vertical" && semantics.tabs && semantics.panel && semantics.fields && semantics.live), JSON.stringify(semantics));
+
   // 2. 既定タブは connectors
   const activeTab = await page.$eval(".settings-sidebar button.is-active", (el) => el.dataset.tab);
   check("既定タブは connectors", activeTab === "connectors", `active=${activeTab}`);
+
+  await page.waitForFunction(() => document.activeElement?.getAttribute("role") === "tab", { timeout: 2000 });
+  await page.keyboard.press("ArrowDown");
+  await page.waitForFunction(() => document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tab === "personas", { timeout: 2000 });
+  await page.keyboard.press("Home");
+  await page.waitForFunction(() => document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tab === "connectors", { timeout: 2000 });
+  check("tab は Arrow/Home で roving focus と activation を行う", true);
 
   // 3. コネクタID (input value) に既存のコネクタが表示されている
   const connText = await visibleText(page);
@@ -204,7 +230,32 @@ try {
     check("エクスポートpackageに秘密値が含まれない", !containsSecretKey(json.config));
   }
 
-  // 13. キャンセル (ESC) でモーダルが閉じる
+  // 13. validation エラーは visible status と assertive live region に出る
+  await page.click('.settings-sidebar button[data-tab="personas"]');
+  await page.waitForFunction(() => document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tab === "personas", { timeout: 2000 });
+  await page.evaluate(() => {
+    const select = document.querySelector('.settings-body select[data-config-path="personas.0.connector"]');
+    select.value = "";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await page.keyboard.down("Control");
+  await page.keyboard.press("s");
+  await page.keyboard.up("Control");
+  await page.waitForFunction(() => document.querySelector("#settings-error-live")?.textContent.includes("保存できません"), { timeout: 2000 });
+  const validationState = await page.evaluate(() => ({
+    live: document.querySelector("#settings-error-live")?.textContent,
+    visible: document.querySelector(".settings-status")?.textContent,
+  }));
+  check("Ctrl+S と validation 失敗が screen reader / 可視 status に通知される", validationState.live.includes("保存できません") && validationState.visible.includes("保存できません"), JSON.stringify(validationState));
+
+  // 13b. dirty 状態の ESC は discard dialog を経由し、親 dialog を閉じられる
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.querySelector(".discard-changes-dialog")?.open === true, { timeout: 2000 });
+  await page.click('.discard-changes-dialog button:nth-of-type(2)');
+  await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === false, { timeout: 2000 });
+  check("dirty 状態の ESC は破棄確認を経由する", true);
+
+  // 14. キャンセル (ESC) でモーダルが閉じる
   //     エクスポート後にモーダルが閉じていることがあるので、開いていなければ開き直す
   const openBefore = await page.evaluate(() => document.querySelector("dialog.settings-modal")?.open === true);
   if (!openBefore) {
@@ -218,7 +269,7 @@ try {
   );
   check("ESC でモーダルが閉じる", true);
 
-  // 13b. 閉じた状態から開き直せることも確認
+  // 14b. 閉じた状態から開き直せることも確認
   await page.click("#btn-settings");
   await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === true, { timeout: 3000 });
   await page.keyboard.press("Escape");
@@ -228,7 +279,22 @@ try {
   );
   check("閉じた後に開き直せる", true);
 
-  // 14. localStorage/sessionStorage にAPIキーを書いていない (issue #13 維持)
+  // 15. 320px相当でも modal/footer が画面外へ固定されず、主要操作を横スクロールさせない
+  await page.setViewport({ width: 320, height: 640 });
+  await page.click("#btn-settings");
+  await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === true, { timeout: 3000 });
+  const compactLayout = await page.evaluate(() => {
+    const dialog = document.querySelector("dialog.settings-modal");
+    const footer = dialog.querySelector(".settings-footer").getBoundingClientRect();
+    const dialogRect = dialog.getBoundingClientRect();
+    return { scrolls: dialog.scrollWidth <= window.innerWidth, footerVisible: footer.bottom <= window.innerHeight + 1, tabOrientation: dialog.querySelector('[role="tablist"]')?.getAttribute("aria-orientation"), footer: { top: footer.top, bottom: footer.bottom }, dialog: { top: dialogRect.top, bottom: dialogRect.bottom }, viewport: { width: window.innerWidth, height: window.innerHeight } };
+  });
+  check("320px相当で主要操作が切れず footer が見える", compactLayout.scrolls && compactLayout.footerVisible && compactLayout.tabOrientation === "horizontal", JSON.stringify(compactLayout));
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === false, { timeout: 2000 });
+  await page.setViewport({ width: 1440, height: 1000 });
+
+  // 16. localStorage/sessionStorage にAPIキーを書いていない (issue #13 維持)
   const storage = await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }));
   check("エディタ使用後も localStorage/sessionStorage は空", storage.local === 0 && storage.session === 0, JSON.stringify(storage));
 

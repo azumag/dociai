@@ -1,7 +1,7 @@
 export function showDiscardChangesDialog(document, { canSave = true } = {}) {
   return new Promise((resolve) => {
-    const dialog = document.createElement("dialog"); dialog.className = "discard-changes-dialog";
-    const title = document.createElement("h2"); title.textContent = "未保存の変更があります";
+    const dialog = document.createElement("dialog"); dialog.className = "discard-changes-dialog"; dialog.setAttribute("aria-labelledby", "discard-changes-title");
+    const title = document.createElement("h2"); title.id = "discard-changes-title"; title.textContent = "未保存の変更があります";
     const detail = document.createElement("p"); detail.textContent = "変更を保存して適用するか、破棄するか選択してください。";
     const actions = document.createElement("div"); actions.className = "settings-actions";
     const finish = (choice) => { dialog.close(); dialog.remove(); resolve(choice); };

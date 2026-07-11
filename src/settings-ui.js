@@ -20,6 +20,10 @@ import { fieldMetadataForIssue } from "./settings/settings-field-registry.js";
 import { navigateToIssue } from "./settings/settings-navigation.js";
 import { showDiscardChangesDialog } from "./ui/dialogs/discard-changes-dialog.js";
 import { serializeConfigExport } from "./config/config-export.js";
+import { createTabsController } from "./settings/a11y/tabs-controller.js";
+import { createLiveAnnouncer } from "./settings/a11y/live-region.js";
+import { deferFocus, restoreFocus } from "./settings/a11y/focus-controller.js";
+import { fieldIds } from "./settings/a11y/field-a11y.js";
 
 const PROVIDERS = registryOptions("providers");
 const TRIGGER_TYPES = registryOptions("triggerTypes");
@@ -52,6 +56,8 @@ export class SettingsUI {
     this.draft = null;
     this.activeTab = "connectors";
     this.root = null;
+    this._opener = null;
+    this._pendingFocusSelector = null;
     this._built = false;
     this.controller = new SettingsController({
       confirmDiscard: async () => showDiscardChangesDialog(document),
@@ -74,17 +80,21 @@ export class SettingsUI {
       this.log("設定を読み込んでから編集してください", "warn");
       return;
     }
+    this._opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     this.draft = clone(current);
     this.controller.open(this.draft);
     this.activeTab = "connectors";
     this.#ensureBuilt();
-    this.#render();
     if (!this.root.open) this.root.showModal();
+    this.#render();
+    deferFocus(this._tabs?.find((tab) => tab.dataset.tab === this.activeTab));
+    this._announcer?.announce("設定エディタを開きました");
   }
 
   async close(reason = "close-button") {
     const result = await this.controller.requestClose(reason);
     if (result === "closed" && this.root?.open) this.root.close();
+    if (result === "continued") deferFocus(this._closeButton);
     return result;
   }
 
@@ -154,6 +164,8 @@ export class SettingsUI {
     if (this._built) return;
     const dlg = document.createElement("dialog");
     dlg.className = "settings-modal";
+    dlg.setAttribute("aria-labelledby", "settings-dialog-title");
+    dlg.setAttribute("aria-describedby", "settings-dialog-description");
     this.root = dlg;
     document.body.append(dlg);
     // 背景クリックでの close は行わない。閉じるのは ×/キャンセル/保存して適用のみ
@@ -163,15 +175,24 @@ export class SettingsUI {
     header.className = "settings-header";
     const title = document.createElement("div");
     title.className = "settings-title";
-    title.innerHTML = `<span class="settings-title-icon">&#9881;</span><h2>設定エディタ</h2>`;
+    const icon = document.createElement("span");
+    icon.className = "settings-title-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = "⚙";
+    const heading = document.createElement("h2");
+    heading.id = "settings-dialog-title";
+    heading.textContent = "設定エディタ";
+    title.append(icon, heading);
     header.append(title);
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "settings-close";
     closeBtn.innerHTML = "&times;";
     closeBtn.title = "閉じる";
+    closeBtn.setAttribute("aria-label", "設定エディタを閉じる");
     closeBtn.addEventListener("click", () => this.close("close-button"));
     header.append(closeBtn);
+    this._closeButton = closeBtn;
 
     // sidebar + main を包むシェル
     const shell = document.createElement("div");
@@ -179,6 +200,9 @@ export class SettingsUI {
 
     const nav = document.createElement("nav");
     nav.className = "settings-sidebar";
+    nav.setAttribute("aria-label", "設定カテゴリ");
+    nav.setAttribute("role", "tablist");
+    nav.setAttribute("aria-orientation", "vertical");
     const tabs = [
       ["connectors", "コネクタ", "AIプロバイダ"],
       ["personas", "ペルソナ", "応答キャラクター"],
@@ -196,12 +220,14 @@ export class SettingsUI {
       const b = document.createElement("button");
       b.type = "button";
       b.dataset.tab = id;
+      b.id = `settings-tab-${id}`;
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-controls", `settings-panel-${id}`);
       b.innerHTML = `<span class="tab-label"></span><span class="tab-desc"></span>`;
       b.querySelector(".tab-label").textContent = label;
       b.querySelector(".tab-desc").textContent = desc;
       b.addEventListener("click", () => {
-        this.activeTab = id;
-        this.#render();
+        this.#activateTab(id, { announce: true });
       });
       nav.append(b);
     }
@@ -211,11 +237,18 @@ export class SettingsUI {
 
     const body = document.createElement("div");
     body.className = "settings-body";
+    body.tabIndex = 0;
+    body.setAttribute("role", "tabpanel");
 
     const footer = document.createElement("footer");
     footer.className = "settings-footer";
     const errors = document.createElement("div");
     errors.className = "settings-errors";
+    errors.id = "settings-visible-errors";
+    const status = document.createElement("div");
+    status.className = "settings-status";
+    status.id = "settings-dialog-description";
+    status.textContent = "設定を編集できます";
     const footerActions = document.createElement("div");
     footerActions.className = "settings-actions";
     const exportBtn = document.createElement("button");
@@ -235,22 +268,57 @@ export class SettingsUI {
     applyBtn.addEventListener("click", () => this.#apply());
     this._applyBtn = applyBtn;
     footerActions.append(exportBtn, cancelBtn, applyBtn);
-    footer.append(errors, footerActions);
+    footer.append(status, errors, footerActions);
+
+    const live = document.createElement("div");
+    live.className = "sr-only";
+    live.id = "settings-status-live";
+    live.setAttribute("aria-live", "polite");
+    live.setAttribute("aria-atomic", "true");
+    const errorLive = document.createElement("div");
+    errorLive.className = "sr-only";
+    errorLive.id = "settings-error-live";
+    errorLive.setAttribute("aria-live", "assertive");
+    errorLive.setAttribute("aria-atomic", "true");
 
     main.append(body, footer);
     shell.append(nav, main);
-    dlg.append(header, shell);
+    dlg.append(header, shell, live, errorLive);
     dlg.addEventListener("cancel", (event) => { event.preventDefault(); this.close("escape"); });
+    dlg.addEventListener("close", () => { restoreFocus(this._opener); this._opener = null; });
+    dlg.addEventListener("keydown", (event) => {
+      const targetPath = event.target?.dataset?.configPath ?? "";
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s" && !targetPath.endsWith(".keys")) {
+        event.preventDefault();
+        if (this.controller.state.dirty) this.#apply();
+      }
+    });
     dlg.addEventListener("input", () => this.controller.changed(this.draft));
     dlg.addEventListener("change", () => this.controller.changed(this.draft));
     this._body = body;
     this._errors = errors;
+    this._status = status;
+    this._announcer = createLiveAnnouncer(live);
+    this._errorAnnouncer = createLiveAnnouncer(errorLive);
+    this._tabs = [...nav.querySelectorAll('[role="tab"]')];
+    this._tabsController = createTabsController({
+      tabs: () => this._tabs,
+      orientation: () => getComputedStyle(nav).flexDirection === "row" ? "horizontal" : "vertical",
+      activate: (id, options) => this.#activateTab(id, options),
+    });
+    const updateTabOrientation = () => nav.setAttribute("aria-orientation", getComputedStyle(nav).flexDirection === "row" ? "horizontal" : "vertical");
+    addEventListener("resize", updateTabOrientation);
+    updateTabOrientation();
+    for (const tab of this._tabs) tab.addEventListener("keydown", (event) => this._tabsController.onKeydown(event));
     this._built = true;
   }
 
   #render() {
-    for (const b of this.root.querySelectorAll(".settings-sidebar button")) {
-      b.classList.toggle("is-active", b.dataset.tab === this.activeTab);
+    for (const b of this._tabs) {
+      const active = b.dataset.tab === this.activeTab;
+      b.classList.toggle("is-active", active);
+      b.setAttribute("aria-selected", String(active));
+      b.tabIndex = active ? 0 : -1;
       const issues = this.controller.state.issues.filter((issue) => issue.tabId === b.dataset.tab);
       const errors = issues.filter((issue) => issue.severity === "error").length;
       const warnings = issues.length - errors;
@@ -258,6 +326,8 @@ export class SettingsUI {
       b.setAttribute("aria-label", `${b.querySelector(".tab-label")?.textContent ?? b.dataset.tab}${errors ? `、エラー${errors}件` : ""}${warnings ? `、警告${warnings}件` : ""}`);
     }
     this._body.replaceChildren();
+    this._body.id = `settings-panel-${this.activeTab}`;
+    this._body.setAttribute("aria-labelledby", `settings-tab-${this.activeTab}`);
     const tab = this.activeTab;
     if (tab === "connectors") this.#renderConnectors();
     else if (tab === "personas") this.#renderPersonas();
@@ -271,6 +341,39 @@ export class SettingsUI {
     else if (tab === "topics") this.#renderTopics();
     else if (tab === "sources") this.#renderSources();
     this._body.scrollTop = 0;
+    this.#applyIssueA11y();
+    if (this._pendingFocusSelector) {
+      const target = this._body.querySelector(this._pendingFocusSelector);
+      this._pendingFocusSelector = null;
+      deferFocus(target);
+    }
+  }
+
+  #activateTab(id, { focus = false, announce = false } = {}) {
+    if (!this._tabs?.some((tab) => tab.dataset.tab === id)) return;
+    this.activeTab = id;
+    this.#render();
+    const tab = this._tabs.find((candidate) => candidate.dataset.tab === id);
+    if (focus) deferFocus(tab);
+    if (announce) {
+      const issues = this.controller.state.issues.filter((issue) => issue.tabId === id && issue.severity === "error").length;
+      this._announcer?.announce(`${tab?.querySelector(".tab-label")?.textContent ?? id} タブ${issues ? `、エラー ${issues}件` : ""}`);
+    }
+  }
+
+  #applyIssueA11y() {
+    for (const issue of this.controller.state.issues) {
+      const field = this._body.querySelector(`[data-config-path="${CSS.escape(issue.fieldId)}"]`);
+      if (!field) continue;
+      const ids = fieldIds(issue.fieldId);
+      field.setAttribute("aria-invalid", String(issue.severity === "error"));
+      field.setAttribute("aria-describedby", ids.error);
+      const message = document.createElement("span");
+      message.id = ids.error;
+      message.className = "sr-only";
+      message.textContent = issue.message;
+      field.after(message);
+    }
   }
 
   // ---- draft への setter ヘルパ ----
@@ -285,16 +388,33 @@ export class SettingsUI {
   }
 
   // ---- 共通フォーム部品 ----
+  #fieldShell(label, path, { inline = false } = {}) {
+    const ids = fieldIds(path);
+    const wrap = document.createElement("div");
+    wrap.className = `field${inline ? " field-inline" : ""}`;
+    const lab = document.createElement("label");
+    lab.className = "field-label";
+    lab.id = ids.label;
+    lab.htmlFor = ids.input;
+    lab.textContent = label;
+    wrap.append(lab);
+    return { wrap, ids };
+  }
+
+  #attachFieldInput(shell, input, path) {
+    input.id = shell.ids.input;
+    input.dataset.configPath = path;
+    input.setAttribute("aria-labelledby", shell.ids.label);
+    shell.wrap.append(input);
+    return shell.wrap;
+  }
+
   // path 経由で draft に書き込む入力
   #pathField(label, path, { type = "text", value = "", placeholder = "", attrs = {}, csv = false, textarea = false, rows = 3 } = {}) {
     const metadata = configUiMetadata(path);
     const inputType = metadata.secret && type === "text" ? "password" : type;
     const inputAttrs = { ...attrs, ...(metadata.min != null ? { min: metadata.min } : {}), ...(metadata.max != null ? { max: metadata.max } : {}) };
-    const wrap = document.createElement("label");
-    wrap.className = "field";
-    const lab = document.createElement("span");
-    lab.className = "field-label";
-    lab.textContent = metadata.label ?? label;
+    const shell = this.#fieldShell(metadata.label ?? label, path);
     let input;
     if (textarea) {
       input = document.createElement("textarea");
@@ -304,7 +424,6 @@ export class SettingsUI {
       input.type = inputType;
     }
     input.value = value ?? "";
-    input.dataset.configPath = path;
     if (placeholder) input.placeholder = placeholder;
     for (const [k, v] of Object.entries(inputAttrs)) input[k] = v;
     const handler = () => {
@@ -315,18 +434,12 @@ export class SettingsUI {
     };
     input.addEventListener("input", handler);
     input.addEventListener("change", handler);
-    wrap.append(lab, input);
-    return wrap;
+    return this.#attachFieldInput(shell, input, path);
   }
 
   #pathSelect(label, options, path, { value = "" } = {}) {
-    const wrap = document.createElement("label");
-    wrap.className = "field";
-    const lab = document.createElement("span");
-    lab.className = "field-label";
-    lab.textContent = label;
+    const shell = this.#fieldShell(label, path);
     const sel = document.createElement("select");
-    sel.dataset.configPath = path;
     for (const opt of options) {
       const o = document.createElement("option");
       const isObj = typeof opt === "object" && opt !== null;
@@ -336,23 +449,16 @@ export class SettingsUI {
     }
     sel.value = value ?? "";
     sel.addEventListener("change", () => this.#setPath(this.draft, path, sel.value || null));
-    wrap.append(lab, sel);
-    return wrap;
+    return this.#attachFieldInput(shell, sel, path);
   }
 
   #pathCheckbox(label, path, { value = false } = {}) {
-    const wrap = document.createElement("label");
-    wrap.className = "field field-inline";
+    const shell = this.#fieldShell(label, path, { inline: true });
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.dataset.configPath = path;
     cb.checked = !!value;
     cb.addEventListener("change", () => this.#setPath(this.draft, path, cb.checked));
-    const lab = document.createElement("span");
-    lab.className = "field-label";
-    lab.textContent = label;
-    wrap.append(cb, lab);
-    return wrap;
+    return this.#attachFieldInput(shell, cb, path);
   }
 
   // リスト要素のフィールド (オブジェクトマップ版)。onChange で setter 呼び出し。
@@ -360,14 +466,10 @@ export class SettingsUI {
     const metadata = field === "__id__" ? {} : configUiMetadata(`${mapName}.${key}.${field}`);
     const inputType = metadata.secret && type === "text" ? "password" : type;
     const inputAttrs = { ...attrs, ...(metadata.min != null ? { min: metadata.min } : {}), ...(metadata.max != null ? { max: metadata.max } : {}) };
-    const wrap = document.createElement("label");
-    wrap.className = "field";
-    const lab = document.createElement("span");
-    lab.className = "field-label";
-    lab.textContent = metadata.label ?? label;
+    const path = `${mapName}.${key}.${field === "__id__" ? "id" : field}`;
+    const shell = this.#fieldShell(metadata.label ?? label, path);
     const input = document.createElement("input");
     input.type = inputType;
-    input.dataset.configPath = `${mapName}.${key}.${field === "__id__" ? "id" : field}`;
     input.value = value ?? "";
     for (const [k, v] of Object.entries(inputAttrs)) input[k] = v;
     input.addEventListener("input", () => {
@@ -379,19 +481,14 @@ export class SettingsUI {
         this.draft[mapName][key][field] = v;
       }
     });
-    wrap.append(lab, input);
-    return wrap;
+    return this.#attachFieldInput(shell, input, path);
   }
 
   #mapSelect(label, options, mapName, key, field, { value = "" } = {}) {
     const metadata = configUiMetadata(`${mapName}.${key}.${field}`);
-    const wrap = document.createElement("label");
-    wrap.className = "field";
-    const lab = document.createElement("span");
-    lab.className = "field-label";
-    lab.textContent = metadata.label ?? label;
+    const path = `${mapName}.${key}.${field}`;
+    const shell = this.#fieldShell(metadata.label ?? label, path);
     const sel = document.createElement("select");
-    sel.dataset.configPath = `${mapName}.${key}.${field}`;
     for (const opt of options) {
       const o = document.createElement("option");
       const isObj = typeof opt === "object" && opt !== null;
@@ -404,8 +501,7 @@ export class SettingsUI {
       this.draft[mapName][key][field] = sel.value;
       if (field === "type") this.#render(); // type 別フィールド再描画
     });
-    wrap.append(lab, sel);
-    return wrap;
+    return this.#attachFieldInput(shell, sel, path);
   }
 
   #renameMapKey(mapName, oldKey, newKey) {
@@ -446,11 +542,8 @@ export class SettingsUI {
     const metadata = configUiMetadata(`${arrPath}.${index}.${field}`);
     const inputType = metadata.secret && type === "text" ? "password" : type;
     const inputAttrs = { ...attrs, ...(metadata.min != null ? { min: metadata.min } : {}), ...(metadata.max != null ? { max: metadata.max } : {}) };
-    const wrap = document.createElement("label");
-    wrap.className = "field";
-    const lab = document.createElement("span");
-    lab.className = "field-label";
-    lab.textContent = metadata.label ?? label;
+    const path = `${arrPath}.${index}.${field}`;
+    const shell = this.#fieldShell(metadata.label ?? label, path);
     let input;
     if (textarea) {
       input = document.createElement("textarea");
@@ -460,7 +553,6 @@ export class SettingsUI {
       input.type = inputType;
     }
     input.value = value ?? "";
-    input.dataset.configPath = `${arrPath}.${index}.${field}`;
     for (const [k, v] of Object.entries(inputAttrs)) input[k] = v;
     input.addEventListener("input", () => {
       const arr = this.#getArr(arrPath);
@@ -468,19 +560,14 @@ export class SettingsUI {
       if (type === "number") v = v === "" ? null : Number(v);
       this.#setPath(arr[index], field, v);
     });
-    wrap.append(lab, input);
-    return wrap;
+    return this.#attachFieldInput(shell, input, path);
   }
 
   #arrSelect(label, options, arrPath, index, field, { value = "" } = {}) {
     const metadata = configUiMetadata(`${arrPath}.${index}.${field}`);
-    const wrap = document.createElement("label");
-    wrap.className = "field";
-    const lab = document.createElement("span");
-    lab.className = "field-label";
-    lab.textContent = metadata.label ?? label;
+    const path = `${arrPath}.${index}.${field}`;
+    const shell = this.#fieldShell(metadata.label ?? label, path);
     const sel = document.createElement("select");
-    sel.dataset.configPath = `${arrPath}.${index}.${field}`;
     for (const opt of options) {
       const o = document.createElement("option");
       const isObj = typeof opt === "object" && opt !== null;
@@ -494,26 +581,20 @@ export class SettingsUI {
       this.#setPath(arr[index], field, sel.value);
       this.#render();
     });
-    wrap.append(lab, sel);
-    return wrap;
+    return this.#attachFieldInput(shell, sel, path);
   }
 
   #arrCheckbox(label, arrPath, index, field, { value = false } = {}) {
-    const wrap = document.createElement("label");
-    wrap.className = "field field-inline";
+    const path = `${arrPath}.${index}.${field}`;
+    const shell = this.#fieldShell(label, path, { inline: true });
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.dataset.configPath = `${arrPath}.${index}.${field}`;
     cb.checked = !!value;
     cb.addEventListener("change", () => {
       const arr = this.#getArr(arrPath);
       this.#setPath(arr[index], field, cb.checked);
     });
-    const lab = document.createElement("span");
-    lab.className = "field-label";
-    lab.textContent = label;
-    wrap.append(cb, lab);
-    return wrap;
+    return this.#attachFieldInput(shell, cb, path);
   }
 
   #getArr(path) {
@@ -541,6 +622,7 @@ export class SettingsUI {
       b.type = "button";
       b.className = "btn-add";
       b.innerHTML = `<span>+</span> 追加`;
+      b.setAttribute("aria-label", `${title}を追加`);
       b.addEventListener("click", onAdd);
       h.append(b);
     }
@@ -566,6 +648,7 @@ export class SettingsUI {
     b.className = "btn-remove";
     b.innerHTML = `<span>&times;</span>`;
     b.title = label;
+    b.setAttribute("aria-label", label);
     b.addEventListener("click", onRemove);
     return b;
   }
@@ -577,7 +660,9 @@ export class SettingsUI {
       let i = 1;
       while (this.draft.connectors[`new_connector_${i}`]) i++;
       this.draft.connectors[`new_connector_${i}`] = { provider: "mock" };
+      this._pendingFocusSelector = `[data-config-path="connectors.new_connector_${i}.id"]`;
       this.#render();
+      this._announcer?.announce(`コネクタ new_connector_${i} を追加しました`);
     }));
     const entries = Object.entries(this.draft.connectors ?? {});
     if (!entries.length) {
@@ -602,8 +687,10 @@ export class SettingsUI {
             if (p.connector === id) p.connector = "";
           }
           if (this.draft.context?.screenCapture?.connector === id) this.draft.context.screenCapture.connector = "";
+          this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
-        }),
+          this._announcer?.announce(`コネクタ ${id} を削除しました`);
+        }, `コネクタ「${id}」を削除`),
       );
       const row2 = document.createElement("div");
       row2.className = "compact-row";
@@ -632,7 +719,9 @@ export class SettingsUI {
         triggers: [],
         voice: { enabled: true, engine: "webspeech", name: "default", rate: 1.0, pitch: 1.0 },
       });
+      this._pendingFocusSelector = `[data-config-path="personas.${this.draft.personas.length - 1}.id"]`;
       this.#render();
+      this._announcer?.announce(`ペルソナ new_persona_${i} を追加しました`);
     }));
     const connectorIds = Object.keys(this.draft.connectors ?? {});
     const triggerIds = Object.keys(this.draft.triggers ?? {});
@@ -643,8 +732,10 @@ export class SettingsUI {
         this.#arrCheckbox("有効", "personas", i, "enabled", { value: p.enabled }),
         this.#removeBtn(() => {
           this.draft.personas.splice(i, 1);
+          this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
-        }),
+          this._announcer?.announce(`ペルソナ ${p.name || p.id} を削除しました`);
+        }, `ペルソナ「${p.name || p.id}」を削除`),
       ];
       const { card, body: cardBody } = this.#card(headEls);
       const grid = document.createElement("div");
@@ -724,7 +815,9 @@ export class SettingsUI {
       let i = 1;
       while (this.draft.triggers[`new_trigger_${i}`]) i++;
       this.draft.triggers[`new_trigger_${i}`] = { type: "manual" };
+      this._pendingFocusSelector = `[data-config-path="triggers.new_trigger_${i}.id"]`;
       this.#render();
+      this._announcer?.announce(`トリガー new_trigger_${i} を追加しました`);
     }));
     for (const [id, t] of Object.entries(this.draft.triggers ?? {})) {
       const { card, body: cardBody } = this.#card(null);
@@ -740,8 +833,10 @@ export class SettingsUI {
             p.triggers = (p.triggers ?? []).filter((x) => x !== id);
           }
           if (this.draft.news?.trigger === id) this.draft.news.trigger = "";
+          this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
-        }),
+          this._announcer?.announce(`トリガー ${id} を削除しました`);
+        }, `トリガー「${id}」を削除`),
       );
       cardBody.append(row1);
 
@@ -939,7 +1034,9 @@ export class SettingsUI {
 
     this._body.append(this.#listHeader("ニュースソース", () => {
       this.draft.news.sources.push({ name: "新規ソース", type: "rss", url: "", enabled: true });
+      this._pendingFocusSelector = `[data-config-path="news.sources.${this.draft.news.sources.length - 1}.name"]`;
       this.#render();
+      this._announcer?.announce("ニュースソースを追加しました");
     }));
     for (const [i, s] of (n.sources ?? []).entries()) {
       const headEls = [
@@ -947,8 +1044,10 @@ export class SettingsUI {
         this.#arrCheckbox("enabled", "news.sources", i, "enabled", { value: s.enabled ?? true }),
         this.#removeBtn(() => {
           this.draft.news.sources.splice(i, 1);
+          this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
-        }),
+          this._announcer?.announce(`ニュースソース ${s.name || i + 1} を削除しました`);
+        }, `ニュースソース「${s.name || i + 1}」を削除`),
       ];
       const { card: c, body: cBody } = this.#card(headEls);
       const g2 = document.createElement("div");
@@ -986,7 +1085,9 @@ export class SettingsUI {
 
     this._body.append(this.#listHeader("話題ソース", () => {
       this.draft.topics.sources.push({ name: "配信ネタ (Todoist)", type: "todoist", enabled: true, token: "", projectId: "" });
+      this._pendingFocusSelector = `[data-config-path="topics.sources.${this.draft.topics.sources.length - 1}.name"]`;
       this.#render();
+      this._announcer?.announce("話題ソースを追加しました");
     }));
     for (const [i, s] of t.sources.entries()) {
       const headEls = [
@@ -994,8 +1095,10 @@ export class SettingsUI {
         this.#arrCheckbox("enabled", "topics.sources", i, "enabled", { value: s.enabled ?? true }),
         this.#removeBtn(() => {
           this.draft.topics.sources.splice(i, 1);
+          this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
-        }),
+          this._announcer?.announce(`話題ソース ${s.name || i + 1} を削除しました`);
+        }, `話題ソース「${s.name || i + 1}」を削除`),
       ];
       const { card: c, body: cBody } = this.#card(headEls);
       const g2 = document.createElement("div");
@@ -1056,15 +1159,22 @@ export class SettingsUI {
         this._errors.append(div);
       }
       this.log(`設定エディタ: ${errors.length + structuredIssues.filter((issue) => issue.severity === "error").length}件のエラーで適用を中止`, "error");
+      const count = errors.length + structuredIssues.filter((issue) => issue.severity === "error").length;
+      this._status.textContent = `保存できません。${count}件のエラーがあります`;
+      this._errorAnnouncer?.announce(`設定を保存できません。${count}件のエラーがあります`);
+      this.#render();
       return;
     }
     for (const w of warnings) this.log(`設定エディタの警告: ${w}`, "warn");
     this._applyBtn.disabled = true;
+    this._status.textContent = "保存して適用しています";
+    this._announcer?.announce("設定を保存して適用しています");
     try {
       await this.onApply(clone(this.draft));
       this.log("設定を config.local.json に保存し、適用しました");
       this.controller.changed(this.draft);
       this.controller.state.dirty = false;
+      this._announcer?.announce("設定を保存して適用しました");
       this.close("saved");
     } catch (e) {
       const div = document.createElement("div");
@@ -1072,6 +1182,8 @@ export class SettingsUI {
       div.textContent = `${e.message} (「JSONエクスポート」で手動保存もできます)`;
       this._errors.append(div);
       this.log(`設定エディタ: 保存に失敗しました (${e.message})`, "error");
+      this._status.textContent = "保存に失敗しました。JSONエクスポートで手動保存できます";
+      this._errorAnnouncer?.announce("設定の保存に失敗しました");
     } finally {
       this._applyBtn.disabled = false;
     }
@@ -1089,5 +1201,7 @@ export class SettingsUI {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     this.log("秘密値を除外した設定packageをエクスポートしました");
+    this._status.textContent = "秘密値を除外した設定 package をエクスポートしました";
+    this._announcer?.announce("秘密値を除外した設定 package をエクスポートしました");
   }
 }
