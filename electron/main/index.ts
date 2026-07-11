@@ -12,6 +12,8 @@ import { TopicService } from "./services/topics/topic-service";
 import { installCspPolicy, securityHeaders } from "./security/csp";
 import { installPermissionPolicy } from "./security/permissions";
 import { registerIpcHandlers } from "./ipc/register";
+import { SpeechBackendService } from "./services/speech/speech-backend-service";
+import { TwitchChatService } from "./services/twitch/twitch-chat-service";
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "dociai",
@@ -137,11 +139,16 @@ if (!hasLock) {
     const aiService = new AiService(configRepository, secretStore, fetch, (event) => controller?.emitToConsole("ai:token", event));
     const feedService = new FeedService(configRepository);
     const topicService = new TopicService(configRepository, secretStore);
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, devServerUrl });
+    const speechService = new SpeechBackendService(fetch);
+    const TwitchWebSocket = require("ws") as new (url: string) => { readyState?: number; send(data: string): void; close(): void; on(event: string, listener: (...args: any[]) => void): void };
+    const twitchService = new TwitchChatService(TwitchWebSocket, (event) => controller?.emitToConsole(event.type, event.payload));
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
     app.once("before-quit", () => feedService.dispose());
     app.once("before-quit", () => topicService.dispose());
+    app.once("before-quit", () => speechService.dispose());
+    app.once("before-quit", () => twitchService.dispose());
     controller.createConsoleWindow();
     app.on("activate", () => controller?.createConsoleWindow());
   }).catch((error) => { logError("startup", error); if (!quitting) app.quit(); });

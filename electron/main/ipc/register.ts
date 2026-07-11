@@ -15,9 +15,11 @@ import type { AiChatInput, AiMessage } from "../../shared/services/ai-contract";
 import { FeedService } from "../services/feeds/feed-service";
 import { TopicService } from "../services/topics/topic-service";
 import type { FeedFetchInput } from "../../shared/services/feed-contract";
+import type { SpeechBackendService } from "../services/speech/speech-backend-service";
+import type { TwitchChatService } from "../services/twitch/twitch-chat-service";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -115,6 +117,14 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     return options.topicService.completeTask({ sourceIndex: sourceIndex(payload), taskId: expectString(payload.taskId, "taskId", 256), ...requestMetadata(payload) });
   }, options);
   register(CHANNELS.TOPIC_CANCEL, (event, input) => ({ cancelled: options.topicService.cancel(expectString(input, "requestId", 256)) }), options);
+  register(CHANNELS.SPEECH_VOICEVOX_SPEAKERS, (event, input) => options.speechService.voicevox.speakers(input === undefined ? {} : expectRecord(input, "VOICEVOX speakers")), options);
+  register(CHANNELS.SPEECH_VOICEVOX_SYNTHESIZE, (event, input) => options.speechService.voicevox.synthesize(expectRecord(input, "VOICEVOX synthesis") as never), options);
+  register(CHANNELS.SPEECH_BOUYOMI_TALK, (event, input) => options.speechService.bouyomi.talk(expectRecord(input, "Bouyomi talk") as never), options);
+  register(CHANNELS.SPEECH_BOUYOMI_CLEAR, (event, input) => options.speechService.bouyomi.clear(input === undefined ? {} : expectRecord(input, "Bouyomi clear")), options);
+  register(CHANNELS.SPEECH_CANCEL, (event, input) => ({ cancelled: options.speechService.cancel(expectString(input, "requestId", 256)) }), options);
+  register(CHANNELS.TWITCH_START, (event, input) => options.twitchService.start(expectRecord(input, "Twitch config") as never), options);
+  register(CHANNELS.TWITCH_STOP, (event, input) => { expectNoInput(input); return options.twitchService.stop(); }, options);
+  register(CHANNELS.TWITCH_RECONNECT, (event, input) => { expectNoInput(input); return { reconnected: options.twitchService.reconnect() }; }, options);
   register(CHANNELS.WINDOW_OBS_OPEN, (event, input) => { expectNoInput(input); options.controller.openObsWindow(); return { opened: true }; }, options);
   register(CHANNELS.WINDOW_OBS_CLOSE, (event, input) => { expectNoInput(input); options.controller.closeObsWindow(); return { closed: true }; }, options);
   register(CHANNELS.WINDOW_STATE_GET, (event, input) => {

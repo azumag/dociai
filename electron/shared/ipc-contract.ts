@@ -10,6 +10,7 @@ export type WindowStateSummary = { consoleOpen: boolean; obsOpen: boolean };
 export type SecretStatus = { key: string; configured: boolean; persistent: boolean; hint?: string; updatedAt?: string };
 export type ExternalOpenResult = { scheme: "https"; host: string };
 export type ShowItemKind = "logs" | "models" | "config";
+export type VoiceVoxSynthesisInput = { text: string; speaker: number; baseUrl?: string; timeoutMs?: number; pitch?: number; speed?: number; intonation?: number; volume?: number; requestId?: string; ownerId?: string; generation?: number };
 
 export type DociaiApi = {
   platform: { getInfo(): Promise<Result<PlatformInfo>> };
@@ -35,6 +36,17 @@ export type DociaiApi = {
     fetch(input: TopicFetchInput): Promise<Result<TopicFetchResponse>>;
     complete(input: TopicCompleteInput): Promise<Result<{ completed: true; requestId: string }>>;
     cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
+  };
+  speech: {
+    voicevox: { speakers(input?: { baseUrl?: string; requestId?: string }): Promise<Result<{ speakers: Array<{ id: number; speaker: string; style: string; label: string }>; requestId: string }>>; synthesize(input: VoiceVoxSynthesisInput): Promise<Result<{ audio: ArrayBuffer; contentType: string; requestId: string }>> };
+    bouyomi: { talk(input: Record<string, unknown>): Promise<Result<{ submitted: true; requestId: string }>>; clear(input?: Record<string, unknown>): Promise<Result<{ cleared: true; requestId: string }>> };
+    cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
+  };
+  bouyomi: { talk(input: Record<string, unknown>): Promise<Result<{ submitted: true; requestId: string }>>; clear(input?: Record<string, unknown>): Promise<Result<{ cleared: true; requestId: string }>> };
+  twitch: {
+    start(config: Record<string, unknown>): Promise<Result<{ state: string; sessionId: string; channels: string[]; attempt: number }>>;
+    stop(): Promise<Result<{ state: string; sessionId: string; channels: string[]; attempt: number }>>;
+    reconnect(): Promise<Result<{ reconnected: boolean }>>;
   };
   windows: {
     openObs(): Promise<Result<{ opened: true }>>;

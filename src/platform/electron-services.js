@@ -38,3 +38,22 @@ export async function completeTopicThroughElectron(input) {
 export async function cancelElectronTopicRequest(requestId) {
   return globalThis.dociai.topics.cancel(requestId);
 }
+
+export function hasElectronVoiceVoxService() { return typeof globalThis.dociai?.speech?.voicevox?.synthesize === "function"; }
+export async function synthesizeThroughElectron(input) { return globalThis.dociai.speech.voicevox.synthesize(input); }
+export async function speakersThroughElectron(input) { return globalThis.dociai.speech.voicevox.speakers(input); }
+export async function cancelElectronSpeechRequest(requestId) { return globalThis.dociai.speech.cancel(requestId); }
+export function hasElectronTwitchService() { return typeof globalThis.dociai?.twitch?.start === "function"; }
+
+export class ElectronTwitchSource {
+  id = "twitch"; label = "Twitch";
+  constructor(config = {}, { onStatus = () => {} } = {}) { this.config = config; this.onStatus = onStatus; this.unsubComment = null; this.unsubStatus = null; this.status = { state: "idle", channels: [] }; }
+  start(onComment) {
+    this.unsubComment = globalThis.dociai.events.subscribe("twitch:comment", (comment) => onComment(comment));
+    this.unsubStatus = globalThis.dociai.events.subscribe("twitch:status", (status) => { this.status = status; this.onStatus(status); });
+    void globalThis.dociai.twitch.start(this.config).then((result) => { if (result?.ok) { this.status = result.value; this.onStatus(this.status); } });
+  }
+  stop() { this.unsubComment?.(); this.unsubStatus?.(); this.unsubComment = null; this.unsubStatus = null; return globalThis.dociai.twitch.stop(); }
+  reconnectNow() { return globalThis.dociai.twitch.reconnect(); }
+  snapshot() { return { ...this.status }; }
+}

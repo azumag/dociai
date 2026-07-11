@@ -44,6 +44,20 @@ const api: DociaiApi = {
     complete: (input) => invoke(CHANNELS.TOPIC_COMPLETE, input),
     cancel: (requestId) => invoke(CHANNELS.TOPIC_CANCEL, requestId),
   },
+  speech: {
+    voicevox: { speakers: (input) => invoke(CHANNELS.SPEECH_VOICEVOX_SPEAKERS, input), synthesize: (input) => invoke(CHANNELS.SPEECH_VOICEVOX_SYNTHESIZE, input) },
+    bouyomi: { talk: (input) => invoke(CHANNELS.SPEECH_BOUYOMI_TALK, input), clear: (input) => invoke(CHANNELS.SPEECH_BOUYOMI_CLEAR, input) },
+    cancel: (requestId) => invoke(CHANNELS.SPEECH_CANCEL, requestId),
+  },
+  twitch: {
+    start: (config) => invoke(CHANNELS.TWITCH_START, config),
+    stop: () => invoke(CHANNELS.TWITCH_STOP),
+    reconnect: () => invoke(CHANNELS.TWITCH_RECONNECT),
+  },
+  bouyomi: {
+    talk: (input) => invoke(CHANNELS.SPEECH_BOUYOMI_TALK, input),
+    clear: (input) => invoke(CHANNELS.SPEECH_BOUYOMI_CLEAR, input),
+  },
   windows: {
     openObs: () => invoke(CHANNELS.WINDOW_OBS_OPEN),
     closeObs: () => invoke(CHANNELS.WINDOW_OBS_CLOSE),
