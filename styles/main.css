@@ -510,6 +510,10 @@ body.obs.transparent { background: transparent; }
   font-size: 12px;
   color: var(--ink-dim);
 }
+.obs-connection { align-self: flex-start; font: 11px var(--mono); color: var(--ink-dim); background: rgba(18, 22, 30, .7); border-radius: 4px; padding: 3px 7px; }
+.obs-connection[data-state="connected"] { color: var(--ok); }
+.obs-connection[data-state="stale"], .obs-connection[data-state="disconnected"] { color: var(--warn); }
+.obs-connection[data-state="error"], .obs-connection[data-state="incompatible"] { color: var(--danger); }
 
 /* ---- 設定エディタ (issue #15) ---- */
 /* 閉じている dialog はブラウザ標準で display:none だが、下の .settings-modal で

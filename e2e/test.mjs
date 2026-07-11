@@ -202,6 +202,9 @@ try {
   await obs.setViewport({ width: 900, height: 500 });
   obs.on("pageerror", (e) => pageErrors.push("obs: " + String(e)));
   await obs.goto(`${BASE}/obs.html?transparent=1`, { waitUntil: "domcontentloaded" });
+  await obs.waitForFunction(() => document.querySelector("#obs-connection")?.dataset.state === "connected", { timeout: 5000 });
+  const handshakeStatus = await obs.$eval("#obs-connection", (el) => el.textContent);
+  check("OBS client handshakeで最新snapshotへ接続", handshakeStatus.includes("接続済み"), handshakeStatus);
 
   step("obs self-send events");
   await obs.evaluate(() => {
