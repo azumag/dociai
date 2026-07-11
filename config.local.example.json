@@ -63,7 +63,8 @@
     "maxAgeMs": 120000,
     "maxHistory": 50,
     "overflow": "drop-oldest",
-    "expireWhileHeld": true
+    "expireWhileHeld": true,
+    "strictOrdering": false
   },
   "micMonitor": {
     "enabled": true,

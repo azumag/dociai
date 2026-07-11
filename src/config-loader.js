@@ -222,6 +222,7 @@ export function validateConfig(cfg) {
     if (q.overflow && !["drop-oldest", "drop-new", "replace-latest", "aggregate"].includes(q.overflow)) {
       errors.push(`speechQueue.overflow "${q.overflow}" は未対応です`);
     }
+    if (q.strictOrdering != null && typeof q.strictOrdering !== "boolean") errors.push("speechQueue.strictOrdering はbooleanで指定してください");
   }
 
   // micMonitor (issue #32)
@@ -341,6 +342,7 @@ export function applyDefaults(cfg) {
       maxHistory: 50,
       overflow: "drop-oldest",
       expireWhileHeld: true,
+      strictOrdering: false,
       ...(cfg.speechQueue ?? {}),
     },
     micMonitor: {

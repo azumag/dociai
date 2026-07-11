@@ -297,6 +297,8 @@ async function applyLoaded({ config, warnings, source }) {
         })
       : null,
     policy: config.speechQueue,
+    strictOrdering: config.speechQueue?.strictOrdering,
+    onHealth: ({ backend, status, error }) => logEvent(`音声backend[${backend}] ${status}${error ? `: ${error}` : ""}`, status === "error" ? "warn" : "info"),
   });
   if (config.bouyomi?.enabled) {
     logEvent(`棒読みちゃん連携を有効化: ${config.bouyomi.baseUrl}`);
@@ -415,6 +417,7 @@ function teardown(reason = "runtime teardown", preCancelled = 0) {
   state.screenContext?.stop();
   state.micMonitor?.stop();
   state.speechQueue?.clear();
+  state.speechQueue?.dispose();
   state.thinking.clear();
   state.speakingPersonaId = null;
   state.manualSpeechHold = false;
@@ -617,7 +620,7 @@ function renderSpeechQueue() {
     const li = document.createElement("li");
     const badge = document.createElement("span");
     badge.className = `badge state-${item.state}`;
-    badge.textContent = { waiting: "待機", speaking: "発話中", done: "完了", skipped: "スキップ", failed: "失敗" }[item.state];
+    badge.textContent = { waiting: "待機", speaking: "発話中", done: "完了", submitted: "送信済", skipped: "スキップ", cancelled: "取消", dropped: "破棄", failed: "失敗" }[item.state] ?? item.state;
     const grow = document.createElement("div");
     grow.className = "grow";
     grow.innerHTML = `<div class="detail"></div>`;
