@@ -74,6 +74,12 @@ export function validateConfig(cfg) {
     });
   }
 
+  if (cfg.router) {
+    if (!Number.isInteger(Number(cfg.router.maxRepliesPerComment)) || Number(cfg.router.maxRepliesPerComment) < 1) errors.push("router.maxRepliesPerComment は1以上の整数にしてください");
+    if (!Number.isFinite(Number(cfg.router.historyTtlSeconds)) || Number(cfg.router.historyTtlSeconds) < 60 || Number(cfg.router.historyTtlSeconds) > 86_400) errors.push("router.historyTtlSeconds は60〜86400秒の範囲にしてください");
+    if (!Number.isInteger(Number(cfg.router.historyMaxEntries)) || Number(cfg.router.historyMaxEntries) < 100 || Number(cfg.router.historyMaxEntries) > 100_000) errors.push("router.historyMaxEntries は100〜100000の整数にしてください");
+  }
+
   // triggers
   if (!cfg.triggers || typeof cfg.triggers !== "object") {
     errors.push("triggers がありません");

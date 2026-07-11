@@ -336,6 +336,7 @@ function teardown(reason = "runtime teardown", preCancelled = 0) {
   const startedAt = Date.now();
   const cancelledRequests = preCancelled + state.runtime.requests.cancelGeneration(state.generation, reason);
   state.responseCoordinator?.dispose();
+  state.personaRouter?.dispose();
   state.automationCoordinator?.dispose();
   state.sourceCoordinator?.dispose();
   state.externalCommentSources = [];

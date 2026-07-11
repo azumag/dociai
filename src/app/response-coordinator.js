@@ -6,15 +6,21 @@ export class ResponseCoordinator {
     if (this.disposed) return [];
     const result = this.personaRouter.select(triggerId, { comment, personaId, ignoreCooldown: manual });
     for (const skipped of result.skipped) this.dispatch({ type: "response-skipped", triggerId, persona: skipped.persona, reason: skipped.reason });
-    for (const persona of result.selected) this.respond(persona, { comment, triggerId, task });
-    return result.selected;
+    const personas = [];
+    for (const selection of result.selected) {
+      const persona = selection?.persona ?? selection;
+      personas.push(persona);
+      this.respond(persona, { comment, triggerId, task, selection: selection?.persona ? selection : null });
+    }
+    return personas;
   }
-  async respond(persona, { comment = null, triggerId = "manual", task = null } = {}) {
+  async respond(persona, { comment = null, triggerId = "manual", task = null, selection = null } = {}) {
     const connector = this.getConnector(persona.connector);
-    if (!connector) { this.onError(new Error(`Missing connector: ${persona.connector}`), persona); return null; }
+    if (!connector) { this.personaRouter.releaseSelection?.(selection); this.onError(new Error(`Missing connector: ${persona.connector}`), persona); return null; }
     const generation = this.getGeneration();
+    const admitted = selection ? this.personaRouter.commitSelection(selection) : this.personaRouter.recordReply(persona, comment);
+    if (admitted === false) { this.dispatch({ type: "response-skipped", persona, triggerId, reason: "1コメント最大応答に到達" }); return null; }
     const request = this.runtime.createRequest({ generation, ownerId: `connector:${generation}:${persona.connector}`, kind: "ai-chat" });
-    this.personaRouter.recordReply(persona, comment);
     this.dispatch({ type: "response-started", persona, triggerId });
     const { messages, debugText } = this.contextBuilder.build({ persona, comment, task });
     this.dispatch({ type: "response-debug", persona, debugText });
