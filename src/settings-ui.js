@@ -12,6 +12,7 @@
 
 import { validateConfig } from "./config-loader.js";
 import { registryIds } from "./config/config-registry.js";
+import { SettingsController } from "./settings/settings-controller.js";
 
 const PROVIDERS = registryIds("providers");
 const TRIGGER_TYPES = registryIds("triggerTypes");
@@ -35,6 +36,7 @@ export class SettingsUI {
     this.activeTab = "connectors";
     this.root = null;
     this._built = false;
+    this.controller = new SettingsController({ confirmDiscard: async () => globalThis.confirm?.("未保存の変更を破棄しますか？") ? "discard" : "continue" });
     this._voices = [];
     this._voiceSupported = typeof window !== "undefined" && "speechSynthesis" in window;
     if (this._voiceSupported) {
@@ -53,14 +55,17 @@ export class SettingsUI {
       return;
     }
     this.draft = clone(current);
+    this.controller.open(this.draft);
     this.activeTab = "connectors";
     this.#ensureBuilt();
     this.#render();
     if (!this.root.open) this.root.showModal();
   }
 
-  close() {
-    if (this.root?.open) this.root.close();
+  async close(reason = "close-button") {
+    const result = await this.controller.requestClose(reason);
+    if (result === "closed" && this.root?.open) this.root.close();
+    return result;
   }
 
   #refreshVoices() {
@@ -145,7 +150,7 @@ export class SettingsUI {
     closeBtn.className = "settings-close";
     closeBtn.innerHTML = "&times;";
     closeBtn.title = "閉じる";
-    closeBtn.addEventListener("click", () => this.close());
+    closeBtn.addEventListener("click", () => this.close("close-button"));
     header.append(closeBtn);
 
     // sidebar + main を包むシェル
@@ -202,7 +207,7 @@ export class SettingsUI {
     cancelBtn.type = "button";
     cancelBtn.className = "btn-ghost";
     cancelBtn.textContent = "キャンセル";
-    cancelBtn.addEventListener("click", () => this.close());
+    cancelBtn.addEventListener("click", () => this.close("cancel-button"));
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
     applyBtn.className = "btn-primary";
@@ -215,6 +220,9 @@ export class SettingsUI {
     main.append(body, footer);
     shell.append(nav, main);
     dlg.append(header, shell);
+    dlg.addEventListener("cancel", (event) => { event.preventDefault(); this.close("escape"); });
+    dlg.addEventListener("input", () => this.controller.changed(this.draft));
+    dlg.addEventListener("change", () => this.controller.changed(this.draft));
     this._body = body;
     this._errors = errors;
     this._built = true;
@@ -995,7 +1003,9 @@ export class SettingsUI {
     try {
       await this.onApply(clone(this.draft));
       this.log("設定を config.local.json に保存し、適用しました");
-      this.close();
+      this.controller.changed(this.draft);
+      this.controller.state.dirty = false;
+      this.close("saved");
     } catch (e) {
       const div = document.createElement("div");
       div.className = "settings-error";

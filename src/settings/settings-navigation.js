@@ -1,0 +1,1 @@
+export function navigateToIssue(root, issue, activateTab) { activateTab(issue.tabId); const element = root.querySelector(`[data-config-path="${CSS.escape(issue.fieldId)}"]`); if (!element) return false; element.setAttribute("aria-invalid", "true"); element.scrollIntoView?.({ block: "center" }); element.focus(); return true; }
