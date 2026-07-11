@@ -32,6 +32,8 @@ python3 scripts/serve.py 8080
 操作卓を開くと `config.local.json` を自動読込します (「サーバーから読込」「ファイルを選択」でも可)。
 APIキーを含む `config.local.json` はGit管理しません。公開デプロイにも含めません。読み込んだキーはメモリ保持のみで、LocalStorage等には保存されません。
 
+設定schemaのcurrent versionは`2`です。schemaVersion未指定のlegacy設定は読込時に段階migrationされ、正規化後の設定が利用されます。将来versionは書き換えずに拒否されます。設定エディタの「JSONエクスポート」は`dociai-config-export` packageを生成し、API key/token等の秘密値は含みません。このpackageと旧来のplain JSONはいずれもファイル読込からimportできます。
+
 `scripts/serve.py` は静的ファイル配信に加え、設定エディタ (「設定を編集」→「保存して適用」) からの
 保存要求 (`PUT /config.local.json`) を受け付け、ディスク上の `config.local.json` を直接書き換えます。
 127.0.0.1 のみで待受けるため外部には公開されません。`python3 -m http.server` でも閲覧はできますが、

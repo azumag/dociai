@@ -2,7 +2,7 @@
 // イベントの流れ: コメント/ホットキー/interval → TriggerEngine → PersonaRouter
 //   → ContextBuilder → AIConnector → AI応答ログ + SpeechQueue → OBS表示へbroadcast
 
-import { loadFromServer, loadFromFile, saveToServer, validateConfig, applyDefaults } from "./config-loader.js";
+import { loadFromServer, loadFromFile, saveToServer, validateConfig } from "./config-loader.js";
 import { createConnector } from "./connectors.js";
 import { CommentStore } from "./comment-store.js";
 import { ContextBuilder } from "./context-builder.js";
@@ -20,6 +20,7 @@ import { scrubSecrets, collectApiKeys, checkSecretStorage } from "./security.js"
 import { SettingsUI } from "./settings-ui.js";
 import { BrowserRuntimeController } from "./runtime/runtime-controller.js";
 import { isCancellation } from "./runtime/request-registry.js";
+import { processConfig } from "./config/config-pipeline.js";
 import { createAppState } from "./app/app-state.js";
 import { AppStore } from "./app/app-store.js";
 import { bindConsoleUI } from "./ui/bindings.js";
@@ -136,7 +137,7 @@ function onSpeechUpdate(items, queue, generation = state.generation) {
 
 // ---- 設定読み込み ----
 
-async function applyLoaded({ config, warnings, source }) {
+async function applyLoaded({ config, warnings, source, migration = null }) {
   if (state.config && settingsUI.root?.open) {
     const closeResult = await settingsUI.close("config-reload");
     if (closeResult === "continued") { logEvent("未保存の設定編集があるため再読込を保留しました", "warn"); return; }
@@ -316,6 +317,7 @@ async function applyLoaded({ config, warnings, source }) {
   state.sourceCoordinator.replace(sourceFactories).then((sources) => { if (state.runtime.isCurrent(generation)) state.externalCommentSources = sources; });
 
   for (const w of warnings) logEvent(`設定の警告: ${w}`, "warn");
+  if (migration?.steps?.length) logEvent(`設定migrationを適用: ${migration.steps.join(" → ")}`, "warn");
 
   // issue #13: APIキーが永続ストレージに残っていないことを実測して報告
   const storageCheck = checkSecretStorage(config);
@@ -594,14 +596,16 @@ function renderDebug() {
 // 保存が失敗した場合は例外を投げ、呼び出し元 (SettingsUI) にエラー表示を委ねる。
 // APIキーは draft に保持された実値を使う (localStorage には書かない)。
 async function applyEditedConfig(rawConfig) {
-  const { errors, warnings } = validateConfig(rawConfig);
+  const processed = processConfig(rawConfig);
+  if (!processed.ok) throw new Error(`設定pipeline失敗: ${processed.stage}`);
+  const { errors, warnings } = validateConfig(processed.config);
   if (errors.length) {
     for (const e of errors) logEvent(`設定エディタ: ${scrub(e)}`, "error");
     throw new Error("設定エラーのため保存を中止しました");
   }
-  await saveToServer(rawConfig);
-  const config = applyDefaults(rawConfig);
-  await applyLoaded({ config, warnings, source: "UI編集 (config.local.json に保存済み)" });
+  await saveToServer(processed.config);
+  const config = processed.config;
+  await applyLoaded({ config, warnings: [...processed.notes, ...warnings], source: "UI編集 (config.local.json に保存済み)", migration: { steps: processed.migrations, secretCandidates: processed.secretCandidates, revision: processed.hash } });
 }
 
 const settingsUI = new SettingsUI({

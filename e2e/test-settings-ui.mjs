@@ -14,7 +14,7 @@ const SHOT_DIR = process.env.SHOT_DIR ?? ".";
 // エクスポートのダウンロード先をプロジェクトディレクトリ外に分離 (config.local.json を誤って消さないため)
 const DOWNLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dociai-export-"));
 // 「保存して適用」は本物の config.local.json を書き換えるため、テスト後に必ず元へ戻す。
-const CONFIG_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "config.local.json");
+const CONFIG_PATH = process.env.CONFIG_PATH ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "config.local.json");
 const originalConfigText = fs.readFileSync(CONFIG_PATH, "utf8");
 
 const results = [];
@@ -177,7 +177,7 @@ try {
   const client = await page.target().createCDPSession();
   await client.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: DOWNLOAD_DIR });
   // 既存のダウンロードファイルがあれば掃除
-  try { fs.unlinkSync(`${DOWNLOAD_DIR}/config.local.json`); } catch {}
+  try { fs.unlinkSync(`${DOWNLOAD_DIR}/dociai-config-export.json`); } catch {}
   const exportButtons = await page.$$('.settings-footer button');
   for (const b of exportButtons) {
     const t = await page.evaluate((el) => el.textContent, b);
@@ -187,14 +187,21 @@ try {
   let exported = false;
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 200));
-    if (fs.existsSync(`${DOWNLOAD_DIR}/config.local.json`)) { exported = true; break; }
+    if (fs.existsSync(`${DOWNLOAD_DIR}/dociai-config-export.json`)) { exported = true; break; }
   }
   check("JSONエクスポートでファイルがダウンロードされる", exported);
   if (exported) {
-    const json = JSON.parse(fs.readFileSync(`${DOWNLOAD_DIR}/config.local.json`, "utf8"));
-    check("エクスポートJSONに connectors/personas がある", !!json.connectors && Array.isArray(json.personas));
-    check("エクスポートJSONに追加した new_connector_1 が含まれる", !!json.connectors.new_connector_1);
-    check("エクスポートJSONに追加した new_persona_1 が含まれる", (json.personas ?? []).some((p) => p.id === "new_persona_1"));
+    const json = JSON.parse(fs.readFileSync(`${DOWNLOAD_DIR}/dociai-config-export.json`, "utf8"));
+    check("エクスポートJSONはversion付きpackageである", json.format === "dociai-config-export" && json.formatVersion === 1 && typeof json.revision === "string");
+    check("エクスポートpackageに connectors/personas がある", !!json.config?.connectors && Array.isArray(json.config.personas));
+    check("エクスポートpackageに追加した new_connector_1 が含まれる", !!json.config.connectors.new_connector_1);
+    check("エクスポートpackageに追加した new_persona_1 が含まれる", (json.config.personas ?? []).some((p) => p.id === "new_persona_1"));
+    const containsSecretKey = (value) => Array.isArray(value)
+      ? value.some(containsSecretKey)
+      : value && typeof value === "object"
+        ? Object.entries(value).some(([key, nested]) => /(?:api[-_]?key|token|secret|authorization|password)$/i.test(key) || containsSecretKey(nested))
+        : false;
+    check("エクスポートpackageに秘密値が含まれない", !containsSecretKey(json.config));
   }
 
   // 13. キャンセル (ESC) でモーダルが閉じる
@@ -230,6 +237,7 @@ try {
 } finally {
   await browser.close();
   fs.writeFileSync(CONFIG_PATH, originalConfigText);
+  fs.rmSync(DOWNLOAD_DIR, { recursive: true, force: true });
 }
 
 const failed = results.filter((r) => !r.ok);

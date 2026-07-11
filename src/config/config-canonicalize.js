@@ -1,8 +1,9 @@
-const secretPattern = /(?:apiKey|token|secret|password)$/i;
+const secretPattern = /(?:api[-_]?key|token|secret|password|authorization|cookie)$/i;
+export const isSecretConfigKey = (key) => secretPattern.test(key);
 const sanitize = (value) => {
   if (Array.isArray(value)) return value.map(sanitize);
   if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.keys(value).sort().filter((key) => !secretPattern.test(key)).map((key) => [key, sanitize(value[key])]));
+  return Object.fromEntries(Object.keys(value).sort().filter((key) => !isSecretConfigKey(key)).map((key) => [key, sanitize(value[key])]));
 };
 export const CANONICAL_FORMAT_VERSION = 1;
 export function canonicalizeConfig(config) { return JSON.stringify(sanitize(config)); }

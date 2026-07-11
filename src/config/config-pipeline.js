@@ -1,11 +1,10 @@
 import { CURRENT_SCHEMA_VERSION, failureResult, issue } from "./config-contract.js";
 import { applyConfigDefaults } from "./config-defaults.js";
-import { canonicalConfigHash, canonicalizeConfig } from "./config-canonicalize.js";
+import { canonicalConfigHash, canonicalizeConfig, isSecretConfigKey } from "./config-canonicalize.js";
 import { normalizeConfig } from "./config-normalize.js";
 import { migrationFrom } from "./migrations/index.js";
 
-const secretPattern = /(?:apiKey|token|secret|password)$/i;
-const collectSecrets = (value, path = [], output = []) => { if (!value || typeof value !== "object") return output; for (const [key, entry] of Object.entries(value)) { const next = [...path, key]; if (secretPattern.test(key) && entry) output.push(Object.freeze({ path: Object.freeze(next), kind: key })); else collectSecrets(entry, next, output); } return output; };
+const collectSecrets = (value, path = [], output = []) => { if (!value || typeof value !== "object") return output; for (const [key, entry] of Object.entries(value)) { const next = [...path, key]; if (isSecretConfigKey(key) && entry) output.push(Object.freeze({ path: Object.freeze(next), kind: key })); else collectSecrets(entry, next, output); } return output; };
 export function detectConfigVersion(config) { return config?.schemaVersion == null ? 0 : Number(config.schemaVersion); }
 export function processConfig(input) {
   const original = structuredClone(input);

@@ -1,12 +1,16 @@
 import fs from "node:fs/promises";
 import { PublicIpcError } from "../../shared/errors";
-
-const SECRET_FIELDS = new Set(["apiKey", "token", "accessToken", "refreshToken", "clientSecret", "client_secret"]);
+import { processMainConfig } from "./config-schema-adapter";
+// @ts-expect-error JavaScript config core intentionally has no separate declaration build.
+import { isSecretConfigKey } from "../../../src/config/config-canonicalize.js";
 
 export type LegacyImportPreview = {
   config: Record<string, unknown>;
   secretEntries: Array<{ key: string; value: string }>;
   source: string;
+  migrations: string[];
+  warnings: string[];
+  secretCandidates: Array<{ path: Array<string | number>; kind: string }>;
 };
 
 function walk(value: unknown, path: string[], secrets: LegacyImportPreview["secretEntries"]): unknown {
@@ -14,7 +18,7 @@ function walk(value: unknown, path: string[], secrets: LegacyImportPreview["secr
   if (!value || typeof value !== "object") return value;
   const output: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value)) {
-    if (SECRET_FIELDS.has(key) && typeof nested === "string" && nested.length > 0) {
+    if (isSecretConfigKey(key) && typeof nested === "string" && nested.length > 0) {
       const secretKey = path.concat(key).join(".");
       secrets.push({ key: secretKey, value: nested });
       output[`${key}Configured`] = true;
@@ -31,6 +35,9 @@ export async function previewLegacyConfig(file: string): Promise<LegacyImportPre
   try { parsed = JSON.parse(await fs.readFile(file, "utf8")); }
   catch { throw new PublicIpcError("NOT_FOUND", "legacy configが見つからないか、JSONとして読めません"); }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new PublicIpcError("INVALID_INPUT", "legacy configのrootはobjectで指定してください");
+  const discovered = processMainConfig(parsed);
   const secretEntries: LegacyImportPreview["secretEntries"] = [];
-  return { config: walk(parsed, [], secretEntries) as Record<string, unknown>, secretEntries, source: file };
+  const redacted = walk(parsed, [], secretEntries) as Record<string, unknown>;
+  const processed = processMainConfig(redacted);
+  return { config: processed.config, secretEntries, source: file, migrations: processed.migrations, warnings: processed.warnings, secretCandidates: discovered.secretCandidates };
 }
