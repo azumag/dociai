@@ -9,6 +9,9 @@
 //
 // YouTube Live Chat / Twitch IRC の実装方針は docs/comment-sources.md を参照。
 
+import { parseIrcFrame } from "./twitch-chat/twitch-irc-parser.js";
+import { TwitchChatSession } from "./twitch-chat/twitch-chat-session.js";
+
 export class ManualCommentSource {
   id = "manual";
   label = "手動入力";
@@ -33,52 +36,12 @@ export class ManualCommentSource {
   }
 }
 
-function normalizeChannel(channel) {
-  return String(channel ?? "").trim().replace(/^#/, "").toLowerCase();
-}
-
-function randomGuestNick() {
-  return `justinfan${Math.floor(10000 + Math.random() * 90000)}`;
-}
-
-function parseTags(raw) {
-  const tags = {};
-  for (const part of raw.split(";")) {
-    const [key, ...value] = part.split("=");
-    if (!key) continue;
-    tags[key] = value.join("=")
-      .replace(/\\s/g, " ")
-      .replace(/\\:/g, ";")
-      .replace(/\\\\/g, "\\");
-  }
-  return tags;
-}
-
 export function parseTwitchIrcLine(line) {
-  let rest = String(line ?? "").trim();
-  if (!rest) return null;
-  if (rest.startsWith("PING ")) {
-    return { type: "ping", payload: rest.slice(5).trim() };
-  }
-
-  let tags = {};
-  if (rest.startsWith("@")) {
-    const tagEnd = rest.indexOf(" ");
-    tags = parseTags(rest.slice(1, tagEnd));
-    rest = rest.slice(tagEnd + 1);
-  }
-
-  const match = rest.match(/^:([^!\s]+)(?:![^\s]+)?\s+PRIVMSG\s+#([^\s]+)\s+:(.*)$/);
-  if (!match) return null;
-
-  const [, login, channel, text] = match;
-  return {
-    type: "message",
-    author: tags["display-name"] || login,
-    text,
-    channel: normalizeChannel(channel),
-    emotes: tags.emotes || null,
-  };
+  const event = parseIrcFrame(line)[0];
+  if (!event) return null;
+  if (event.type === "ping") return { type: "ping", payload: event.payload };
+  if (event.type !== "privmsg") return null;
+  return { type: "message", author: event.author, text: event.text, channel: event.channel, ...(event.emotes ? { emotes: event.emotes } : {}) };
 }
 
 // Twitchの emotes タグ ("id:start-end,start-end/id2:start-end") が指す文字範囲を
@@ -117,58 +80,33 @@ export class TwitchChatSource {
     this.log = log;
     this.ws = null;
     this.onComment = null;
-    this.channels = (config.channels ?? [config.channel]).map(normalizeChannel).filter(Boolean);
-    this.nick = config.nick || randomGuestNick();
-    this.url = config.url || "wss://irc-ws.chat.twitch.tv:443";
+    this.session = null;
+    this.status = null;
   }
 
   start(onComment) {
-    if (!this.channels.length) throw new Error("Twitchチャンネルが設定されていません");
-    if (!this.WebSocketImpl) throw new Error("このブラウザはWebSocketに対応していません");
     this.stop();
     this.onComment = onComment;
-    this.ws = new this.WebSocketImpl(this.url);
-    this.ws.addEventListener("open", () => this.#onOpen());
-    this.ws.addEventListener("message", (event) => this.#onMessage(event.data));
-    this.ws.addEventListener("error", () => this.log("Twitchチャット接続でエラーが発生しました", "error"));
-    this.ws.addEventListener("close", () => this.log("Twitchチャット接続を終了しました"));
+    const session = this.session = new TwitchChatSession(this.config, {
+      WebSocketImpl: this.WebSocketImpl,
+      log: this.log,
+      onComment: (raw) => {
+        if (this.session !== session) return;
+        const { sessionId, emotes, ...comment } = raw;
+        this.onComment?.({ ...comment, ...(emotes ? { emotes } : {}) });
+      },
+      onStatus: (status) => { if (this.session === session) this.status = status; },
+    });
+    session.start();
+    this.ws = session.socket;
   }
 
   stop() {
-    const ws = this.ws;
+    const session = this.session;
+    this.session = null;
     this.ws = null;
     this.onComment = null;
-    if (ws && ws.readyState < 2) ws.close();
-  }
-
-  #send(line) {
-    if (this.ws?.readyState === 1) this.ws.send(line);
-  }
-
-  #onOpen() {
-    this.#send("CAP REQ :twitch.tv/tags twitch.tv/commands");
-    this.#send("PASS SCHMOOPIIE");
-    this.#send(`NICK ${this.nick}`);
-    for (const channel of this.channels) this.#send(`JOIN #${channel}`);
-    this.log(`Twitchチャットに接続しました: ${this.channels.map((c) => `#${c}`).join(", ")}`);
-  }
-
-  #onMessage(data) {
-    for (const line of String(data ?? "").split(/\r?\n/)) {
-      const parsed = parseTwitchIrcLine(line);
-      if (!parsed) continue;
-      if (parsed.type === "ping") {
-        this.#send(`PONG ${parsed.payload}`);
-        continue;
-      }
-      this.onComment?.({
-        author: parsed.author,
-        text: parsed.text,
-        source: this.id,
-        channel: parsed.channel,
-        emotes: parsed.emotes,
-      });
-    }
+    session?.stop();
   }
 }
 
