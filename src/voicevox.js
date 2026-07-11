@@ -13,6 +13,7 @@
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:50021";
 const DEFAULT_MAX_CHARS = 200;
+import { cancelElectronSpeechRequest, hasElectronVoiceVoxService, speakersThroughElectron, synthesizeThroughElectron } from "./platform/electron-services.js";
 
 export class VoiceVoxClient {
   constructor({ baseUrl = DEFAULT_BASE_URL, timeoutMs = 30000, retries = 1, log = () => {} } = {}) {
@@ -21,6 +22,8 @@ export class VoiceVoxClient {
     this.retries = Number(retries) >= 0 ? Number(retries) : 1;
     this.log = log;
     this._cachedSpeakers = null;
+    this.bridge = hasElectronVoiceVoxService();
+    this._sequence = 0;
   }
 
   async #fetch(pathname, { method = "GET", query = null, body = null, expect = "json", signal: parentSignal = null } = {}) {
@@ -59,6 +62,12 @@ export class VoiceVoxClient {
 
   async speakers({ force = false } = {}) {
     if (this._cachedSpeakers && !force) return this._cachedSpeakers;
+    if (this.bridge) {
+      const result = await speakersThroughElectron({ baseUrl: this.baseUrl });
+      if (!result?.ok) throw new VoiceVoxError(result?.error?.message ?? "VOICEVOX話者一覧を取得できません", "network");
+      this._cachedSpeakers = result.value.speakers;
+      return this._cachedSpeakers;
+    }
     const data = await this.#fetch("/speakers");
     const out = [];
     for (const s of data ?? []) {
@@ -77,6 +86,16 @@ export class VoiceVoxClient {
     if (!Number.isFinite(sp) || sp < 0) throw new VoiceVoxError(`speaker ID が不正です: ${speaker}`, "bad_request");
     const clean = String(text ?? "").replace(/[#＃]/g, "");
     if (!clean.trim()) throw new VoiceVoxError("合成対象のテキストが空です", "bad_request");
+    if (this.bridge) {
+      const requestId = `voicevox-${Date.now()}-${++this._sequence}`;
+      const cancel = () => { void cancelElectronSpeechRequest(requestId); };
+      signal?.addEventListener("abort", cancel, { once: true });
+      try {
+        const result = await synthesizeThroughElectron({ requestId, baseUrl: this.baseUrl, timeoutMs: this.timeoutMs, text: clean, speaker: sp, pitch, speed, intonation, volume });
+        if (!result?.ok) throw new VoiceVoxError(result?.error?.message ?? "VOICEVOX合成に失敗しました", result?.error?.code === "TIMEOUT" ? "timeout" : "server");
+        return new Blob([result.value.audio], { type: result.value.contentType || "audio/wav" });
+      } finally { signal?.removeEventListener("abort", cancel); }
+    }
 
     const query = await this.#fetch("/audio_query", {
       method: "POST",

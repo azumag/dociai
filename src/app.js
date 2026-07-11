@@ -16,6 +16,7 @@ import { MicMonitor } from "./mic-monitor.js";
 import { NewsReader } from "./news-reader.js";
 import { TopicReader } from "./topic-reader.js";
 import { ManualCommentSource, TwitchChatSource, stripEmotes } from "./comment-sources.js";
+import { ElectronTwitchSource, hasElectronTwitchService } from "./platform/electron-services.js";
 import { scrubSecrets, collectApiKeys, checkSecretStorage } from "./security.js";
 import { SettingsUI } from "./settings-ui.js";
 import { BrowserRuntimeController } from "./runtime/runtime-controller.js";
@@ -314,7 +315,7 @@ async function applyLoaded({ config, warnings, source, migration = null }) {
   });
   const twitch = config.commentSources?.twitch;
   const sourceFactories = [() => state.manualSource];
-  if (twitch?.enabled) sourceFactories.push(({ onStatus }) => new TwitchChatSource(twitch, { log: (m, level) => logEvent(m, level), onStatus }));
+  if (twitch?.enabled) sourceFactories.push(({ onStatus }) => hasElectronTwitchService() ? new ElectronTwitchSource(twitch, { onStatus }) : new TwitchChatSource(twitch, { log: (m, level) => logEvent(m, level), onStatus }));
   state.sourceCoordinator.replace(sourceFactories).then((sources) => { if (state.runtime.isCurrent(generation)) state.externalCommentSources = sources; });
 
   for (const w of warnings) logEvent(`設定の警告: ${w}`, "warn");

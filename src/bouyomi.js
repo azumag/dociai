@@ -19,7 +19,7 @@ export class BouyomiClient {
   constructor({ baseUrl = "http://127.0.0.1:50080", timeoutMs = 5000, bridge = null, defaults = {} } = {}) {
     this.baseUrl = String(baseUrl).replace(/\/$/, "");
     this.timeoutMs = finiteOr(timeoutMs, 5000);
-    this.bridge = bridge ?? globalThis.window?.dociai?.bouyomi ?? null;
+    this.bridge = bridge ?? globalThis.window?.dociai?.bouyomi ?? globalThis.window?.dociai?.speech?.bouyomi ?? null;
     this.defaults = defaults;
   }
 
@@ -39,8 +39,9 @@ export class BouyomiClient {
       const { signal, ...bridgeRequest } = request;
       if (signal?.aborted) throw new BouyomiError("棒読みちゃん送信はキャンセルされました", "cancelled");
       const result = await this.bridge.talk(bridgeRequest);
-      if (result?.ok === false) throw new BouyomiError(result.error || "棒読みちゃんへの送信に失敗しました", result.kind);
-      return result;
+      const value = result?.ok === true ? result.value : result;
+      if (result?.ok === false || value?.ok === false) throw new BouyomiError(result?.error?.message || value?.error || "棒読みちゃんへの送信に失敗しました", result?.error?.code || value?.kind);
+      return value;
     }
     return this.#request("Talk", request, request.signal);
   }
@@ -48,8 +49,9 @@ export class BouyomiClient {
   async clear() {
     if (this.bridge?.clear) {
       const result = await this.bridge.clear({ baseUrl: this.baseUrl, timeoutMs: this.timeoutMs });
-      if (result?.ok === false) throw new BouyomiError(result.error || "棒読みちゃんのキュー消去に失敗しました", result.kind);
-      return result;
+      const value = result?.ok === true ? result.value : result;
+      if (result?.ok === false || value?.ok === false) throw new BouyomiError(result?.error?.message || value?.error || "棒読みちゃんのキュー消去に失敗しました", result?.error?.code || value?.kind);
+      return value;
     }
     return this.#request("Clear", {});
   }
