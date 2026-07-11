@@ -137,6 +137,10 @@ function onSpeechUpdate(items, queue, generation = state.generation) {
 // ---- 設定読み込み ----
 
 async function applyLoaded({ config, warnings, source }) {
+  if (state.config && settingsUI.root?.open) {
+    const closeResult = await settingsUI.close("config-reload");
+    if (closeResult === "continued") { logEvent("未保存の設定編集があるため再読込を保留しました", "warn"); return; }
+  }
   const transition = state.runtime.beginTransition("config reload");
   teardown("config reload", transition.cancelledRequests);
   const generation = transition.generation;
@@ -665,6 +669,7 @@ function boot() {
     obsBridge.dispose();
     state.runtime.dispose("window unloaded");
   }, { once: true });
+  addEventListener("beforeunload", (event) => { if (settingsUI.dirty) event.preventDefault(); });
 }
 
 boot();
