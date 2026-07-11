@@ -22,7 +22,7 @@ class FakeSocket {
 async function loadModules() {
   const result = await build({
     stdin: {
-      contents: `export { decodeIrcTag, parseIrcFrame, parseIrcTags } from "./src/twitch-chat/twitch-irc-parser.js"; export { TwitchChatSession } from "./src/twitch-chat/twitch-chat-session.js"; export { TwitchChatSource, parseTwitchIrcLine } from "./src/comment-sources.js";`,
+      contents: `export { decodeIrcTag, parseIrcFrame, parseIrcTags } from "./src/twitch-chat/twitch-irc-parser.js"; export { TwitchChatSession } from "./src/twitch-chat/twitch-chat-session.js"; export { ReconnectPolicy } from "./src/twitch-chat/reconnect-policy.js"; export { TwitchChatSource, parseTwitchIrcLine } from "./src/comment-sources.js";`,
       resolveDir: path.resolve(new URL("../..", import.meta.url).pathname),
       sourcefile: "twitch-chat-test.js",
       loader: "js",
@@ -92,6 +92,97 @@ test("Twitch source replaces an old session without allowing its messages throug
     first.message("@display-name=Old :old!o@o PRIVMSG #channel :ignored\r\n");
     second.message("@display-name=New :new!n@n PRIVMSG #channel :accepted\r\n");
     assert.deepEqual(received.map((comment) => comment.text), ["accepted"]);
+    source.stop();
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("Twitch source coalesces reconnects, pauses offline, and recovers online", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    let now = 1_000;
+    let timerSequence = 0;
+    const timers = new Map();
+    const clock = {
+      now: () => now,
+      setTimeout(callback, ms) { const id = ++timerSequence; timers.set(id, { callback, ms }); return id; },
+      clearTimeout(id) { timers.delete(id); },
+    };
+    const platformCallbacks = {};
+    let online = true;
+    const platform = {
+      isOnline: () => online,
+      subscribe(callbacks) { Object.assign(platformCallbacks, callbacks); return () => {}; },
+    };
+    const statuses = [];
+    const source = new modules.TwitchChatSource({ channels: ["channel"], nick: "justinfan12345", reconnect: { baseDelayMs: 100, maxDelayMs: 1_000, jitterRatio: 0 } }, { WebSocketImpl: FakeSocket, clock, platform, random: () => 0.5, onStatus: (status) => statuses.push(status) });
+    source.start(() => {});
+    const first = source.ws;
+    first.open();
+    first.emit("error", {});
+    first.emit("close", {});
+    assert.equal(timers.size, 1);
+    assert.equal([...timers.values()][0].ms, 100);
+    assert.equal(source.snapshot().state, "retrying");
+
+    online = false;
+    platformCallbacks.offline();
+    assert.equal(timers.size, 0);
+    assert.equal(source.snapshot().offline, true);
+    online = true;
+    platformCallbacks.online();
+    assert.notEqual(source.ws, first);
+
+    const second = source.ws;
+    second.open();
+    second.message("PING :tmi.twitch.tv\r\n");
+    now += 100_000;
+    platformCallbacks.resume();
+    const resumed = source.ws;
+    assert.notEqual(resumed, second);
+    resumed.open();
+    resumed.message(":tmi.twitch.tv RECONNECT\r\n");
+    assert.equal([...timers.values()][0].ms, 0);
+    source.stop();
+    assert.equal(timers.size, 0);
+    assert.ok(statuses.some((status) => status.health?.status === "retrying"));
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("Reconnect policy follows exponential backoff and max delay", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    const policy = new modules.ReconnectPolicy({ baseDelayMs: 100, maxDelayMs: 350, jitterRatio: 0, random: () => 0.5 });
+    assert.deepEqual([policy.delay(1), policy.delay(2), policy.delay(3), policy.delay(4)], [100, 200, 350, 350]);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("Twitch source stops retrying when every channel has a permanent failure", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    const timers = new Map();
+    const clock = { now: () => 10, setTimeout(callback, ms) { timers.set(1, { callback, ms }); return 1; }, clearTimeout() { timers.clear(); } };
+    const platform = { isOnline: () => true, subscribe: () => () => {} };
+    const source = new modules.TwitchChatSource({ channels: ["blocked"], nick: "justinfan12345" }, { WebSocketImpl: FakeSocket, clock, platform });
+    source.start(() => {});
+    source.ws.open();
+    source.ws.message("@msg-id=msg_banned :tmi.twitch.tv NOTICE #blocked :banned\r\n");
+    assert.equal(timers.size, 0);
+    assert.equal(source.snapshot().health.status, "unavailable");
+    assert.equal(source.snapshot().channels[0].permanent, true);
+    source.stop();
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("Twitch source remains connected when only one channel has a permanent failure", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    const source = new modules.TwitchChatSource({ channels: ["live", "blocked"], nick: "justinfan12345" }, { WebSocketImpl: FakeSocket });
+    source.start(() => {});
+    source.ws.open();
+    source.ws.message(":justinfan12345!j@j JOIN #live\r\n@msg-id=msg_banned :tmi.twitch.tv NOTICE #blocked :banned\r\n");
+    assert.equal(source.snapshot().health.status, "degraded");
+    assert.deepEqual(source.snapshot().channels.map((channel) => channel.status), ["joined", "failed"]);
+    assert.equal(source.ws.readyState, 1);
     source.stop();
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

@@ -53,6 +53,10 @@
         <div class="panel-kicker">LIVE COMMENTS</div>
         <h1>コメント読み上げ</h1>
         <p class="panel-lead">届いたコメントを中心に、読み上げとAI応答の流れを確認できます。</p>
+        <div class="twitch-status-row" id="twitch-chat-panel" hidden>
+          <div id="twitch-chat-status" class="muted" aria-live="polite"></div>
+          <button id="btn-twitch-reconnect" type="button">Twitch再接続</button>
+        </div>
         <form id="comment-form" autocomplete="off">
           <input id="comment-author" placeholder="名前 (省略可)" aria-label="コメントの名前">
           <div class="comment-row">

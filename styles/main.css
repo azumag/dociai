@@ -220,6 +220,17 @@ a { color: var(--focus); }
   border-left-color: var(--ok);
   color: var(--ink);
 }
+
+.twitch-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
 .speech-actions button:first-child { border-color: #5c3f27; color: var(--cue); }
 .speech-actions button:nth-child(2) { border-color: #234a3a; color: var(--ok); }
 .speech-list { max-height: 42vh; overflow-y: auto; }

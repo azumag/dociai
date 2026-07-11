@@ -1,18 +1,21 @@
 import { ChannelMembership } from "./channel-membership.js";
 import { parseIrcFrame } from "./twitch-irc-parser.js";
 import { TwitchChatState } from "./twitch-chat-state.js";
+import { classifyNotice } from "./twitch-chat-errors.js";
 
 let sequence = 0;
 const channel = (value) => String(value ?? "").trim().replace(/^#/, "").toLowerCase();
 const guestNick = () => `justinfan${Math.floor(10000 + Math.random() * 90000)}`;
 
 export class TwitchChatSession {
-  constructor(config = {}, { WebSocketImpl = globalThis.WebSocket, log = () => {}, onComment = () => {}, onStatus = () => {} } = {}) {
+  constructor(config = {}, { WebSocketImpl = globalThis.WebSocket, log = () => {}, onComment = () => {}, onStatus = () => {}, onDisconnect = () => {}, now = Date.now } = {}) {
     this.id = `twitch-session-${++sequence}`;
     this.WebSocketImpl = WebSocketImpl;
     this.log = log;
     this.onComment = onComment;
     this.onStatus = onStatus;
+    this.onDisconnect = onDisconnect;
+    this.now = now;
     this.url = config.url || "wss://irc-ws.chat.twitch.tv:443";
     this.nick = config.nick || guestNick();
     this.channels = (config.channels ?? [config.channel]).map(channel).filter(Boolean);
@@ -21,6 +24,8 @@ export class TwitchChatSession {
     this.socket = null;
     this.active = false;
     this.parserErrors = 0;
+    this.lastActivityAt = null;
+    this.disconnectNotified = false;
   }
 
   start() {
@@ -49,7 +54,7 @@ export class TwitchChatSession {
     return true;
   }
 
-  snapshot() { return { sessionId: this.id, state: this.state.value, parserErrors: this.parserErrors, channels: this.membership.snapshot() }; }
+  snapshot() { return { sessionId: this.id, state: this.state.value, parserErrors: this.parserErrors, channels: this.membership.snapshot(), lastActivityAt: this.lastActivityAt }; }
   #owns(socket) { return this.active && this.socket === socket; }
   #send(line) { if (this.socket?.readyState === 1) this.socket.send(line); }
   #open() {
@@ -63,19 +68,21 @@ export class TwitchChatSession {
     this.#status();
   }
   #message(frame) {
+    this.lastActivityAt = this.now();
     for (const event of parseIrcFrame(frame)) {
       if (event.type === "malformed" || event.type === "unknown") { this.parserErrors += 1; continue; }
       if (event.type === "ping") { this.#send(`PONG ${event.payload}`); continue; }
-      if (event.type === "reconnect") { this.#error("server requested reconnect"); continue; }
+      if (event.type === "reconnect") { this.#disconnect("server requested reconnect", { immediate: true }); this.stop(); return; }
       if (event.type === "join" && event.login === this.nick.toLowerCase()) this.membership.joined(event.channel);
       if (event.type === "part" && event.login === this.nick.toLowerCase()) this.membership.parted(event.channel);
-      if (event.type === "notice" && event.channel) this.membership.failed(event.channel, event.message || event.messageId);
+      if (event.type === "notice" && event.channel) { const failure = classifyNotice(event); this.membership.failed(event.channel, failure.message, { permanent: failure.permanent, code: failure.code }); }
       if (event.type === "privmsg") { this.membership.message(event.channel); this.onComment({ author: event.author, text: event.text, source: "twitch", channel: event.channel, emotes: event.emotes, sessionId: this.id }); }
       if (this.membership.allJoined()) this.state.transition("connected", "channel membership resolved");
     }
     this.#status();
   }
-  #error(reason) { this.state.transition("error", reason); this.log(`Twitchチャット接続でエラーが発生しました: ${reason}`, "error"); this.#status(); }
+  #error(reason) { this.state.transition("error", reason); this.log(`Twitchチャット接続でエラーが発生しました: ${reason}`, "error"); this.#status(); this.#disconnect(reason); }
   #closed() { if (!this.active) return; this.#error("socket closed"); }
+  #disconnect(reason, options = {}) { if (this.disconnectNotified) return; this.disconnectNotified = true; this.onDisconnect({ reason, ...options }); }
   #status() { this.onStatus(this.snapshot()); }
 }
