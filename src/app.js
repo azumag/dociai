@@ -25,6 +25,10 @@ import { AppStore } from "./app/app-store.js";
 import { bindConsoleUI } from "./ui/bindings.js";
 import { ElementRegistry } from "./ui/element-registry.js";
 import { ConsoleView } from "./ui/console-view.js";
+import { AutomationCoordinator } from "./app/automation-coordinator.js";
+import { ResponseCoordinator } from "./app/response-coordinator.js";
+import { SourceCoordinator } from "./app/source-coordinator.js";
+import { ObsBridge } from "./obs/obs-bridge.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -37,6 +41,7 @@ const appStore = new AppStore(createAppState({
 }));
 const state = appStore.createLegacyAdapter();
 const consoleView = new ConsoleView(document);
+const obsBridge = new ObsBridge({ transport: state.obs, getGeneration: () => state.generation });
 
 const scrub = (text) => scrubSecrets(text, state.secrets);
 const hhmmss = (d = new Date()) => new Date(d).toTimeString().slice(0, 8);
@@ -52,11 +57,7 @@ const personaColor = (id) => {
 const COMMENT_READER_ID = "__comment_reader__";
 
 function broadcast(type, payload) {
-  try {
-    state.obs.postMessage({ type, payload: { ...payload, generation: state.generation } });
-  } catch {
-    // OBS表示が閉じていても操作卓は動き続ける
-  }
+  obsBridge.publish(type, payload);
 }
 
 // ---- ログ ----
@@ -111,93 +112,15 @@ function handleTrigger(triggerId, { comment = null, personaId = null, manual = f
   }
   if (handledByReader) return;
 
-  const { selected, skipped } = state.personaRouter.select(triggerId, {
-    comment,
-    personaId,
-    ignoreCooldown: manual,
-  });
-  for (const s of skipped) {
-    logEvent(`「${s.persona.name}」はスキップ: ${s.reason} (trigger: ${triggerId})`);
-  }
-  for (const persona of selected) {
-    respond(persona, { comment, triggerId });
-  }
-}
-
-async function respond(persona, { comment = null, triggerId = "manual", task = null }) {
-  const connector = state.connectors.get(persona.connector);
-  if (!connector) {
-    logEvent(`「${persona.name}」のコネクタ "${persona.connector}" が初期化されていません`, "error");
-    return;
-  }
-  // 二重応答防止のため呼び出し前に記録する
-  const generation = state.generation;
-  const request = state.runtime.createRequest({ generation, ownerId: `connector:${generation}:${persona.connector}`, kind: "ai-chat", timeoutMs: state.config?.connectors?.[persona.connector]?.timeoutMs });
-  state.personaRouter.recordReply(persona, comment);
-  state.thinking.add(persona.id);
-  renderTally();
-  renderPersonas();
-
-  const { messages, debugText } = state.contextBuilder.build({ persona, comment, task });
-  state.lastDebug = { personaName: persona.name, debugText, at: new Date() };
-  renderDebug();
-
-  try {
-    const { text } = await connector.chat(messages, { signal: request.context.signal, requestId: request.context.requestId, generation });
-    state.runtime.guard(request.context);
-    appendReply({ persona, text, triggerId });
-    broadcast("reply", {
-      personaId: persona.id,
-      personaName: persona.name,
-      color: personaColor(persona.id),
-      text,
-      time: Date.now(),
-    });
-    state.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice });
-  } catch (e) {
-    if (isCancellation(e)) return;
-    const msg = scrub(e.message);
-    logEvent(`「${persona.name}」応答失敗: ${msg}`, "error");
-    appendReply({ persona, error: msg, triggerId });
-  } finally {
-    request.complete();
-    if (!state.runtime.isCurrent(generation)) return;
-    state.thinking.delete(persona.id);
-    renderTally();
-    renderPersonas();
-  }
+  state.responseCoordinator?.handleTrigger(triggerId, { comment, personaId, manual });
 }
 
 async function runNews() {
-  const reader = state.newsReader;
-  const generation = state.generation;
-  if (!reader) return;
-  const request = state.runtime.createRequest({ generation, ownerId: `news:${generation}`, kind: "news-fetch" });
-  try {
-    await reader.run({ ...request.context, isCurrent: () => state.runtime.isCurrent(generation) });
-  } catch (e) {
-    if (isCancellation(e)) return;
-    logEvent(`ニュース読み上げ失敗: ${scrub(e.message)}`, "error");
-  } finally {
-    request.complete();
-  }
-  if (state.runtime.isCurrent(generation)) renderNewsPanel();
+  return state.automationCoordinator?.run("news", state.newsReader);
 }
 
 async function runTopics() {
-  const reader = state.topicReader;
-  const generation = state.generation;
-  if (!reader) return;
-  const request = state.runtime.createRequest({ generation, ownerId: `topics:${generation}`, kind: "topic-fetch" });
-  try {
-    await reader.run({ ...request.context, isCurrent: () => state.runtime.isCurrent(generation) });
-  } catch (e) {
-    if (isCancellation(e)) return;
-    logEvent(`話題読み上げ失敗: ${scrub(e.message)}`, "error");
-  } finally {
-    request.complete();
-  }
-  if (state.runtime.isCurrent(generation)) renderTopicPanel();
+  return state.automationCoordinator?.run("topics", state.topicReader);
 }
 
 function onSpeechUpdate(items, queue, generation = state.generation) {
@@ -299,6 +222,32 @@ async function applyLoaded({ config, warnings, source }) {
     config,
   });
 
+  state.responseCoordinator = new ResponseCoordinator({
+    runtime: state.runtime,
+    getGeneration: () => state.generation,
+    getConnector: (id) => state.connectors.get(id),
+    personaRouter: state.personaRouter,
+    contextBuilder: state.contextBuilder,
+    speechQueue: state.speechQueue,
+    publish: (type, payload) => broadcast(type, { ...payload, color: payload.personaId ? personaColor(payload.personaId) : payload.color }),
+    dispatch: (action) => {
+      const { persona } = action;
+      if (action.type === "response-skipped") logEvent(`「${persona.name}」はスキップ: ${action.reason} (trigger: ${action.triggerId})`);
+      if (action.type === "response-started") { state.thinking.add(persona.id); renderTally(); renderPersonas(); }
+      if (action.type === "response-debug") { state.lastDebug = { personaName: persona.name, debugText: action.debugText, at: new Date() }; renderDebug(); }
+      if (action.type === "response-final") appendReply({ persona, text: action.text, triggerId: action.triggerId });
+      if (action.type === "response-error") appendReply({ persona, error: scrub(action.error.message), triggerId: action.triggerId });
+      if (action.type === "response-finished" && state.runtime.isCurrent(action.generation)) { state.thinking.delete(persona.id); renderTally(); renderPersonas(); }
+    },
+    onError: (error, persona) => logEvent(`「${persona?.name ?? "不明"}」応答失敗: ${scrub(error.message)}`, "error"),
+  });
+  state.automationCoordinator = new AutomationCoordinator({
+    runtime: state.runtime,
+    getGeneration: () => state.generation,
+    onError: (kind, error) => logEvent(`${kind === "news" ? "ニュース" : "話題"}読み上げ失敗: ${scrub(error.message)}`, "error"),
+    onComplete: (kind) => kind === "news" ? renderNewsPanel() : renderTopicPanel(),
+  });
+
   state.newsReader = new NewsReader({
     config,
     getConnector: (id) => state.connectors.get(id),
@@ -351,7 +300,16 @@ async function applyLoaded({ config, warnings, source }) {
   });
   state.triggerEngine.start();
 
-  startExternalCommentSources(config, generation);
+  state.sourceCoordinator = new SourceCoordinator({
+    isCurrent: () => state.runtime.isCurrent(generation),
+    onComment: (raw) => addComment(raw),
+    onStatus: (_id, status) => { state.twitchStatus = status; renderTwitchChatStatus(); },
+    onError: (error) => logEvent(`コメントsourceを開始できません: ${scrub(error.message)}`, "error"),
+  });
+  const twitch = config.commentSources?.twitch;
+  const sourceFactories = [() => state.manualSource];
+  if (twitch?.enabled) sourceFactories.push(({ onStatus }) => new TwitchChatSource(twitch, { log: (m, level) => logEvent(m, level), onStatus }));
+  state.sourceCoordinator.replace(sourceFactories).then((sources) => { if (state.runtime.isCurrent(generation)) state.externalCommentSources = sources; });
 
   for (const w of warnings) logEvent(`設定の警告: ${w}`, "warn");
 
@@ -371,7 +329,9 @@ async function applyLoaded({ config, warnings, source }) {
 function teardown(reason = "runtime teardown", preCancelled = 0) {
   const startedAt = Date.now();
   const cancelledRequests = preCancelled + state.runtime.requests.cancelGeneration(state.generation, reason);
-  for (const source of state.externalCommentSources) source.stop();
+  state.responseCoordinator?.dispose();
+  state.automationCoordinator?.dispose();
+  state.sourceCoordinator?.dispose();
   state.externalCommentSources = [];
   state.triggerEngine?.stop();
   state.screenContext?.stop();
@@ -389,26 +349,6 @@ function teardown(reason = "runtime teardown", preCancelled = 0) {
     cancelledRequests,
     activeRequests: state.runtime.requests.list(),
   };
-}
-
-function startExternalCommentSources(config, generation = state.generation) {
-  const twitch = config.commentSources?.twitch;
-  if (!twitch?.enabled) return;
-
-  try {
-    const source = new TwitchChatSource(twitch, {
-      log: (m, level) => logEvent(m, level),
-      onStatus: (status) => {
-        if (!state.runtime.isCurrent(generation)) return;
-        state.twitchStatus = status;
-        renderTwitchChatStatus();
-      },
-    });
-    source.start((raw) => { if (state.runtime.isCurrent(generation)) addComment(raw); });
-    state.externalCommentSources.push(source);
-  } catch (e) {
-    logEvent(`Twitchチャットを開始できません: ${scrub(e.message)}`, "error");
-  }
 }
 
 function reportConfigError(e) {
@@ -713,7 +653,6 @@ function bindUI() {
 
 function boot() {
   bindUI();
-  state.manualSource.start((raw) => addComment(raw));
   state.commentStore.onChange(renderComments);
   renderAll();
   logEvent("dociai 操作卓を起動しました。設定を読み込んでください");
@@ -723,6 +662,7 @@ function boot() {
     .catch((e) => logEvent(`自動読込は見送り: ${scrub(e.message)}`, "warn"));
   addEventListener("pagehide", () => {
     teardown("window unloaded");
+    obsBridge.dispose();
     state.runtime.dispose("window unloaded");
   }, { once: true });
 }
