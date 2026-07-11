@@ -11,13 +11,14 @@
 // ときだけ再描画する (入力フォーカスは失われるが、入力値は draft に反映済みなので保持される)。
 
 import { validateConfig } from "./config-loader.js";
+import { registryIds } from "./config/config-registry.js";
 
-const PROVIDERS = ["openai", "openrouter", "openai-compatible", "ollama", "minimax", "mock"];
-const TRIGGER_TYPES = ["keyword", "hotkey", "interval", "random", "manual"];
-const VOICE_ENGINES = ["webspeech", "voicevox", "bouyomi"];
-const NEWS_MODES = ["topic", "current", "simple"];
-const NEWS_SOURCE_TYPES = ["rss", "mock"];
-const TOPIC_SOURCE_TYPES = ["todoist"];
+const PROVIDERS = registryIds("providers");
+const TRIGGER_TYPES = registryIds("triggerTypes");
+const VOICE_ENGINES = registryIds("voiceEngines");
+const NEWS_MODES = registryIds("newsModes");
+const NEWS_SOURCE_TYPES = registryIds("newsSourceTypes");
+const TOPIC_SOURCE_TYPES = registryIds("topicSourceTypes");
 
 const clone = (v) => JSON.parse(JSON.stringify(v ?? null));
 // 壊れた/手編集された config.local.json で配列であるべき値が文字列などになっていても

@@ -2,11 +2,13 @@
 // config.local.json をサーバー経由fetchまたはファイル選択で読み込む。
 // 読み込んだ設定 (APIキー含む) はメモリ保持のみ。永続ストレージには書かない。
 
-const KNOWN_PROVIDERS = ["openai", "openrouter", "openai-compatible", "ollama", "minimax", "mock"];
-const KNOWN_TRIGGER_TYPES = ["keyword", "hotkey", "interval", "random", "manual"];
-const KNOWN_NEWS_SOURCE_TYPES = ["rss", "mock"];
-const KNOWN_TOPIC_SOURCE_TYPES = ["todoist"];
-const KNOWN_NEWS_MODES = ["topic", "current", "simple"];
+import { registryIds } from "./config/config-registry.js";
+const KNOWN_PROVIDERS = registryIds("providers");
+const KNOWN_TRIGGER_TYPES = registryIds("triggerTypes");
+const KNOWN_NEWS_SOURCE_TYPES = registryIds("newsSourceTypes");
+const KNOWN_TOPIC_SOURCE_TYPES = registryIds("topicSourceTypes");
+const KNOWN_NEWS_MODES = registryIds("newsModes");
+const VOICE_ENGINES = registryIds("voiceEngines");
 const DEFAULT_TOPIC_INTRO = "上のお題について、あなたのキャラクターとして自由にコメントしてください。";
 const DEFAULT_TOPIC_STYLE = "雑談のお題として、自然な自分の言葉で自由にコメントする";
 
@@ -242,7 +244,7 @@ export function validateConfig(cfg) {
   // commentReader (issue #31)
   if (cfg.commentReader?.enabled) {
     const cr = cfg.commentReader;
-    if (cr.engine && !["webspeech", "voicevox", "bouyomi"].includes(cr.engine)) {
+    if (cr.engine && !VOICE_ENGINES.includes(cr.engine)) {
       errors.push(`commentReader.engine "${cr.engine}" は未対応です (対応: webspeech, voicevox, bouyomi)`);
     }
     if (cr.engine === "voicevox" && !cfg.voicevox?.enabled) {
@@ -260,7 +262,7 @@ export function validateConfig(cfg) {
   for (const [i, p] of (cfg.personas ?? []).entries()) {
     const label = p?.id ? `personas[${p.id}]` : `personas[${i}]`;
     const engine = p?.voice?.engine;
-    if (engine && !["webspeech", "voicevox", "bouyomi"].includes(engine)) {
+    if (engine && !VOICE_ENGINES.includes(engine)) {
       errors.push(`${label}.voice.engine "${engine}" は未対応です (対応: webspeech, voicevox, bouyomi)`);
     }
     if (engine === "voicevox" && !cfg.voicevox?.enabled) {
