@@ -209,6 +209,21 @@ export function validateConfig(cfg) {
     }
   }
 
+  if (cfg.speechQueue) {
+    const q = cfg.speechQueue;
+    for (const key of ["maxPending", "maxPendingPerSource", "maxHistory"]) {
+      if (q[key] != null && !(Number.isInteger(Number(q[key])) && Number(q[key]) >= (key === "maxHistory" ? 0 : 1) && Number(q[key]) <= 1000)) {
+        errors.push(`speechQueue.${key} は${key === "maxHistory" ? "0" : "1"}〜1000の整数にしてください`);
+      }
+    }
+    if (q.maxAgeMs != null && !(Number(q.maxAgeMs) >= 1000 && Number(q.maxAgeMs) <= 86_400_000)) {
+      errors.push("speechQueue.maxAgeMs は1000〜86400000の範囲にしてください");
+    }
+    if (q.overflow && !["drop-oldest", "drop-new", "replace-latest", "aggregate"].includes(q.overflow)) {
+      errors.push(`speechQueue.overflow "${q.overflow}" は未対応です`);
+    }
+  }
+
   // micMonitor (issue #32)
   if (cfg.micMonitor?.enabled) {
     const m = cfg.micMonitor;
@@ -318,6 +333,15 @@ export function applyDefaults(cfg) {
       speed: -1,
       tone: -1,
       ...(cfg.bouyomi ?? {}),
+    },
+    speechQueue: {
+      maxPending: 50,
+      maxPendingPerSource: 20,
+      maxAgeMs: 120000,
+      maxHistory: 50,
+      overflow: "drop-oldest",
+      expireWhileHeld: true,
+      ...(cfg.speechQueue ?? {}),
     },
     micMonitor: {
       enabled: false,

@@ -6,15 +6,13 @@
 // 状態: waiting -> speaking -> done | skipped | failed
 
 import { VoiceVoxClient, VoiceVoxError, chunkText } from "./voicevox.js";
-
-let seq = 0;
+import { SpeechScheduler } from "./speech/speech-scheduler.js";
 
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
 export class SpeechQueue {
-  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null } = {}) {
-    this.items = [];
-    this.current = null;
+  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {} } = {}) {
+    this.scheduler = new SpeechScheduler(policy);
     this.paused = false;
     this.cancelling = false;
     this._holdingItem = null;
@@ -29,21 +27,13 @@ export class SpeechQueue {
     }
   }
 
-  enqueue({ personaId, personaName, text, voice = {} }) {
-    const item = {
-      id: `s${++seq}`,
-      personaId,
-      personaName,
-      text: String(text),
-      voice,
-      state: "waiting",
-      error: null,
-      chunkIndex: 0,
-      chunkCount: 0,
-    };
-    this.items.push(item);
-    if (this.items.length > 50) this.items.splice(0, this.items.length - 50);
-    this.#setState(item, "waiting");
+  get current() { return this.scheduler.current; }
+  get items() { return [...this.scheduler.history.items, ...this.scheduler.pending, ...(this.current ? [this.current] : [])]; }
+  snapshot() { return this.scheduler.snapshot(); }
+
+  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt }) {
+    const item = this.scheduler.enqueue({ personaId, personaName, text, voice, source, priority, deadlineAt });
+    this.#setState(item, item.state);
     this.#pump();
     return item;
   }
@@ -72,8 +62,8 @@ export class SpeechQueue {
   }
 
   clear() {
-    for (const item of this.items) {
-      if (item.state === "waiting") this.#setState(item, "skipped");
+    for (const item of [...this.scheduler.pending]) {
+      this.scheduler.removePending(item, "skipped");
     }
     this.#cancelCurrent();
     this.bouyomi?.clear().catch((e) => this.log(`棒読みちゃんのキュー消去に失敗: ${e.message}`));
@@ -82,7 +72,7 @@ export class SpeechQueue {
   }
 
   waitingCount() {
-    return this.items.filter((i) => i.state === "waiting").length;
+    return this.scheduler.pending.length;
   }
 
   #cancelCurrent() {
@@ -106,17 +96,17 @@ export class SpeechQueue {
 
   #pump() {
     if (this.current || this.paused) return;
-    const item = this.items.find((i) => i.state === "waiting");
+    const item = this.scheduler.take();
     if (!item) return;
 
     if (item.voice?.enabled === false) {
       item.error = "音声OFFのペルソナのため読み上げなし";
-      this.#setState(item, "done");
+      this.scheduler.complete(item, "done");
+      this.#setState(item, item.state);
       this.#pump();
       return;
     }
 
-    this.current = item;
     item._abortController = new AbortController();
     this.#setState(item, "speaking");
 
@@ -143,7 +133,8 @@ export class SpeechQueue {
 
     if (!this.supported) {
       item.error = "このブラウザはWeb Speech APIに未対応です";
-      this.#setState(item, "failed");
+      this.scheduler.complete(item, "failed", { error: item.error });
+      this.#setState(item, item.state);
       this.#pump();
       return;
     }
@@ -283,11 +274,10 @@ export class SpeechQueue {
 
   #finish(item, state) {
     if (this.current !== item) return;
-    this.current = null;
     if (this.cancelling && state === "done") state = "skipped";
+    const held = this._holdingItem === item;
     if (this._holdingItem === item) {
       this._holdingItem = null;
-      state = "waiting";
       item.chunkIndex = 0;
     }
     this.cancelling = false;
@@ -302,7 +292,9 @@ export class SpeechQueue {
       item._audio = null;
     }
     item._abortController = null;
-    this.#setState(item, state);
+    if (held) this.scheduler.requeueCurrent();
+    else this.scheduler.complete(item, state, { error: item.error });
+    this.#setState(item, item.state);
     // Chromeはcancel直後のspeakを取りこぼすことがあるため少し置いて次へ
     setTimeout(() => this.#pump(), 250);
   }
@@ -320,7 +312,7 @@ export class SpeechQueue {
 
   #setState(item, state) {
     item.state = state;
-    const label = { waiting: "待機中", speaking: "読み上げ中", done: "完了", skipped: "スキップ", failed: "失敗" }[state];
+    const label = { waiting: "待機中", speaking: "読み上げ中", done: "完了", submitted: "送信済み", skipped: "スキップ", cancelled: "キャンセル", dropped: "破棄", failed: "失敗" }[state] ?? state;
     const chunkInfo = item.chunkCount > 1 ? ` [${Math.min(item.chunkIndex + 1, item.chunkCount)}/${item.chunkCount}]` : "";
     this.log(`音声[${item.personaName}] ${label}${chunkInfo}${item.error ? ` (${item.error})` : ""}: ${item.text.slice(0, 40)}`);
     this.onUpdate(this.items, this);
