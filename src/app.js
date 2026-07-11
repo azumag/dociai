@@ -20,36 +20,23 @@ import { scrubSecrets, collectApiKeys, checkSecretStorage } from "./security.js"
 import { SettingsUI } from "./settings-ui.js";
 import { BrowserRuntimeController } from "./runtime/runtime-controller.js";
 import { isCancellation } from "./runtime/request-registry.js";
+import { createAppState } from "./app/app-state.js";
+import { AppStore } from "./app/app-store.js";
+import { bindConsoleUI } from "./ui/bindings.js";
+import { ElementRegistry } from "./ui/element-registry.js";
+import { ConsoleView } from "./ui/console-view.js";
 
 const $ = (sel) => document.querySelector(sel);
 
-const state = {
-  config: null,
-  configSource: null,
-  configLoadedAt: null,
-  secrets: [],
+const appStore = new AppStore(createAppState({
   connectors: new Map(),
   commentStore: new CommentStore({ limit: 80 }),
-  contextBuilder: null,
-  triggerEngine: null,
-  personaRouter: null,
-  speechQueue: null,
-  screenContext: null,
-  micMonitor: null,
-  newsReader: null,
-  topicReader: null,
   manualSource: new ManualCommentSource(),
-  externalCommentSources: [],
-  thinking: new Set(),
-  speakingPersonaId: null,
-  manualSpeechHold: false,
-  lastDebug: null,
   obs: new BroadcastChannel("dociai-obs"),
   runtime: new BrowserRuntimeController(),
-  generation: 0,
-  lastTeardown: null,
-  twitchStatus: null,
-};
+}));
+const state = appStore.createLegacyAdapter();
+const consoleView = new ConsoleView(document);
 
 const scrub = (text) => scrubSecrets(text, state.secrets);
 const hhmmss = (d = new Date()) => new Date(d).toTimeString().slice(0, 8);
@@ -75,38 +62,14 @@ function broadcast(type, payload) {
 // ---- ログ ----
 
 function logEvent(message, level = "info") {
-  const li = document.createElement("li");
-  if (level === "error") li.className = "is-error";
-  if (level === "warn") li.className = "is-warn";
-  li.innerHTML = `<span class="time">${hhmmss()}</span>`;
-  li.append(scrub(message));
-  const log = $("#event-log");
-  log.prepend(li);
-  while (log.children.length > 200) log.lastChild.remove();
+  consoleView.appendSystemLog({ message: scrub(message), level, time: hhmmss() });
+  appStore.dispatch({ type: "append-system-log", entry: { message: String(message), level, at: new Date().toISOString() } });
 }
 
 function appendReply({ persona, text = null, error = null, triggerId, newsTitle = null, topicTitle = null, contentLabel = null, contentTitle = null }) {
-  const li = document.createElement("li");
-  li.className = `reply-item${error ? " is-error" : ""}`;
-  li.style.setProperty("--persona-color", personaColor(persona.id));
-  const head = document.createElement("div");
-  head.className = "reply-head";
-  head.innerHTML = `<span class="persona-name"></span><span class="time">${hhmmss()}</span><span>trigger: ${triggerId}</span>`;
-  head.querySelector(".persona-name").textContent = persona.name;
   const label = contentLabel ?? (newsTitle ? "news" : topicTitle ? "topic" : null);
   const title = contentTitle ?? newsTitle ?? topicTitle;
-  if (label && title) {
-    const n = document.createElement("span");
-    n.textContent = `${label}: ${title.slice(0, 24)}`;
-    head.append(n);
-  }
-  const body = document.createElement("div");
-  body.className = "reply-text";
-  body.textContent = error ? `応答失敗: ${error}` : text;
-  li.append(head, body);
-  const log = $("#reply-log");
-  log.prepend(li);
-  while (log.children.length > 100) log.lastChild.remove();
+  consoleView.appendReply({ personaName: persona.name, color: personaColor(persona.id), text, error, triggerId, contentLabel: label, contentTitle: title, time: hhmmss() });
 }
 
 // ---- 応答フロー ----
@@ -475,14 +438,7 @@ function renderAll() {
 }
 
 function renderConfigStatus() {
-  const el = $("#config-status");
-  if (!state.config) {
-    el.textContent = "設定: 未読込";
-    el.className = "chip is-warn";
-    return;
-  }
-  el.textContent = `設定: 読込済 (${state.configSource} ${hhmmss(state.configLoadedAt)})`;
-  el.className = "chip is-ok";
+  consoleView.renderConfig({ loaded: Boolean(state.config), source: state.configSource, time: state.configLoadedAt ? hhmmss(state.configLoadedAt) : null });
 }
 
 function personaState(p) {
@@ -493,79 +449,28 @@ function personaState(p) {
 }
 
 function renderTally() {
-  const tally = $("#tally");
-  tally.replaceChildren();
-  for (const p of state.personaRouter?.list() ?? []) {
-    const s = personaState(p);
-    const lamp = document.createElement("span");
-    lamp.className = `tally-lamp is-${s}`;
-    lamp.title = { off: "無効", ready: "待機", thinking: "思考中", speaking: "発話中" }[s];
-    const dot = document.createElement("span");
-    dot.className = "dot";
-    lamp.append(dot, p.name);
-    tally.append(lamp);
-  }
+  consoleView.renderTally((state.personaRouter?.list() ?? []).map((persona) => ({ name: persona.name, state: personaState(persona) })));
 }
 
 function renderConnectors() {
-  const ul = $("#connector-list");
-  ul.replaceChildren();
-  for (const [id, cfg] of Object.entries(state.config?.connectors ?? {})) {
+  const connectors = Object.entries(state.config?.connectors ?? {}).map(([id, cfg]) => {
     const connector = state.connectors.get(id);
-    const li = document.createElement("li");
     const info = connector?.describe() ?? { provider: cfg.provider, model: cfg.model, apiKeyMasked: "(初期化失敗)" };
-    li.innerHTML = `<div class="grow"><div class="name"></div><div class="detail"></div></div>`;
-    li.querySelector(".name").textContent = id;
-    li.querySelector(".detail").textContent = `${info.provider} / ${info.model} / key: ${info.apiKeyMasked}`;
-    ul.append(li);
-  }
-  if (!ul.children.length) ul.innerHTML = `<li class="detail">設定を読み込むと表示されます</li>`;
+    return { id, ...info };
+  });
+  consoleView.renderConnectors(connectors);
 }
 
 function renderPersonas() {
-  const ul = $("#persona-list");
-  ul.replaceChildren();
-  for (const p of state.personaRouter?.list() ?? []) {
-    const li = document.createElement("li");
-    const dot = document.createElement("span");
-    dot.className = `persona-dot is-${personaState(p)}`;
-    dot.style.background = p.enabled && personaState(p) === "ready" ? personaColor(p.id) : "";
-
-    const grow = document.createElement("div");
-    grow.className = "grow";
+  const personas = (state.personaRouter?.list() ?? []).map((p) => {
     const cooldown = state.personaRouter.cooldownRemaining(p);
-    grow.innerHTML = `<div class="name"></div><div class="detail"></div>`;
-    grow.querySelector(".name").textContent = p.name;
-    grow.querySelector(".detail").textContent =
-      `${p.connector} / triggers: ${(p.triggers ?? []).join(", ") || "なし"}` +
-      (cooldown > 0 ? ` / CD ${Math.ceil(cooldown)}s` : "");
-
-    const switchLabel = document.createElement("label");
-    switchLabel.className = "switch";
-    switchLabel.title = "ペルソナのON/OFF";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = p.enabled;
-    checkbox.addEventListener("change", () => {
-      state.personaRouter.setEnabled(p.id, checkbox.checked);
-      logEvent(`ペルソナ「${p.name}」を${checkbox.checked ? "有効化" : "無効化"}しました`);
-    });
-    const track = document.createElement("span");
-    track.className = "track";
-    switchLabel.append(checkbox, track);
-
-    const fire = document.createElement("button");
-    fire.type = "button";
-    fire.textContent = "発話";
-    fire.title = "このペルソナを手動で発話させる";
-    fire.addEventListener("click", () => {
-      handleTrigger("manual", { personaId: p.id, manual: true });
-    });
-
-    li.append(dot, grow, switchLabel, fire);
-    ul.append(li);
-  }
-  if (!ul.children.length) ul.innerHTML = `<li class="detail">設定を読み込むと表示されます</li>`;
+    const pState = personaState(p);
+    return { ...p, state: pState, dotColor: p.enabled && pState === "ready" ? personaColor(p.id) : "", detail: `${p.connector} / triggers: ${(p.triggers ?? []).join(", ") || "なし"}${cooldown > 0 ? ` / CD ${Math.ceil(cooldown)}s` : ""}` };
+  });
+  consoleView.renderPersonas(personas, {
+    setPersonaEnabled: (id, enabled) => { const persona = personas.find((entry) => entry.id === id); state.personaRouter.setEnabled(id, enabled); logEvent(`ペルソナ「${persona.name}」を${enabled ? "有効化" : "無効化"}しました`); },
+    firePersona: (id) => handleTrigger("manual", { personaId: id, manual: true }),
+  });
 }
 
 function triggerDetail(t) {
@@ -579,79 +484,35 @@ function triggerDetail(t) {
 }
 
 function renderTriggers() {
-  const ul = $("#trigger-list");
-  ul.replaceChildren();
-  for (const [id, t] of Object.entries(state.config?.triggers ?? {})) {
-    const li = document.createElement("li");
-    const badge = document.createElement("span");
-    badge.className = "badge";
-    badge.textContent = t.type;
-    const grow = document.createElement("div");
-    grow.className = "grow";
-    grow.innerHTML = `<div class="name"></div><div class="detail"></div>`;
-    grow.querySelector(".name").textContent = id;
+  const triggers = Object.entries(state.config?.triggers ?? {}).map(([id, t]) => {
     const users = (state.config.personas ?? []).filter((p) => (p.triggers ?? []).includes(id)).map((p) => p.name);
     const newsUses = state.config.news?.enabled && state.config.news.trigger === id;
     const topicUses = state.config.topics?.enabled && state.config.topics.trigger === id;
     const uses = [...users];
     if (newsUses) uses.push("ニュース読み上げ");
     if (topicUses) uses.push("話題読み上げ");
-    grow.querySelector(".detail").textContent =
-      `${triggerDetail(t)} → ${uses.join(", ") || "(使用ペルソナなし)"}`;
-    const fire = document.createElement("button");
-    fire.type = "button";
-    fire.textContent = "発火";
-    fire.addEventListener("click", () => state.triggerEngine.fire(id, { reason: "manual" }));
-    li.append(badge, grow, fire);
-    ul.append(li);
-  }
-  if (!ul.children.length) ul.innerHTML = `<li class="detail">設定を読み込むと表示されます</li>`;
+    return { id, type: t.type, detail: `${triggerDetail(t)} → ${uses.join(", ") || "(使用ペルソナなし)"}` };
+  });
+  consoleView.renderTriggers(triggers, { fireTrigger: (id) => state.triggerEngine.fire(id, { reason: "manual" }) });
 }
 
 function renderSpeechQueue() {
   const snapshot = state.speechQueue?.snapshot();
-  const renderItems = (ul, items, empty) => {
-    ul.replaceChildren();
-    for (const item of items) {
-    const li = document.createElement("li");
-    const badge = document.createElement("span");
-    badge.className = `badge state-${item.state}`;
-    badge.textContent = { waiting: "待機", speaking: "発話中", done: "完了", submitted: "送信済", skipped: "スキップ", cancelled: "取消", dropped: "破棄", failed: "失敗" }[item.state] ?? item.state;
-    const grow = document.createElement("div");
-    grow.className = "grow";
-    grow.innerHTML = `<div class="detail"></div>`;
-    grow.querySelector(".detail").textContent = `${item.personaName}: ${item.text.slice(0, 60)}${item.error ? ` (${item.error})` : ""}`;
-    li.append(badge, grow);
-    ul.append(li);
-    }
-    if (!items.length) ul.innerHTML = `<li class="detail">${empty}</li>`;
-  };
-  const current = $("#speech-current");
-  current.textContent = snapshot?.current ? `${snapshot.current.personaName}: ${snapshot.current.text}` : "再生中なし";
-  renderItems($("#speech-pending"), snapshot ? [...snapshot.pending] : [], "待機なし");
-  renderItems($("#speech-list"), snapshot ? [...snapshot.history].reverse().slice(0, 8) : [], "履歴なし");
-  const diagnostics = $("#speech-diagnostics");
-  if (snapshot) {
-    diagnostics.textContent = `待機 ${snapshot.pending.length} / 最古 ${Math.round(snapshot.oldestPendingAgeMs / 1000)}秒 / drop ${snapshot.metrics.dropped} / hold ${snapshot.holdReasons.join(", ") || "なし"}${snapshot.activeExecution ? ` / 実行 ${snapshot.activeExecution.id}` : ""}${snapshot.backendWarnings.length ? ` / 警告: ${snapshot.backendWarnings.join("; ")}` : ""}${snapshot.remoteClear.status === "failed" ? ` / remote clear失敗: ${snapshot.remoteClear.error}` : ""}`;
-  } else {
-    diagnostics.textContent = "キュー未初期化";
-  }
-
-  const chip = $("#speech-state");
-  if (!state.speechQueue) {
-    chip.textContent = "";
-  } else if (state.speechQueue.paused) {
+  let status = "";
+  let statusClass = "chip";
+  if (state.speechQueue?.paused) {
     const reasons = state.speechQueue.holdReasons;
-    chip.textContent = reasons.length === 1 && reasons[0] === "manual"
+    status = reasons.length === 1 && reasons[0] === "manual"
       ? "手動停止中"
       : reasons.length === 1 && reasons[0] === "mic"
         ? "マイク検知で保留中"
         : `保留中: ${reasons.join(" + ")}`;
-    chip.className = "chip is-warn";
-  } else {
-    chip.textContent = `待機 ${state.speechQueue.waitingCount()}`;
-    chip.className = "chip";
+    statusClass = "chip is-warn";
+  } else if (state.speechQueue) {
+    status = `待機 ${state.speechQueue.waitingCount()}`;
   }
+  const diagnostics = snapshot ? `待機 ${snapshot.pending.length} / 最古 ${Math.round(snapshot.oldestPendingAgeMs / 1000)}秒 / drop ${snapshot.metrics.dropped} / hold ${snapshot.holdReasons.join(", ") || "なし"}${snapshot.activeExecution ? ` / 実行 ${snapshot.activeExecution.id}` : ""}${snapshot.backendWarnings.length ? ` / 警告: ${snapshot.backendWarnings.join("; ")}` : ""}${snapshot.remoteClear.status === "failed" ? ` / remote clear失敗: ${snapshot.remoteClear.error}` : ""}` : "キュー未初期化";
+  consoleView.renderSpeech({ current: snapshot?.current ?? null, pending: snapshot ? [...snapshot.pending] : [], history: snapshot ? [...snapshot.history].reverse().slice(0, 8) : [], diagnostics, status, statusClass });
 }
 
 function renderCommentReaderStatus() {
@@ -774,27 +635,13 @@ function renderTopicPanel() {
 }
 
 function renderComments() {
-  const ol = $("#comment-log");
-  ol.replaceChildren();
-  for (const c of state.commentStore.recent(50).reverse()) {
-    const li = document.createElement("li");
-    li.innerHTML = `<span class="time">${hhmmss(c.timestamp)}</span><span class="author"></span>`;
-    li.querySelector(".author").textContent = c.author;
-    li.append(c.text);
-    ol.append(li);
-  }
+  consoleView.renderComments(state.commentStore.recent(50).reverse().map((comment) => ({ ...comment, time: hhmmss(comment.timestamp) })));
 }
 
 function renderDebug() {
-  const meta = $("#debug-meta");
-  const pre = $("#debug-prompt");
-  if (!state.lastDebug) {
-    meta.textContent = "まだAI呼び出しはありません";
-    pre.textContent = "";
-    return;
-  }
-  meta.textContent = `${state.lastDebug.personaName} — ${hhmmss(state.lastDebug.at)} 時点の送信プロンプト`;
-  pre.textContent = scrub(state.lastDebug.debugText);
+  consoleView.renderDebug(state.lastDebug
+    ? { meta: `${state.lastDebug.personaName} — ${hhmmss(state.lastDebug.at)} 時点の送信プロンプト`, text: scrub(state.lastDebug.debugText) }
+    : { meta: "まだAI呼び出しはありません", text: "" });
 }
 
 // ---- 設定UI (issue #15) ----
@@ -821,106 +668,47 @@ const settingsUI = new SettingsUI({
 
 // ---- 起動 ----
 
+function createAppActions() {
+  const report = (promise) => Promise.resolve(promise).catch(reportConfigError);
+  return {
+    loadServer: () => report(loadFromServer().then(applyLoaded)),
+    loadFile: (file) => report(loadFromFile(file).then(applyLoaded)),
+    openSettings: () => settingsUI.open(),
+    submitComment: (comment) => state.manualSource.submit(comment),
+    holdSpeech: () => { state.manualSpeechHold = true; state.speechQueue?.hold("manual"); },
+    releaseSpeech: () => { state.manualSpeechHold = false; state.speechQueue?.release("manual"); },
+    skipSpeech: () => state.speechQueue?.skip(),
+    clearSpeech: () => state.speechQueue?.clear(),
+    startMic: async () => { try { await state.micMonitor.start(); } catch (e) { logEvent(`マイク監視を開始できません: ${scrub(e.message)}`, "error"); } renderMicPanel(); },
+    stopMic: () => { state.micMonitor?.stop(); renderMicPanel(); },
+    startScreen: async () => { try { await state.screenContext.start(); } catch (e) { logEvent(`画面共有を開始できません: ${scrub(e.message)}`, "error"); } renderScreenPanel(); },
+    stopScreen: () => state.screenContext?.stop(),
+    readScreen: async () => {
+      const screen = state.screenContext;
+      const generation = state.generation;
+      if (!screen) return;
+      const request = state.runtime.createRequest({ generation, ownerId: `screen:${generation}`, kind: "screen-analysis" });
+      try { await screen.updateContext({ ...request.context, isCurrent: () => state.runtime.isCurrent(generation) }); }
+      catch (e) { if (!isCancellation(e)) logEvent(`画面の読み取りに失敗: ${scrub(e.message)}`, "error"); }
+      finally { request.complete(); }
+      if (state.runtime.isCurrent(generation)) renderScreenPanel();
+    },
+    readNews: () => { renderNewsPanel(); runNews(); },
+    readTopics: () => { renderTopicPanel(); runTopics(); },
+    reconnectTwitch: () => { const source = state.externalCommentSources.find((candidate) => candidate.id === "twitch"); if (source?.reconnectNow()) logEvent("Twitchチャットを手動再接続します"); renderTwitchChatStatus(); },
+    refreshTimedPanels: () => { if (state.personaRouter) renderPersonas(); if (state.screenContext?.summary) renderScreenPanel(); if (state.twitchStatus?.nextRetryAt) renderTwitchChatStatus(); },
+  };
+}
+
 function bindUI() {
-  $("#btn-load-server").addEventListener("click", async () => {
-    try {
-      applyLoaded(await loadFromServer());
-    } catch (e) {
-      reportConfigError(e);
-    }
+  const elements = new ElementRegistry(document, {
+    loadServer: "#btn-load-server", loadFile: "#btn-load-file", fileInput: "#file-input", settings: "#btn-settings",
+    commentForm: "#comment-form", commentText: "#comment-text", commentAuthor: "#comment-author",
+    speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
+    micStart: "#btn-mic-start", micStop: "#btn-mic-stop", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
+    newsRead: "#btn-news-read", topicRead: "#btn-topic-read", twitchReconnect: "#btn-twitch-reconnect",
   });
-
-  $("#btn-load-file").addEventListener("click", () => $("#file-input").click());
-  $("#file-input").addEventListener("change", async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    try {
-      applyLoaded(await loadFromFile(file));
-    } catch (err) {
-      reportConfigError(err);
-    }
-  });
-
-  $("#btn-settings").addEventListener("click", () => settingsUI.open());
-
-  $("#comment-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const text = $("#comment-text").value;
-    if (!text.trim()) return;
-    state.manualSource.submit({ author: $("#comment-author").value, text });
-    $("#comment-text").value = "";
-    $("#comment-text").focus();
-  });
-
-  $("#btn-speech-stop").addEventListener("click", () => {
-    state.manualSpeechHold = true;
-    state.speechQueue?.hold("manual");
-  });
-  $("#btn-speech-resume").addEventListener("click", () => {
-    state.manualSpeechHold = false;
-    state.speechQueue?.release("manual");
-  });
-  $("#btn-speech-skip").addEventListener("click", () => state.speechQueue?.skip());
-  $("#btn-speech-clear").addEventListener("click", () => state.speechQueue?.clear());
-
-  $("#btn-mic-start").addEventListener("click", async () => {
-    try {
-      await state.micMonitor.start();
-    } catch (e) {
-      logEvent(`マイク監視を開始できません: ${scrub(e.message)}`, "error");
-    }
-    renderMicPanel();
-  });
-  $("#btn-mic-stop").addEventListener("click", () => {
-    state.micMonitor?.stop();
-    renderMicPanel();
-  });
-
-  $("#btn-screen-start").addEventListener("click", async () => {
-    try {
-      await state.screenContext.start();
-    } catch (e) {
-      logEvent(`画面共有を開始できません: ${scrub(e.message)}`, "error");
-    }
-    renderScreenPanel();
-  });
-  $("#btn-screen-stop").addEventListener("click", () => state.screenContext?.stop());
-  $("#btn-screen-read").addEventListener("click", async () => {
-    const screen = state.screenContext;
-    const generation = state.generation;
-    if (!screen) return;
-    const request = state.runtime.createRequest({ generation, ownerId: `screen:${generation}`, kind: "screen-analysis" });
-    try {
-      await screen.updateContext({ ...request.context, isCurrent: () => state.runtime.isCurrent(generation) });
-    } catch (e) {
-      if (!isCancellation(e)) logEvent(`画面の読み取りに失敗: ${scrub(e.message)}`, "error");
-    } finally {
-      request.complete();
-    }
-    if (state.runtime.isCurrent(generation)) renderScreenPanel();
-  });
-
-  $("#btn-news-read").addEventListener("click", () => {
-    renderNewsPanel();
-    runNews();
-  });
-  $("#btn-topic-read").addEventListener("click", () => {
-    renderTopicPanel();
-    runTopics();
-  });
-  $("#btn-twitch-reconnect").addEventListener("click", () => {
-    const source = state.externalCommentSources.find((candidate) => candidate.id === "twitch");
-    if (source?.reconnectNow()) logEvent("Twitchチャットを手動再接続します");
-    renderTwitchChatStatus();
-  });
-
-  // クールダウン残り秒の表示だけを定期更新する
-  setInterval(() => {
-    if (state.personaRouter) renderPersonas();
-    if (state.screenContext?.summary) renderScreenPanel();
-    if (state.twitchStatus?.nextRetryAt) renderTwitchChatStatus();
-  }, 2000);
+  return bindConsoleUI(elements, createAppActions());
 }
 
 function boot() {
