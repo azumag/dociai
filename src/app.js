@@ -551,34 +551,81 @@ function renderScreenPanel() {
 
 function renderNewsPanel() {
   const el = $("#news-status");
+  const failures = $("#news-failures");
   $("#btn-news-read").disabled = !state.newsReader?.enabled || state.newsReader?.busy;
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
+    failures.replaceChildren();
     return;
   }
   const s = state.newsReader.status();
   if (!s.enabled) {
     el.textContent = "設定で無効です (news.enabled: false)";
+    failures.replaceChildren();
     return;
   }
   const trigger = state.config.news.trigger ? `トリガー: ${state.config.news.trigger}` : "トリガー未設定";
-  el.textContent = `${trigger} / 既読 ${s.readCount}件` + (s.lastRunAt ? ` / 最終実行 ${hhmmss(s.lastRunAt)}` : "");
+  el.textContent = readerLifecycleText(trigger, s);
+  renderReaderFailures(failures, state.newsReader, s, () => { renderNewsPanel(); runNews(); }, renderNewsPanel);
 }
 
 function renderTopicPanel() {
   const el = $("#topic-status");
+  const failures = $("#topic-failures");
   $("#btn-topic-read").disabled = !state.topicReader?.enabled || state.topicReader?.busy;
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
+    failures.replaceChildren();
     return;
   }
   const s = state.topicReader.status();
   if (!s.enabled) {
     el.textContent = "設定で無効です (topics.enabled: false)";
+    failures.replaceChildren();
     return;
   }
   const trigger = state.config.topics.trigger ? `トリガー: ${state.config.topics.trigger}` : "トリガー未設定";
-  el.textContent = `${trigger} / 既読 ${s.readCount}件` + (s.lastRunAt ? ` / 最終実行 ${hhmmss(s.lastRunAt)}` : "");
+  el.textContent = readerLifecycleText(trigger, s);
+  renderReaderFailures(failures, state.topicReader, s, () => { renderTopicPanel(); runTopics(); }, renderTopicPanel);
+}
+
+function readerLifecycleText(trigger, status) {
+  const counts = status.counts ?? {};
+  const parts = [
+    trigger,
+    `未読 ${counts.unread ?? 0}件`,
+    `既読 ${counts.read ?? status.readCount ?? 0}件`,
+    `再試行待ち ${counts.retry_wait ?? 0}件`,
+    `要確認 ${counts.failed_permanent ?? 0}件`,
+  ];
+  if (counts.skipped) parts.push(`skip ${counts.skipped}件`);
+  if (status.nextRetryAt) parts.push(`次回再試行 ${hhmmss(new Date(status.nextRetryAt))}`);
+  if (status.lastRunAt) parts.push(`最終実行 ${hhmmss(status.lastRunAt)}`);
+  return parts.join(" / ");
+}
+
+function renderReaderFailures(container, reader, status, onRetry, onChange) {
+  container.replaceChildren();
+  for (const record of status.failures ?? []) {
+    const row = document.createElement("div");
+    row.className = "reader-failure";
+    const details = document.createElement("span");
+    const error = record.lastError?.message ? `: ${scrub(record.lastError.message)}` : "";
+    const retry = record.state === "retry_wait" && record.nextRetryAt ? ` / 次回 ${hhmmss(new Date(record.nextRetryAt))}` : "";
+    details.textContent = `${record.sourceName || "source"} / ${record.title || "(無題)"} / ${record.attempts}回 / ${record.state}${retry}${error}`;
+    const retryButton = document.createElement("button");
+    retryButton.type = "button";
+    retryButton.textContent = "再試行";
+    retryButton.disabled = reader.busy;
+    retryButton.addEventListener("click", () => { if (reader.retryNow(record.key)) onRetry(); });
+    const skipButton = document.createElement("button");
+    skipButton.type = "button";
+    skipButton.textContent = "skip";
+    skipButton.disabled = reader.busy;
+    skipButton.addEventListener("click", () => { if (reader.skip(record.key)) onChange(); });
+    row.append(details, retryButton, skipButton);
+    container.append(row);
+  }
 }
 
 function renderComments() {

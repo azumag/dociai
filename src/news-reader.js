@@ -4,6 +4,9 @@
 
 import { cancelElectronFeedRequest, fetchFeedThroughElectron, hasElectronFeedService } from "./platform/electron-services.js";
 import { RequestCancelledError, isCancellation } from "./runtime/request-registry.js";
+import { MemoryItemProcessingStore } from "./readers/item-processing-store.js";
+import { createReaderItemKey, readerStatus, retryOptions } from "./readers/reader-runner.js";
+import { retryDecision } from "./readers/retry-policy.js";
 
 const MOCK_NEWS = [
   { title: "ローカルPoCが初起動", description: "配信AIコンパニオンのローカルPoCが初めて起動し、コメントへの音声応答に成功した。", guid: "mock-1", publishedAt: "2026-07-01T09:00:00+09:00", sourceName: "mock" },
@@ -32,7 +35,7 @@ function parseDate(value) {
 }
 
 export class NewsReader {
-  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {} }) {
+  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now() }) {
     this.config = config;
     this.getConnector = getConnector;
     this.personaRouter = personaRouter;
@@ -40,9 +43,18 @@ export class NewsReader {
     this.speechQueue = speechQueue;
     this.log = log;
     this.onRead = onRead;
-    this.readGuids = new Set();
+    this.store = store;
+    this.clock = clock;
+    this.generation = 0;
     this.busy = false;
     this.lastRunAt = null;
+    this.lastSuccessAt = null;
+    this.lastRunResult = null;
+  }
+
+  // 従来の外部利用との互換性。内部状態の唯一の正本は processing store。
+  get readGuids() {
+    return new Set(this.store.list({ states: "read" }).map((record) => record.guid ?? record.key));
   }
 
   get enabled() {
@@ -60,14 +72,18 @@ export class NewsReader {
       this.log("ニュース処理が進行中のためスキップしました");
       return;
     }
+    this.generation = context.generation ?? this.generation;
     this.busy = true;
-    this.lastRunAt = new Date();
+    this.lastRunAt = new Date(this.clock());
     try {
       this.#guard(context);
       const items = await this.fetchAll(context);
-      const unread = items.filter((i) => !this.readGuids.has(i.guid));
-      const picks = unread.slice(0, news.maxItems ?? 3);
-      this.log(`ニュース候補 ${items.length}件 (未読 ${unread.length}件、読み上げ ${picks.length}件)`);
+      const now = this.clock();
+      for (const item of items) this.store.ensure({ ...item, key: item.processingKey }, this.generation, now);
+      const candidateKeys = new Set(this.store.candidates(this.generation, now).map((record) => record.key));
+      const picks = items.filter((item) => candidateKeys.has(item.processingKey)).slice(0, news.maxItems ?? 3);
+      this.lastRunResult = { candidates: candidateKeys.size, processed: 0, succeeded: 0, retryScheduled: 0, failed: 0 };
+      this.log(`ニュース候補 ${items.length}件 (再処理可能 ${candidateKeys.size}件、読み上げ ${picks.length}件)`);
       if (!picks.length) return;
 
       const persona = (news.persona && this.personaRouter.get(news.persona)) || this.personaRouter.defaultPersona();
@@ -76,21 +92,45 @@ export class NewsReader {
         this.log(`ニュース担当ペルソナ「${persona.name}」が無効化中のためスキップしました`);
         return;
       }
-      const connector = this.getConnector(persona.connector);
+      const connector = this.#getConnector(persona);
+      if (!connector) return;
+      if (typeof this.speechQueue?.enqueue !== "function") {
+        this.log("ニュース音声キューが利用できません。item は未読のままです", "error");
+        return;
+      }
 
       for (const item of picks) {
         this.#guard(context);
-        const { messages, debugText } = this.contextBuilder.build({ persona, news: item, includeScreen: "never" });
+        const record = this.store.begin(item.processingKey, this.generation, this.clock());
+        if (!record) continue;
+        this.lastRunResult.processed++;
         try {
+          const { messages, debugText } = this.contextBuilder.build({ persona, news: item, includeScreen: "never" });
           const { text } = await connector.chat(messages, { signal: context.signal, requestId: `${context.requestId ?? "news"}:summary:${item.guid}`, generation: context.generation });
-          this.#guard(context);
-          this.readGuids.add(item.guid);
+          if (!String(text ?? "").trim()) throw Object.assign(new Error("ニュース要約が空です"), { kind: "empty" });
           this.#guard(context);
           this.onRead({ persona, item, text, debugText });
           this.#guard(context);
-          this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice });
+          const queued = this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "news" });
+          if (queued?.state === "dropped") this.log(`ニュース音声はキュー上限で破棄されました [${item.title}]`, "warn");
+          this.#guard(context);
+          this.store.markRead(item.processingKey, this.generation, this.clock());
+          this.lastRunResult.succeeded++;
+          this.lastSuccessAt = new Date(this.clock());
         } catch (e) {
-          if (isCancellation(e)) throw e;
+          if (isCancellation(e)) {
+            this.store.resetUnread(item.processingKey, this.generation, this.clock());
+            throw e;
+          }
+          if (String(e?.kind ?? "").toLowerCase() === "auth") {
+            this.store.resetUnread(item.processingKey, this.generation, this.clock());
+            this.log("ニュース要約の認証に失敗しました。connector 設定を確認してから再実行してください", "error");
+            return;
+          }
+          const decision = retryDecision(e, { attempts: record.attempts, now: this.clock(), ...retryOptions(news) });
+          this.store.markFailure(item.processingKey, this.generation, e, decision, this.clock());
+          if (decision.action === "retry") this.lastRunResult.retryScheduled++;
+          else this.lastRunResult.failed++;
           this.log(`ニュース1件の読み上げ失敗 [${item.title}]: ${e.message}`, "error");
         }
       }
@@ -165,7 +205,7 @@ export class NewsReader {
         if (seen.has(key)) continue;
         seen.add(key);
       }
-      refined.push({ ...item, normalizedTitle: key });
+      refined.push({ ...item, normalizedTitle: key, processingKey: createReaderItemKey(item, "news") });
     }
     refined.sort((a, b) => {
       const bt = Date.parse(b.publishedAt ?? "") || 0;
@@ -176,12 +216,30 @@ export class NewsReader {
   }
 
   status() {
-    return {
-      enabled: this.enabled,
-      busy: this.busy,
-      readCount: this.readGuids.size,
-      lastRunAt: this.lastRunAt,
-    };
+    return { ...readerStatus(this.store, this.enabled, this.busy, this.lastRunAt), lastSuccessAt: this.lastSuccessAt, lastRunResult: this.lastRunResult };
+  }
+
+  retryNow(key) {
+    return this.store.retryNow(key, this.generation, this.clock());
+  }
+
+  skip(key) {
+    return this.store.skip(key, this.generation, this.clock());
+  }
+
+  restore(key) {
+    return this.store.restore(key, this.generation, this.clock());
+  }
+
+  #getConnector(persona) {
+    try {
+      const connector = this.getConnector(persona.connector);
+      if (connector?.chat) return connector;
+      this.log(`ニュース担当ペルソナ「${persona.name}」の connector が未設定です。item は未読のままです`, "error");
+    } catch (error) {
+      this.log(`ニュース担当 connector を初期化できません: ${error.message}。item は未読のままです`, "error");
+    }
+    return null;
   }
 
   #guard(context) {

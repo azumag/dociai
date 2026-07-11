@@ -241,6 +241,11 @@ a { color: var(--focus); }
 
 .btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 
+.reader-failures { display: grid; gap: 5px; margin-top: 8px; }
+.reader-failure { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-dim); }
+.reader-failure span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.reader-failure button { padding: 3px 6px; font-size: 11px; }
+
 /* ---- マイク監視 (issue #32) ---- */
 .mic-meter {
   height: 6px;
