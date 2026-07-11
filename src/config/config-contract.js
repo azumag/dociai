@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export const issue = (path, code, message, { severity = "error", source = "schema", meta = {} } = {}) =>
   Object.freeze({ path: Object.freeze(Array.isArray(path) ? [...path] : String(path).split(".").filter(Boolean)), code, message, severity, source, meta: Object.freeze({ ...meta }) });
