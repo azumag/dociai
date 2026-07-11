@@ -1,50 +1,48 @@
-// 音声読み上げキュー (issue #8, #17, #30)
-// 3つのバックエンドを持つ:
-//   - webspeech: 従来の Web Speech API (ブラウザ内蔵)
-//   - voicevox : VOICEVOX engine (ローカル/リモート)。長文はチャンクに分けて順次再生する。
-//   - bouyomi  : 棒読みちゃん HTTP API。送信後の再生順は棒読みちゃん側のキューが管理する。
-// 状態: waiting -> speaking -> done | skipped | failed
-
-import { VoiceVoxClient, VoiceVoxError, chunkText } from "./voicevox.js";
+// 音声読み上げキュー。順序・保持はSpeechScheduler、再生resourceは各SpeechBackendが所有する。
+import { BackendRegistry } from "./speech/backends/backend-registry.js";
 import { SpeechScheduler } from "./speech/speech-scheduler.js";
 
-const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
-
 export class SpeechQueue {
-  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {} } = {}) {
+  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {}, strictOrdering = false, onHealth = () => {}, webSpeech = {} } = {}) {
     this.scheduler = new SpeechScheduler(policy);
-    this.paused = false;
-    this.cancelling = false;
-    this._holdingItem = null;
     this.onUpdate = onUpdate;
     this.log = log;
-    this.voicevox = voicevox ?? null; // VoiceVoxClient | null
-    this.bouyomi = bouyomi ?? null; // BouyomiClient | null
-    this.supported = typeof window !== "undefined" && "speechSynthesis" in window;
-    if (this.supported) {
-      speechSynthesis.getVoices();
-      speechSynthesis.addEventListener?.("voiceschanged", () => speechSynthesis.getVoices());
-    }
+    this.paused = false;
+    this.executionSequence = 0;
+    this.activeExecution = null;
+    this.cancelMode = null;
+    this.voicevox = voicevox;
+    this.bouyomi = bouyomi;
+    this.backends = new BackendRegistry({
+      voicevox,
+      bouyomi,
+      strictOrdering,
+      webSpeech,
+      onWarning: (message) => this.log(message),
+      onHealth,
+    });
   }
 
   get current() { return this.scheduler.current; }
   get items() { return [...this.scheduler.history.items, ...this.scheduler.pending, ...(this.current ? [this.current] : [])]; }
   snapshot() { return this.scheduler.snapshot(); }
+  waitingCount() { return this.scheduler.pending.length; }
 
   enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt }) {
+    const engines = [...this.scheduler.pending, ...(this.current ? [this.current] : [])].map((item) => item.voice?.engine ?? this.#defaultEngine());
+    this.backends.validateMix([...engines, voice?.engine ?? this.#defaultEngine()]);
     const item = this.scheduler.enqueue({ personaId, personaName, text, voice, source, priority, deadlineAt });
-    this.#setState(item, item.state);
+    this.#notify(item);
     this.#pump();
     return item;
   }
 
   stop() {
+    if (this.paused) return;
     this.paused = true;
-    // マイク発話検知/手動停止による「保留」はキューからの離脱ではないので、
-    // 話している途中のアイテムを skipped で終わらせず waiting に戻し、
-    // resume() 後に最初から再生し直す (#finish 側で消費するマーカー)。
-    if (this.current) this._holdingItem = this.current;
-    this.#cancelCurrent();
+    this.scheduler.held = true;
+    this.cancelMode = "hold";
+    this.#cancelActive();
     this.log("読み上げを停止しました (キュー保留)");
     this.onUpdate(this.items, this);
   }
@@ -52,269 +50,86 @@ export class SpeechQueue {
   resume() {
     if (!this.paused) return;
     this.paused = false;
+    this.scheduler.held = false;
     this.log("読み上げを再開しました");
     this.onUpdate(this.items, this);
     this.#pump();
   }
 
   skip() {
-    if (this.current) this.#cancelCurrent();
+    if (!this.current) return;
+    this.cancelMode = "skipped";
+    this.#cancelActive();
   }
 
   clear() {
-    for (const item of [...this.scheduler.pending]) {
-      this.scheduler.removePending(item, "skipped");
+    for (const item of [...this.scheduler.pending]) this.scheduler.removePending(item, "skipped");
+    if (this.current) {
+      this.cancelMode = "skipped";
+      this.#cancelActive();
     }
-    this.#cancelCurrent();
-    this.bouyomi?.clear().catch((e) => this.log(`棒読みちゃんのキュー消去に失敗: ${e.message}`));
+    this.backends.clear().catch((error) => this.log(`棒読みちゃんのキュー消去に失敗: ${error.message}`));
     this.log("音声キューを全消去しました");
     this.onUpdate(this.items, this);
   }
 
-  waitingCount() {
-    return this.scheduler.pending.length;
+  dispose() {
+    this.cancelMode = "cancelled";
+    this.#cancelActive();
+    this.backends.dispose();
   }
 
-  #cancelCurrent() {
-    if (!this.current) return;
-    this.cancelling = true;
-    // voicevox: 再生中の <audio> を止める。Web Speech: speechSynthesis.cancel()。
-    const item = this.current;
-    item._abortController?.abort();
-    if (item._audio) {
-      try { item._audio.pause(); } catch {}
-      // 事前合成中 (まだ src 未設定) は #speakVoiceVox 側の cancelling チェックが
-      // 次のループで自己終了する。既にチャンク再生済み (src あり) だと ended/error が
-      // 二度と来ないため、Web Speech の speechSynthesis.cancel() → onerror → #finish()
-      // と同等の後始末をここで明示的に行う。
-      if (item._audio.src) this.#finish(item, "skipped");
-    }
-    if (this.supported) {
-      try { speechSynthesis.cancel(); } catch {}
-    }
+  #defaultEngine() { return this.voicevox ? "voicevox" : "webspeech"; }
+
+  #cancelActive() {
+    if (!this.activeExecution) return false;
+    this.activeExecution.controller.abort();
+    this.backends.cancel(this.activeExecution.id);
+    return true;
   }
 
   #pump() {
     if (this.current || this.paused) return;
     const item = this.scheduler.take();
     if (!item) return;
-
     if (item.voice?.enabled === false) {
-      item.error = "音声OFFのペルソナのため読み上げなし";
-      this.scheduler.complete(item, "done");
-      this.#setState(item, item.state);
+      this.scheduler.complete(item, "done", { error: "音声OFFのペルソナのため読み上げなし" });
+      this.#notify(item);
       this.#pump();
       return;
     }
-
-    item._abortController = new AbortController();
-    this.#setState(item, "speaking");
-
-    const engine = item.voice?.engine || (this.voicevox ? "voicevox" : "webspeech");
-    if (engine === "bouyomi" && this.bouyomi) {
-      this.bouyomi.talk(item.text, { ...item.voice, signal: item._abortController.signal }).then(
-        () => this.#finish(item, "done"),
-        (e) => {
-          if (this.cancelling || e?.kind === "cancelled") { this.#finish(item, "skipped"); return; }
-          item.error = `棒読みちゃん送信失敗: ${e.message}`;
-          this.#finish(item, "failed");
-        },
-      );
-      return;
-    }
-    if (engine === "voicevox" && this.voicevox) {
-      this.#speakVoiceVox(item).catch((e) => {
-        if (this.cancelling || e?.kind === "cancelled") { this.#finish(item, "skipped"); return; }
-        item.error = `VOICEVOX 読み上げ失敗: ${e.message}`;
-        this.#finish(item, "failed");
-      });
-      return;
-    }
-
-    if (!this.supported) {
-      item.error = "このブラウザはWeb Speech APIに未対応です";
-      this.scheduler.complete(item, "failed", { error: item.error });
-      this.#setState(item, item.state);
-      this.#pump();
-      return;
-    }
-    this.#speakWebSpeech(item);
+    const engine = item.voice?.engine ?? this.#defaultEngine();
+    const backend = this.backends.resolve(engine);
+    const execution = { id: `speech-${++this.executionSequence}`, controller: new AbortController(), item, backend };
+    this.activeExecution = execution;
+    this.#notify(item);
+    backend.play(item, { executionId: execution.id, signal: execution.controller.signal }).then(
+      (result) => this.#finish(execution, result),
+      (error) => this.#finish(execution, { state: "failed", error: error.message }),
+    );
   }
 
-  // VOICEVOX: テキストをチャンクに分けて合成し、<audio> で順次再生する。
-  // チャンク[i]の再生中にチャンク[i+1]の合成を並走させる (1つ先読みパイプライン)。
-  // 全チャンクを合成してから再生していた旧実装は、長文だと最初の音が出るまでの
-  // 待ち時間が合成回数分積み上がっていた。合成はチャンク単位でタイムアウト・
-  // リトライする (#synthChunk) ため、1チャンクの失敗が他チャンクへ波及しない。
-  async #speakVoiceVox(item) {
-    const v = item.voice ?? {};
-    const maxChars = Number(v.maxChars) > 0 ? Number(v.maxChars) : 200;
-    const chunks = chunkText(item.text, maxChars);
-    item.chunkCount = chunks.length;
-    item.chunkIndex = 0;
-    if (!chunks.length) {
-      this.#finish(item, "done");
-      return;
+  #finish(execution, result) {
+    if (this.activeExecution !== execution || this.current !== execution.item) return;
+    this.activeExecution = null;
+    let state = result.state;
+    if (this.cancelMode === "hold") {
+      this.scheduler.requeueCurrent();
+      state = "waiting";
+    } else {
+      if (this.cancelMode === "skipped") state = "skipped";
+      else if (this.cancelMode === "cancelled") state = "cancelled";
+      this.scheduler.complete(execution.item, state, { error: result.error });
     }
-
-    const audio = new Audio();
-    item._audio = audio;
-    const blobUrls = [];
-    item._blobUrls = blobUrls;
-    // チャンクごとの合成Promiseをキャッシュする (二重合成防止・先読みと再生の疎結合化)。
-    const synthesizing = [];
-    const ensureSynth = (i) => {
-      if (i < 0 || i >= chunks.length) return null;
-      if (!synthesizing[i]) {
-        synthesizing[i] = this.#synthChunk(chunks[i], v, item._abortController.signal).then((url) => {
-          // 先読み完了までにキャンセル/保留で次のアイテムに移っていたら即解放する
-          // (そうしないとBlob URLが再生も破棄もされず残り続ける)。
-          if (this.current === item) blobUrls[i] = url;
-          else try { URL.revokeObjectURL(url); } catch {}
-          return url;
-        });
-      }
-      return synthesizing[i];
-    };
-
-    audio.addEventListener("ended", () => {
-      if (this.cancelling) {
-        this.#finish(item, "skipped");
-        return;
-      }
-      const next = item.chunkIndex + 1;
-      if (next >= chunks.length) {
-        this.#finish(item, "done");
-        return;
-      }
-      advanceTo(next);
-    });
-    audio.addEventListener("error", () => {
-      if (this.cancelling) this.#finish(item, "skipped");
-      else this.#finish(item, "failed");
-    });
-
-    const advanceTo = async (i) => {
-      item.chunkIndex = i;
-      this.onUpdate(this.items, this);
-      let url;
-      try {
-        url = await ensureSynth(i);
-      } catch (e) {
-        if (this.cancelling) { this.#finish(item, "skipped"); return; }
-        item.error = `VOICEVOX 読み上げ失敗 (${i + 1}/${chunks.length}チャンク目): ${e.message}`;
-        this.#finish(item, "failed");
-        return;
-      }
-      if (this.cancelling) { this.#finish(item, "skipped"); return; }
-      ensureSynth(i + 1)?.catch(() => {}); // 次チャンクを先読み合成 (失敗は次のadvanceToで再取得・再送出)
-      this.#playChunk(item, audio, url);
-    };
-
-    await advanceTo(0);
-  }
-
-  // 1チャンク分の合成。タイムアウトのみ即座に再試行する (issue #31)。
-  // voicevox.retries が試行回数の上乗せ分。キャンセル/保留中は再試行を打ち切る。
-  async #synthChunk(text, v, signal) {
-    const maxAttempts = 1 + (Number(this.voicevox.retries) > 0 ? Number(this.voicevox.retries) : 0);
-    let lastErr;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (this.cancelling || signal?.aborted) throw lastErr ?? new VoiceVoxError("キャンセルされました", "cancelled");
-      try {
-        const blob = await this.voicevox.synth(text, {
-          speaker: v.speaker,
-          pitch: v.pitch,
-          speed: v.speed ?? v.rate,
-          intonation: v.intonation,
-          volume: v.volume,
-          signal,
-        });
-        return URL.createObjectURL(blob);
-      } catch (e) {
-        lastErr = e instanceof VoiceVoxError ? e : new VoiceVoxError(e.message, "server");
-        if (lastErr.kind !== "timeout" || attempt === maxAttempts) throw lastErr;
-        this.log(`VOICEVOX タイムアウトのため再試行します (${attempt}/${maxAttempts - 1})`);
-      }
-    }
-    throw lastErr;
-  }
-
-  #playChunk(item, audio, url) {
-    if (!url) {
-      this.#finish(item, "failed");
-      return;
-    }
-    audio.src = url;
-    audio.play().catch((e) => {
-      item.error = `再生失敗: ${e.message ?? e}`;
-      this.#finish(item, "failed");
-    });
-  }
-
-  #speakWebSpeech(item) {
-    const u = new SpeechSynthesisUtterance(item.text);
-    u.rate = clamp(item.voice?.rate ?? 1.0, 0.5, 2);
-    u.pitch = clamp(item.voice?.pitch ?? 1.0, 0, 2);
-    const voice = this.#pickVoice(item.voice?.name);
-    if (voice) u.voice = voice;
-    u.lang = voice?.lang ?? "ja-JP";
-
-    u.onend = () => this.#finish(item, "done");
-    u.onerror = (e) => {
-      if (this.cancelling || e.error === "canceled" || e.error === "interrupted") {
-        this.#finish(item, "skipped");
-      } else {
-        item.error = `読み上げ失敗: ${e.error ?? "不明なエラー"}`;
-        this.#finish(item, "failed");
-      }
-    };
-    speechSynthesis.speak(u);
-  }
-
-  #finish(item, state) {
-    if (this.current !== item) return;
-    if (this.cancelling && state === "done") state = "skipped";
-    const held = this._holdingItem === item;
-    if (this._holdingItem === item) {
-      this._holdingItem = null;
-      item.chunkIndex = 0;
-    }
-    this.cancelling = false;
-    if (item._blobUrls) {
-      for (const url of item._blobUrls) {
-        try { URL.revokeObjectURL(url); } catch {}
-      }
-      item._blobUrls = null;
-    }
-    if (item._audio) {
-      try { item._audio.pause(); } catch {}
-      item._audio = null;
-    }
-    item._abortController = null;
-    if (held) this.scheduler.requeueCurrent();
-    else this.scheduler.complete(item, state, { error: item.error });
-    this.#setState(item, item.state);
-    // Chromeはcancel直後のspeakを取りこぼすことがあるため少し置いて次へ
+    this.cancelMode = null;
+    if (result.warning) this.log(result.warning);
+    this.#notify(execution.item, state);
     setTimeout(() => this.#pump(), 250);
   }
 
-  #pickVoice(name) {
-    if (!this.supported) return null;
-    const voices = speechSynthesis.getVoices();
-    if (name && name !== "default") {
-      const hit = voices.find((v) => v.name === name) ?? voices.find((v) => v.name.includes(name));
-      if (hit) return hit;
-      this.log(`音声 "${name}" が見つからないため日本語デフォルトを使います`);
-    }
-    return voices.find((v) => v.lang?.startsWith("ja")) ?? null;
-  }
-
-  #setState(item, state) {
-    item.state = state;
+  #notify(item, state = item.state) {
     const label = { waiting: "待機中", speaking: "読み上げ中", done: "完了", submitted: "送信済み", skipped: "スキップ", cancelled: "キャンセル", dropped: "破棄", failed: "失敗" }[state] ?? state;
-    const chunkInfo = item.chunkCount > 1 ? ` [${Math.min(item.chunkIndex + 1, item.chunkCount)}/${item.chunkCount}]` : "";
-    this.log(`音声[${item.personaName}] ${label}${chunkInfo}${item.error ? ` (${item.error})` : ""}: ${item.text.slice(0, 40)}`);
+    this.log(`音声[${item.personaName}] ${label}${item.error ? ` (${item.error})` : ""}: ${item.text.slice(0, 40)}`);
     this.onUpdate(this.items, this);
   }
 }
