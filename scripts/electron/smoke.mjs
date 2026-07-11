@@ -75,7 +75,7 @@ try {
   }));
   assert.equal(checks.platform.ok, true, JSON.stringify(checks.platform));
   assert.equal(checks.platform.value.runtime, "electron");
-  assert.deepEqual(checks.keys, ["ai", "bouyomi", "config", "events", "feeds", "obs", "platform", "secrets", "speech", "system", "topics", "twitch", "windows"]);
+  assert.deepEqual(checks.keys, ["ai", "bouyomi", "config", "events", "feeds", "obs", "platform", "secrets", "shortcuts", "speech", "system", "topics", "twitch", "windows"]);
   assert.match(checks.csp ?? "", /object-src 'none'/);
   assert.match(checks.csp ?? "", /connect-src 'self'/);
   assert.doesNotMatch(checks.csp ?? "", /connect-src[^;]*(?:https?:|wss?:)/);
