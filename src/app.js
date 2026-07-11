@@ -20,36 +20,21 @@ import { scrubSecrets, collectApiKeys, checkSecretStorage } from "./security.js"
 import { SettingsUI } from "./settings-ui.js";
 import { BrowserRuntimeController } from "./runtime/runtime-controller.js";
 import { isCancellation } from "./runtime/request-registry.js";
+import { createAppState } from "./app/app-state.js";
+import { AppStore } from "./app/app-store.js";
+import { bindConsoleUI } from "./ui/bindings.js";
+import { ElementRegistry } from "./ui/element-registry.js";
 
 const $ = (sel) => document.querySelector(sel);
 
-const state = {
-  config: null,
-  configSource: null,
-  configLoadedAt: null,
-  secrets: [],
+const appStore = new AppStore(createAppState({
   connectors: new Map(),
   commentStore: new CommentStore({ limit: 80 }),
-  contextBuilder: null,
-  triggerEngine: null,
-  personaRouter: null,
-  speechQueue: null,
-  screenContext: null,
-  micMonitor: null,
-  newsReader: null,
-  topicReader: null,
   manualSource: new ManualCommentSource(),
-  externalCommentSources: [],
-  thinking: new Set(),
-  speakingPersonaId: null,
-  manualSpeechHold: false,
-  lastDebug: null,
   obs: new BroadcastChannel("dociai-obs"),
   runtime: new BrowserRuntimeController(),
-  generation: 0,
-  lastTeardown: null,
-  twitchStatus: null,
-};
+}));
+const state = appStore.createLegacyAdapter();
 
 const scrub = (text) => scrubSecrets(text, state.secrets);
 const hhmmss = (d = new Date()) => new Date(d).toTimeString().slice(0, 8);
@@ -83,6 +68,7 @@ function logEvent(message, level = "info") {
   const log = $("#event-log");
   log.prepend(li);
   while (log.children.length > 200) log.lastChild.remove();
+  appStore.dispatch({ type: "append-system-log", entry: { message: String(message), level, at: new Date().toISOString() } });
 }
 
 function appendReply({ persona, text = null, error = null, triggerId, newsTitle = null, topicTitle = null, contentLabel = null, contentTitle = null }) {
@@ -821,106 +807,47 @@ const settingsUI = new SettingsUI({
 
 // ---- 起動 ----
 
+function createAppActions() {
+  const report = (promise) => Promise.resolve(promise).catch(reportConfigError);
+  return {
+    loadServer: () => report(loadFromServer().then(applyLoaded)),
+    loadFile: (file) => report(loadFromFile(file).then(applyLoaded)),
+    openSettings: () => settingsUI.open(),
+    submitComment: (comment) => state.manualSource.submit(comment),
+    holdSpeech: () => { state.manualSpeechHold = true; state.speechQueue?.hold("manual"); },
+    releaseSpeech: () => { state.manualSpeechHold = false; state.speechQueue?.release("manual"); },
+    skipSpeech: () => state.speechQueue?.skip(),
+    clearSpeech: () => state.speechQueue?.clear(),
+    startMic: async () => { try { await state.micMonitor.start(); } catch (e) { logEvent(`マイク監視を開始できません: ${scrub(e.message)}`, "error"); } renderMicPanel(); },
+    stopMic: () => { state.micMonitor?.stop(); renderMicPanel(); },
+    startScreen: async () => { try { await state.screenContext.start(); } catch (e) { logEvent(`画面共有を開始できません: ${scrub(e.message)}`, "error"); } renderScreenPanel(); },
+    stopScreen: () => state.screenContext?.stop(),
+    readScreen: async () => {
+      const screen = state.screenContext;
+      const generation = state.generation;
+      if (!screen) return;
+      const request = state.runtime.createRequest({ generation, ownerId: `screen:${generation}`, kind: "screen-analysis" });
+      try { await screen.updateContext({ ...request.context, isCurrent: () => state.runtime.isCurrent(generation) }); }
+      catch (e) { if (!isCancellation(e)) logEvent(`画面の読み取りに失敗: ${scrub(e.message)}`, "error"); }
+      finally { request.complete(); }
+      if (state.runtime.isCurrent(generation)) renderScreenPanel();
+    },
+    readNews: () => { renderNewsPanel(); runNews(); },
+    readTopics: () => { renderTopicPanel(); runTopics(); },
+    reconnectTwitch: () => { const source = state.externalCommentSources.find((candidate) => candidate.id === "twitch"); if (source?.reconnectNow()) logEvent("Twitchチャットを手動再接続します"); renderTwitchChatStatus(); },
+    refreshTimedPanels: () => { if (state.personaRouter) renderPersonas(); if (state.screenContext?.summary) renderScreenPanel(); if (state.twitchStatus?.nextRetryAt) renderTwitchChatStatus(); },
+  };
+}
+
 function bindUI() {
-  $("#btn-load-server").addEventListener("click", async () => {
-    try {
-      applyLoaded(await loadFromServer());
-    } catch (e) {
-      reportConfigError(e);
-    }
+  const elements = new ElementRegistry(document, {
+    loadServer: "#btn-load-server", loadFile: "#btn-load-file", fileInput: "#file-input", settings: "#btn-settings",
+    commentForm: "#comment-form", commentText: "#comment-text", commentAuthor: "#comment-author",
+    speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
+    micStart: "#btn-mic-start", micStop: "#btn-mic-stop", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
+    newsRead: "#btn-news-read", topicRead: "#btn-topic-read", twitchReconnect: "#btn-twitch-reconnect",
   });
-
-  $("#btn-load-file").addEventListener("click", () => $("#file-input").click());
-  $("#file-input").addEventListener("change", async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    try {
-      applyLoaded(await loadFromFile(file));
-    } catch (err) {
-      reportConfigError(err);
-    }
-  });
-
-  $("#btn-settings").addEventListener("click", () => settingsUI.open());
-
-  $("#comment-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const text = $("#comment-text").value;
-    if (!text.trim()) return;
-    state.manualSource.submit({ author: $("#comment-author").value, text });
-    $("#comment-text").value = "";
-    $("#comment-text").focus();
-  });
-
-  $("#btn-speech-stop").addEventListener("click", () => {
-    state.manualSpeechHold = true;
-    state.speechQueue?.hold("manual");
-  });
-  $("#btn-speech-resume").addEventListener("click", () => {
-    state.manualSpeechHold = false;
-    state.speechQueue?.release("manual");
-  });
-  $("#btn-speech-skip").addEventListener("click", () => state.speechQueue?.skip());
-  $("#btn-speech-clear").addEventListener("click", () => state.speechQueue?.clear());
-
-  $("#btn-mic-start").addEventListener("click", async () => {
-    try {
-      await state.micMonitor.start();
-    } catch (e) {
-      logEvent(`マイク監視を開始できません: ${scrub(e.message)}`, "error");
-    }
-    renderMicPanel();
-  });
-  $("#btn-mic-stop").addEventListener("click", () => {
-    state.micMonitor?.stop();
-    renderMicPanel();
-  });
-
-  $("#btn-screen-start").addEventListener("click", async () => {
-    try {
-      await state.screenContext.start();
-    } catch (e) {
-      logEvent(`画面共有を開始できません: ${scrub(e.message)}`, "error");
-    }
-    renderScreenPanel();
-  });
-  $("#btn-screen-stop").addEventListener("click", () => state.screenContext?.stop());
-  $("#btn-screen-read").addEventListener("click", async () => {
-    const screen = state.screenContext;
-    const generation = state.generation;
-    if (!screen) return;
-    const request = state.runtime.createRequest({ generation, ownerId: `screen:${generation}`, kind: "screen-analysis" });
-    try {
-      await screen.updateContext({ ...request.context, isCurrent: () => state.runtime.isCurrent(generation) });
-    } catch (e) {
-      if (!isCancellation(e)) logEvent(`画面の読み取りに失敗: ${scrub(e.message)}`, "error");
-    } finally {
-      request.complete();
-    }
-    if (state.runtime.isCurrent(generation)) renderScreenPanel();
-  });
-
-  $("#btn-news-read").addEventListener("click", () => {
-    renderNewsPanel();
-    runNews();
-  });
-  $("#btn-topic-read").addEventListener("click", () => {
-    renderTopicPanel();
-    runTopics();
-  });
-  $("#btn-twitch-reconnect").addEventListener("click", () => {
-    const source = state.externalCommentSources.find((candidate) => candidate.id === "twitch");
-    if (source?.reconnectNow()) logEvent("Twitchチャットを手動再接続します");
-    renderTwitchChatStatus();
-  });
-
-  // クールダウン残り秒の表示だけを定期更新する
-  setInterval(() => {
-    if (state.personaRouter) renderPersonas();
-    if (state.screenContext?.summary) renderScreenPanel();
-    if (state.twitchStatus?.nextRetryAt) renderTwitchChatStatus();
-  }, 2000);
+  return bindConsoleUI(elements, createAppActions());
 }
 
 function boot() {
