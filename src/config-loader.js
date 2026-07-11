@@ -13,6 +13,18 @@ const KNOWN_NEWS_MODES = registryIds("newsModes");
 const VOICE_ENGINES = registryIds("voiceEngines");
 const DEFAULT_TOPIC_INTRO = "上のお題について、あなたのキャラクターとして自由にコメントしてください。";
 const DEFAULT_TOPIC_STYLE = "雑談のお題として、自然な自分の言葉で自由にコメントする";
+const DEFAULT_READER_RETRY = { maxAttempts: 3, initialDelaySeconds: 30, maxDelaySeconds: 900 };
+
+function validateReaderRetry(retry, label, errors) {
+  if (retry == null) return;
+  if (!retry || typeof retry !== "object" || Array.isArray(retry)) { errors.push(`${label}.retry はオブジェクトで指定してください`); return; }
+  for (const [field, min, max] of [["maxAttempts", 1, 10], ["initialDelaySeconds", 1, 3600], ["maxDelaySeconds", 1, 86400]]) {
+    if (retry[field] == null) continue;
+    const value = Number(retry[field]);
+    if (!Number.isInteger(value) || value < min || value > max) errors.push(`${label}.retry.${field} は${min}〜${max}の整数にしてください`);
+  }
+  if (Number(retry.maxDelaySeconds) < Number(retry.initialDelaySeconds)) errors.push(`${label}.retry.maxDelaySeconds は initialDelaySeconds 以上にしてください`);
+}
 
 function splitNewsAndLegacyTopics(cfg) {
   const sources = Array.isArray(cfg.news?.sources) ? cfg.news.sources : [];
@@ -113,6 +125,7 @@ export function validateConfig(cfg) {
 
   // news
   if (cfg.news?.enabled) {
+    validateReaderRetry(cfg.news.retry, "news", errors);
     if (!Array.isArray(cfg.news.sources) || !cfg.news.sources.length) {
       errors.push("news.enabled が true ですが news.sources が空です");
     } else {
@@ -147,6 +160,7 @@ export function validateConfig(cfg) {
 
   // topics (Todoistなどの配信ネタ)
   if (cfg.topics?.enabled) {
+    validateReaderRetry(cfg.topics.retry, "topics", errors);
     if (!Array.isArray(cfg.topics.sources) || !cfg.topics.sources.length) {
       const hasLegacyTodoist = (cfg.news?.sources ?? []).some((src) => src?.type === "todoist");
       if (!hasLegacyTodoist) errors.push("topics.enabled が true ですが topics.sources が空です");
@@ -295,6 +309,7 @@ export function applyDefaults(cfg) {
         trigger: cfg.news?.trigger ?? "",
         persona: cfg.news?.persona ?? "",
         maxItems: cfg.news?.maxItems ?? 3,
+        retry: { ...DEFAULT_READER_RETRY, ...(cfg.news?.retry ?? {}) },
         intro: topicIntro ?? DEFAULT_TOPIC_INTRO,
         style: topicStyle ?? DEFAULT_TOPIC_STYLE,
       }
@@ -379,6 +394,7 @@ export function applyDefaults(cfg) {
           mode: "topic",
           dedupe: true,
           ...newsRest,
+          retry: { ...DEFAULT_READER_RETRY, ...(newsRest.retry ?? {}) },
           enabled: newsSources.length ? !!cfg.news.enabled : false,
           sources: newsSources,
         }
@@ -386,6 +402,7 @@ export function applyDefaults(cfg) {
           enabled: false,
           mode: "topic",
           dedupe: true,
+          retry: { ...DEFAULT_READER_RETRY },
           sources: [],
         },
     topics: {
@@ -397,6 +414,7 @@ export function applyDefaults(cfg) {
       style: DEFAULT_TOPIC_STYLE,
       ...legacyTopicDefaults,
       ...(cfg.topics ?? {}),
+      retry: { ...DEFAULT_READER_RETRY, ...(legacyTopicDefaults.retry ?? {}), ...(cfg.topics?.retry ?? {}) },
       sources: explicitTopicSources ?? legacyTopicSources,
     },
     commentSources: {
