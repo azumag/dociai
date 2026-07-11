@@ -296,6 +296,7 @@ async function applyLoaded({ config, warnings, source }) {
           defaults: config.bouyomi,
         })
       : null,
+    policy: config.speechQueue,
   });
   if (config.bouyomi?.enabled) {
     logEvent(`棒読みちゃん連携を有効化: ${config.bouyomi.baseUrl}`);

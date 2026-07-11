@@ -57,6 +57,14 @@
     "speed": -1,
     "tone": -1
   },
+  "speechQueue": {
+    "maxPending": 50,
+    "maxPendingPerSource": 20,
+    "maxAgeMs": 120000,
+    "maxHistory": 50,
+    "overflow": "drop-oldest",
+    "expireWhileHeld": true
+  },
   "micMonitor": {
     "enabled": true,
     "threshold": 0.05,
