@@ -48,4 +48,8 @@ export type DociaiApi = {
   events: {
     subscribe(type: string, listener: (event: unknown) => void): () => void;
   };
+  obs: {
+    send(message: unknown): boolean;
+    subscribe(listener: (message: unknown) => void): () => void;
+  };
 };

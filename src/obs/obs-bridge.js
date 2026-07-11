@@ -10,7 +10,8 @@ export class ObsBridge {
     this.snapshotStore = snapshotStore;
     this.clients = clients;
     this.disposed = false;
-    if (this.transport) this.transport.onmessage = ({ data }) => this.receive(data);
+    if (this.transport?.start) this.transport.start((message) => this.receive(message));
+    else if (this.transport) this.transport.onmessage = ({ data }) => this.receive(data);
   }
   publish(type, payload) {
     if (this.disposed) return false;
@@ -19,8 +20,8 @@ export class ObsBridge {
       this.snapshotStore.apply({ kind: type, ...payload }, generation);
       const snapshot = this.snapshot();
       // #106で protocol envelope/handshake transportへ置換するまで、既存OBS Browser Sourceとのwire互換を維持する。
-      this.transport.postMessage({ type, payload: { ...payload, generation } });
-      this.transport.postMessage(createEnvelope("state", { kind: type, ...payload }, snapshot));
+      this.#send({ type, payload: { ...payload, generation } });
+      this.#send(createEnvelope("state", { kind: type, ...payload }, snapshot));
       return true;
     }
     catch (error) { this.onError(error); return false; }
@@ -33,10 +34,11 @@ export class ObsBridge {
     const clientId = message.payload.clientId;
     if (typeof clientId !== "string" || !clientId) return false;
     this.clients.hello(clientId);
-    if (message.type === "snapshot-request" || message.type === "hello") this.transport.postMessage(createEnvelope("snapshot", this.snapshot(), { ...this.snapshot(), targetClientId: clientId }));
-    if (message.type === "heartbeat") this.transport.postMessage(createEnvelope("heartbeat", { clientId }, { ...this.snapshot(), targetClientId: clientId }));
+    if (message.type === "snapshot-request" || message.type === "hello") this.#send(createEnvelope("snapshot", this.snapshot(), { ...this.snapshot(), targetClientId: clientId }));
+    if (message.type === "heartbeat") this.#send(createEnvelope("heartbeat", { clientId }, { ...this.snapshot(), targetClientId: clientId }));
     return true;
   }
   diagnostics() { return { clients: this.clients.list().length, snapshot: this.snapshot() }; }
-  dispose() { if (this.disposed) return false; this.disposed = true; if (this.transport) this.transport.onmessage = null; this.transport.close?.(); return true; }
+  #send(message) { return this.transport?.postMessage?.(message) ?? this.transport?.send?.(message) ?? false; }
+  dispose() { if (this.disposed) return false; this.disposed = true; if (this.transport && !this.transport.start) this.transport.onmessage = null; this.transport.close?.(); this.transport.stop?.(); return true; }
 }

@@ -4,6 +4,7 @@ import { toPublicError, PublicIpcError } from "../../shared/errors";
 import type { Result, ShowItemKind } from "../../shared/ipc-contract";
 import { expectExternalHttpsUrl, expectNoInput, expectRecord, expectString } from "../../shared/validation";
 import { assertTrustedSender } from "./guard";
+import { getWindowRole } from "../window-roles";
 import { openAllowedExternalUrl } from "../security/navigation";
 import type { AppPaths } from "../paths";
 import { ConfigRepository } from "../config/config-repository";
@@ -132,10 +133,20 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     require("electron").shell.showItemInFolder(target);
     return { shown: true };
   }, options);
+  ipcMain.on(CHANNELS.OBS_MESSAGE, (event, message) => {
+    try {
+      assertTrustedSender(event, options.devServerUrl, ["console", "obs"]);
+      if (!message || typeof message !== "object") return;
+      const role = getWindowRole(event.sender);
+      if (role === "console") options.controller.emitToObs("obs:message", message);
+      if (role === "obs") options.controller.emitToConsole("obs:message", message);
+    } catch { /* untrusted renderer messages are ignored */ }
+  });
 
   return () => {
     for (const channel of Object.values(CHANNELS)) {
       if (channel !== CHANNELS.APP_EVENT) ipcMain.removeHandler(channel);
     }
+    ipcMain.removeAllListeners(CHANNELS.OBS_MESSAGE);
   };
 }

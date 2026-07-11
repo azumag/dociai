@@ -13,8 +13,9 @@ if (new URLSearchParams(location.search).has("transparent")) {
 
 import { ObsClient } from "./obs-client/obs-client.js";
 import { BroadcastChannelTransport } from "./obs/transports/broadcast-channel-transport.js";
+import { ElectronIpcTransport } from "./obs/transports/electron-ipc-transport.js";
 
-const transport = new BroadcastChannelTransport();
+const transport = globalThis.dociai?.obs ? new ElectronIpcTransport() : new BroadcastChannelTransport();
 let received = false;
 const connection = $("#obs-connection");
 

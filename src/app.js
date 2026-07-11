@@ -30,6 +30,7 @@ import { AutomationCoordinator } from "./app/automation-coordinator.js";
 import { ResponseCoordinator } from "./app/response-coordinator.js";
 import { SourceCoordinator } from "./app/source-coordinator.js";
 import { ObsBridge } from "./obs/obs-bridge.js";
+import { ElectronIpcTransport } from "./obs/transports/electron-ipc-transport.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -37,7 +38,7 @@ const appStore = new AppStore(createAppState({
   connectors: new Map(),
   commentStore: new CommentStore({ limit: 80 }),
   manualSource: new ManualCommentSource(),
-  obs: new BroadcastChannel("dociai-obs"),
+  obs: globalThis.dociai?.obs ? new ElectronIpcTransport() : new BroadcastChannel("dociai-obs"),
   runtime: new BrowserRuntimeController(),
 }));
 const state = appStore.createLegacyAdapter();
