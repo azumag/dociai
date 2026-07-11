@@ -125,6 +125,13 @@ try {
   );
   const trigText = await visibleText(page);
   check("トリガー一覧に mention_ai が表示される", trigText.includes("mention_ai"), trigText.slice(0, 120).replace(/\n/g, " "));
+  const globalShortcutField = await page.evaluate(() => {
+    const keyField = [...document.querySelectorAll("[data-config-path]")].find((element) => element.getAttribute("data-config-path").endsWith(".keys") && element.value === "Alt+1");
+    const path = keyField?.getAttribute("data-config-path");
+    const globalField = path ? document.querySelector(`[data-config-path="${path.replace(/\.keys$/, ".global")}"]`) : null;
+    return { path, globalType: globalField?.type, label: globalField?.getAttribute("aria-labelledby") ? document.getElementById(globalField.getAttribute("aria-labelledby"))?.textContent : "" };
+  });
+  check("ホットキートリガーにElectronグローバル設定が表示される", globalShortcutField.globalType === "checkbox" && globalShortcutField.label.includes("グローバル"), JSON.stringify(globalShortcutField));
 
   // 6. 画面・文脈タブ
   await page.click('.settings-sidebar button[data-tab="context"]');

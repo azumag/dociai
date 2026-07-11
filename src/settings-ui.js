@@ -504,6 +504,17 @@ export class SettingsUI {
     return this.#attachFieldInput(shell, sel, path);
   }
 
+  #mapCheckbox(label, mapName, key, field, { value = false } = {}) {
+    const metadata = configUiMetadata(`${mapName}.${key}.${field}`);
+    const path = `${mapName}.${key}.${field}`;
+    const shell = this.#fieldShell(metadata.label ?? label, path, { inline: true });
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!value;
+    cb.addEventListener("change", () => { this.draft[mapName][key][field] = cb.checked; });
+    return this.#attachFieldInput(shell, cb, path);
+  }
+
   #renameMapKey(mapName, oldKey, newKey) {
     if (oldKey === newKey) return;
     const map = this.draft[mapName];
@@ -850,7 +861,7 @@ export class SettingsUI {
         });
         row2.append(kwField);
       } else if (t.type === "hotkey") {
-        row2.append(this.#mapField("keys (例: Alt+1)", "triggers", id, "keys", { value: t.keys ?? "", attrs: { spellcheck: "false" } }));
+        row2.append(this.#mapField("keys (例: Alt+1)", "triggers", id, "keys", { value: t.keys ?? "", attrs: { spellcheck: "false" } }), this.#mapCheckbox("グローバル (Electron)", "triggers", id, "global", { value: t.global }));
       } else if (t.type === "interval") {
         const g = document.createElement("div");
         g.className = "card-grid";

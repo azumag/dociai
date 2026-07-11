@@ -10,6 +10,8 @@ export type WindowStateSummary = { consoleOpen: boolean; obsOpen: boolean };
 export type SecretStatus = { key: string; configured: boolean; persistent: boolean; hint?: string; updatedAt?: string };
 export type ExternalOpenResult = { scheme: "https"; host: string };
 export type ShowItemKind = "logs" | "models" | "config";
+export type ShortcutRegistration = { triggerId: string; accelerator: string; registered: boolean; reason?: "occupied" | "invalid" | "registration_failed" };
+export type ShortcutStatus = { entries: ShortcutRegistration[]; updatedAt: number };
 export type VoiceVoxSynthesisInput = { text: string; speaker: number; baseUrl?: string; timeoutMs?: number; pitch?: number; speed?: number; intonation?: number; volume?: number; requestId?: string; ownerId?: string; generation?: number };
 
 export type DociaiApi = {
@@ -57,6 +59,7 @@ export type DociaiApi = {
     openExternal(url: string): Promise<Result<ExternalOpenResult>>;
     showItemInFolder(kind: ShowItemKind): Promise<Result<{ shown: true }>>;
   };
+  shortcuts: { status(): Promise<Result<ShortcutStatus>> };
   events: {
     subscribe(type: string, listener: (event: unknown) => void): () => void;
   };
