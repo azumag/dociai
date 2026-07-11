@@ -47,5 +47,6 @@ test("AutomationCoordinator suppresses duplicate runs and ObsBridge is bounded a
   const messages = [];
   const bridge = new ObsBridge({ transport: { postMessage: (message) => messages.push(message) }, getGeneration: () => 3 });
   assert.equal(bridge.publish("comment", { text: "x" }), true); assert.equal(messages[0].payload.generation, 3);
+  assert.equal(bridge.snapshot().sequence, 1); assert.equal(bridge.snapshot().generation, 3);
   bridge.dispose(); assert.equal(bridge.publish("comment", {}), false);
 });
