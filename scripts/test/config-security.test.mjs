@@ -8,7 +8,7 @@ import { build } from "esbuild";
 async function loadSecurityModules() {
   const result = await build({
     stdin: {
-      contents: `export { ConfigRepository } from "./electron/main/config/config-repository.ts"; export { SafeStorageSecretStore } from "./electron/main/secrets/safe-storage-secret-store.ts";`,
+      contents: `export { ConfigRepository } from "./electron/main/config/config-repository.ts"; export { SafeStorageSecretStore } from "./electron/main/secrets/safe-storage-secret-store.ts"; export { mainConfigRevision, processMainConfig } from "./electron/main/config/config-schema-adapter.ts";`,
       resolveDir: path.resolve(new URL("../..", import.meta.url).pathname),
       sourcefile: "config-security-test.ts",
       loader: "ts",
@@ -41,16 +41,31 @@ test("ConfigRepository is atomic, revision-checked, and rejects plaintext secret
     await fs.writeFile(path.join(directory, "legacy.json"), JSON.stringify({ connectors: { main: { apiKey: "secret-value", model: "mock" } } }));
     const repository = new modules.ConfigRepository(paths, path.join(directory, "legacy.json"));
     const initial = await repository.getPublic();
-    assert.equal(initial.config.schemaVersion, 1);
+    assert.equal(initial.config.schemaVersion, 2);
     await assert.rejects(repository.save({ connectors: { main: { apiKey: "secret-value" } } }), /secret IPC/);
-    const saved = await repository.save({ schemaVersion: 1, connectors: { main: { provider: "mock" } } });
+    const saved = await repository.save({ schemaVersion: 1, connectors: { main: { provider: "mock" } }, personas: [], triggers: {} });
     await assert.rejects(repository.save({ schemaVersion: 1 }, "wrong-revision"), /別のwindow/);
-    await repository.save({ schemaVersion: 1, connectors: { other: { provider: "mock" } } }, saved.revision);
+    await repository.save({ schemaVersion: 1, connectors: { other: { provider: "mock" } }, personas: [], triggers: {} }, saved.revision);
     await repository.restoreBackup();
     assert.ok((await repository.getPublic()).config.connectors.main);
     const preview = await repository.previewLegacy();
     assert.deepEqual(preview.secretEntries.map((entry) => entry.key), ["connectors.main.apiKey"]);
+    assert.deepEqual(preview.secretCandidates.map((entry) => entry.path.join(".")), ["connectors.main.apiKey"]);
     assert.doesNotMatch(JSON.stringify(preview.config), /secret-value/);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Browser and Electron config adapters produce the same normalized config and revision", async () => {
+  const { modules, directory } = await loadSecurityModules();
+  try {
+    const input = { connectors: { main: { provider: "mock", authorization: "Bearer local-only" } }, personas: [], triggers: {} };
+    const browser = (await import("../../src/config/config-pipeline.js")).processConfig(input);
+    const electron = modules.processMainConfig(input);
+    assert.equal(browser.ok, true);
+    assert.deepEqual(electron.config, browser.config);
+    assert.equal(modules.mainConfigRevision(electron.config), browser.hash);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

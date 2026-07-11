@@ -3,6 +3,8 @@
 // 読み込んだ設定 (APIキー含む) はメモリ保持のみ。永続ストレージには書かない。
 
 import { registryIds } from "./config/config-registry.js";
+import { processConfigText } from "./config/config-adapters.js";
+import { processConfig } from "./config/config-pipeline.js";
 const KNOWN_PROVIDERS = registryIds("providers");
 const KNOWN_TRIGGER_TYPES = registryIds("triggerTypes");
 const KNOWN_NEWS_SOURCE_TYPES = registryIds("newsSourceTypes");
@@ -402,21 +404,16 @@ export function applyDefaults(cfg) {
 }
 
 function parseAndValidate(text, sourceLabel) {
-  let cfg;
-  try {
-    cfg = JSON.parse(text);
-  } catch (e) {
-    const err = new Error(`JSONの構文エラー: ${e.message}`);
-    err.validationErrors = [err.message];
-    throw err;
-  }
+  const processed = processConfigText(text, sourceLabel);
+  if (!processed.ok) { const err = new Error(`設定処理エラー (${processed.stage})`); err.validationErrors = processed.issues.map((entry) => `${entry.path.join(".")}: ${entry.message}`); throw err; }
+  const cfg = processed.config;
   const { errors, warnings } = validateConfig(cfg);
   if (errors.length) {
     const err = new Error(`設定エラー (${sourceLabel})`);
     err.validationErrors = errors;
     throw err;
   }
-  return { config: applyDefaults(cfg), warnings, source: sourceLabel };
+  return { config: cfg, warnings: [...(processed.notes ?? []), ...warnings], source: sourceLabel, migration: { steps: processed.migrations, secretCandidates: processed.secretCandidates, revision: processed.hash } };
 }
 
 export async function loadFromServer() {
@@ -437,12 +434,14 @@ export async function loadFromServer() {
 // ディスクへ書き込む。python3 -m http.server など保存に対応しないサーバーでは失敗するので、
 // 呼び出し側でエラーを捕捉し、JSONエクスポートへの案内を行うこと。
 export async function saveToServer(config) {
+  const processed = processConfig(config);
+  if (!processed.ok) throw new Error(`設定pipeline失敗: ${processed.stage}`);
   let res;
   try {
     res = await fetch("./config.local.json", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config, null, 2),
+      body: JSON.stringify(processed.config, null, 2),
     });
   } catch (e) {
     throw new Error(`config.local.json への保存に失敗しました: ${e.message}`);

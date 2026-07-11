@@ -11,20 +11,30 @@
 // ときだけ再描画する (入力フォーカスは失われるが、入力値は draft に反映済みなので保持される)。
 
 import { validateConfig } from "./config-loader.js";
-import { registryIds } from "./config/config-registry.js";
+import { registryOptions } from "./config/config-registry.js";
+import { CONFIG_UI_METADATA } from "./config/config-ui-metadata.js";
 import { SettingsController } from "./settings/settings-controller.js";
 import { processConfig } from "./config/config-pipeline.js";
 import { validateConfigStructure } from "./config/config-validation.js";
 import { fieldMetadataForIssue } from "./settings/settings-field-registry.js";
 import { navigateToIssue } from "./settings/settings-navigation.js";
 import { showDiscardChangesDialog } from "./ui/dialogs/discard-changes-dialog.js";
+import { serializeConfigExport } from "./config/config-export.js";
 
-const PROVIDERS = registryIds("providers");
-const TRIGGER_TYPES = registryIds("triggerTypes");
-const VOICE_ENGINES = registryIds("voiceEngines");
-const NEWS_MODES = registryIds("newsModes");
-const NEWS_SOURCE_TYPES = registryIds("newsSourceTypes");
-const TOPIC_SOURCE_TYPES = registryIds("topicSourceTypes");
+const PROVIDERS = registryOptions("providers");
+const TRIGGER_TYPES = registryOptions("triggerTypes");
+const VOICE_ENGINES = registryOptions("voiceEngines");
+const NEWS_MODES = registryOptions("newsModes");
+const NEWS_SOURCE_TYPES = registryOptions("newsSourceTypes");
+const TOPIC_SOURCE_TYPES = registryOptions("topicSourceTypes");
+
+function configUiMetadata(path) {
+  const segments = path.split(".");
+  return Object.entries(CONFIG_UI_METADATA).find(([pattern]) => {
+    const expected = pattern.split(".");
+    return expected.length === segments.length && expected.every((part, index) => part === "*" || part === segments[index]);
+  })?.[1] ?? {};
+}
 
 const clone = (v) => JSON.parse(JSON.stringify(v ?? null));
 // 壊れた/手編集された config.local.json で配列であるべき値が文字列などになっていても
@@ -277,23 +287,26 @@ export class SettingsUI {
   // ---- 共通フォーム部品 ----
   // path 経由で draft に書き込む入力
   #pathField(label, path, { type = "text", value = "", placeholder = "", attrs = {}, csv = false, textarea = false, rows = 3 } = {}) {
+    const metadata = configUiMetadata(path);
+    const inputType = metadata.secret && type === "text" ? "password" : type;
+    const inputAttrs = { ...attrs, ...(metadata.min != null ? { min: metadata.min } : {}), ...(metadata.max != null ? { max: metadata.max } : {}) };
     const wrap = document.createElement("label");
     wrap.className = "field";
     const lab = document.createElement("span");
     lab.className = "field-label";
-    lab.textContent = label;
+    lab.textContent = metadata.label ?? label;
     let input;
     if (textarea) {
       input = document.createElement("textarea");
       input.rows = rows;
     } else {
       input = document.createElement("input");
-      input.type = type;
+      input.type = inputType;
     }
     input.value = value ?? "";
     input.dataset.configPath = path;
     if (placeholder) input.placeholder = placeholder;
-    for (const [k, v] of Object.entries(attrs)) input[k] = v;
+    for (const [k, v] of Object.entries(inputAttrs)) input[k] = v;
     const handler = () => {
       let v = input.value;
       if (type === "number") v = v === "" ? null : Number(v);
@@ -344,16 +357,19 @@ export class SettingsUI {
 
   // リスト要素のフィールド (オブジェクトマップ版)。onChange で setter 呼び出し。
   #mapField(label, mapName, key, field, { type = "text", value = "", attrs = {} } = {}) {
+    const metadata = field === "__id__" ? {} : configUiMetadata(`${mapName}.${key}.${field}`);
+    const inputType = metadata.secret && type === "text" ? "password" : type;
+    const inputAttrs = { ...attrs, ...(metadata.min != null ? { min: metadata.min } : {}), ...(metadata.max != null ? { max: metadata.max } : {}) };
     const wrap = document.createElement("label");
     wrap.className = "field";
     const lab = document.createElement("span");
     lab.className = "field-label";
-    lab.textContent = label;
+    lab.textContent = metadata.label ?? label;
     const input = document.createElement("input");
-    input.type = type;
+    input.type = inputType;
     input.dataset.configPath = `${mapName}.${key}.${field === "__id__" ? "id" : field}`;
     input.value = value ?? "";
-    for (const [k, v] of Object.entries(attrs)) input[k] = v;
+    for (const [k, v] of Object.entries(inputAttrs)) input[k] = v;
     input.addEventListener("input", () => {
       let v = input.value;
       if (type === "number") v = v === "" ? null : Number(v);
@@ -368,17 +384,19 @@ export class SettingsUI {
   }
 
   #mapSelect(label, options, mapName, key, field, { value = "" } = {}) {
+    const metadata = configUiMetadata(`${mapName}.${key}.${field}`);
     const wrap = document.createElement("label");
     wrap.className = "field";
     const lab = document.createElement("span");
     lab.className = "field-label";
-    lab.textContent = label;
+    lab.textContent = metadata.label ?? label;
     const sel = document.createElement("select");
     sel.dataset.configPath = `${mapName}.${key}.${field}`;
     for (const opt of options) {
       const o = document.createElement("option");
-      o.value = opt;
-      o.textContent = opt;
+      const isObj = typeof opt === "object" && opt !== null;
+      o.value = isObj ? opt.value : opt;
+      o.textContent = isObj ? opt.label : opt;
       sel.append(o);
     }
     sel.value = value ?? "";
@@ -425,22 +443,25 @@ export class SettingsUI {
 
   // 配列要素のフィールド (personas, news.sources, topics.sources)
   #arrField(label, arrPath, index, field, { type = "text", value = "", attrs = {}, textarea = false, rows = 3 } = {}) {
+    const metadata = configUiMetadata(`${arrPath}.${index}.${field}`);
+    const inputType = metadata.secret && type === "text" ? "password" : type;
+    const inputAttrs = { ...attrs, ...(metadata.min != null ? { min: metadata.min } : {}), ...(metadata.max != null ? { max: metadata.max } : {}) };
     const wrap = document.createElement("label");
     wrap.className = "field";
     const lab = document.createElement("span");
     lab.className = "field-label";
-    lab.textContent = label;
+    lab.textContent = metadata.label ?? label;
     let input;
     if (textarea) {
       input = document.createElement("textarea");
       input.rows = rows;
     } else {
       input = document.createElement("input");
-      input.type = type;
+      input.type = inputType;
     }
     input.value = value ?? "";
     input.dataset.configPath = `${arrPath}.${index}.${field}`;
-    for (const [k, v] of Object.entries(attrs)) input[k] = v;
+    for (const [k, v] of Object.entries(inputAttrs)) input[k] = v;
     input.addEventListener("input", () => {
       const arr = this.#getArr(arrPath);
       let v = input.value;
@@ -452,11 +473,12 @@ export class SettingsUI {
   }
 
   #arrSelect(label, options, arrPath, index, field, { value = "" } = {}) {
+    const metadata = configUiMetadata(`${arrPath}.${index}.${field}`);
     const wrap = document.createElement("label");
     wrap.className = "field";
     const lab = document.createElement("span");
     lab.className = "field-label";
-    lab.textContent = label;
+    lab.textContent = metadata.label ?? label;
     const sel = document.createElement("select");
     sel.dataset.configPath = `${arrPath}.${index}.${field}`;
     for (const opt of options) {
@@ -1011,7 +1033,7 @@ export class SettingsUI {
   async #apply() {
     const processed = processConfig(this.draft);
     const structured = processed.ok ? validateConfigStructure(processed.config) : processed;
-    const { errors, warnings } = validateConfig(this.draft);
+    const { errors, warnings } = validateConfig(processed.ok ? processed.config : this.draft);
     this._errors.replaceChildren();
     const structuredIssues = structured.issues?.map(fieldMetadataForIssue) ?? [];
     this.controller.state.issues = structuredIssues;
@@ -1056,16 +1078,16 @@ export class SettingsUI {
   }
 
   #export() {
-    const json = JSON.stringify(this.draft, null, 2);
+    const json = serializeConfigExport(this.draft);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "config.local.json";
+    a.download = "dociai-config-export.json";
     document.body.append(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    this.log("設定を config.local.json としてエクスポートしました (APIキーを含むため取扱注意)");
+    this.log("秘密値を除外した設定packageをエクスポートしました");
   }
 }

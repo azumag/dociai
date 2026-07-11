@@ -18,6 +18,7 @@
     "test:contract": "node --test scripts/test/mock-services.test.mjs",
     "lint": "node scripts/ci/lint.mjs",
     "test:e2e:browser": "node scripts/test/run-browser-e2e.mjs",
+    "test:e2e:settings": "node scripts/test/run-settings-e2e.mjs",
     "test:e2e:browser:direct": "npm --workspace e2e test",
     "test:e2e:list": "node scripts/test/list-e2e-scenarios.mjs",
     "electron:build": "node scripts/electron/build.mjs",
