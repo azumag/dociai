@@ -63,6 +63,19 @@ const api: DociaiApi = {
       return () => ipcRenderer.removeListener(CHANNELS.APP_EVENT, callback);
     },
   },
+  obs: {
+    send(message) {
+      if (!message || typeof message !== "object") return false;
+      ipcRenderer.send(CHANNELS.OBS_MESSAGE, message);
+      return true;
+    },
+    subscribe(listener) {
+      if (typeof listener !== "function") return () => {};
+      const callback = (_event: Electron.IpcRendererEvent, payload: { type?: string; event?: unknown }) => { if (payload?.type === "obs:message") listener(payload.event); };
+      ipcRenderer.on(CHANNELS.APP_EVENT, callback);
+      return () => ipcRenderer.removeListener(CHANNELS.APP_EVENT, callback);
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld("dociai", deepFreeze(api));

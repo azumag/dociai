@@ -93,6 +93,9 @@ export function createWindowController(options: WindowControllerOptions) {
     emitToConsole(type: string, event: unknown) {
       if (consoleWindow && !consoleWindow.isDestroyed()) consoleWindow.webContents.send(CHANNELS.APP_EVENT, { type, event });
     },
+    emitToObs(type: string, event: unknown) {
+      if (obsWindow && !obsWindow.isDestroyed()) obsWindow.webContents.send(CHANNELS.APP_EVENT, { type, event });
+    },
     dispose() {
       saveWindowState(stateFile, consoleWindow);
       if (obsWindow && !obsWindow.isDestroyed()) obsWindow.destroy();

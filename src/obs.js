@@ -11,33 +11,28 @@ if (new URLSearchParams(location.search).has("transparent")) {
   document.body.classList.add("transparent");
 }
 
-const channel = new BroadcastChannel("dociai-obs");
+import { ObsClient } from "./obs-client/obs-client.js";
+import { BroadcastChannelTransport } from "./obs/transports/broadcast-channel-transport.js";
+import { ElectronIpcTransport } from "./obs/transports/electron-ipc-transport.js";
+
+const transport = globalThis.dociai?.obs ? new ElectronIpcTransport() : new BroadcastChannelTransport();
 let received = false;
+const connection = $("#obs-connection");
 
-channel.onmessage = ({ data }) => {
-  if (!received) {
-    received = true;
-    $("#obs-waiting").hidden = true;
-  }
-  const { type, payload } = data ?? {};
+function render(type, payload) {
+  if (!received) { received = true; $("#obs-waiting").hidden = true; }
+  if (type === "comment") { $("#obs-comment-author").textContent = payload.author; $("#obs-comment-text").textContent = payload.text; $("#obs-comment").hidden = false; }
+  if (type === "reply") { const reply = $("#obs-reply"); reply.style.setProperty("--persona-color", payload.color ?? ""); $("#obs-reply-persona").textContent = payload.personaName; $("#obs-reply-text").textContent = payload.text; reply.hidden = false; }
+  if (type === "speech") { const speaking = payload.state === "speaking"; $("#obs-speaking").hidden = !speaking; if (speaking) $("#obs-speaking-name").textContent = `ON AIR — ${payload.personaName}`; }
+}
 
-  if (type === "comment") {
-    $("#obs-comment-author").textContent = payload.author;
-    $("#obs-comment-text").textContent = payload.text;
-    $("#obs-comment").hidden = false;
-  }
-
-  if (type === "reply") {
-    const reply = $("#obs-reply");
-    reply.style.setProperty("--persona-color", payload.color ?? "");
-    $("#obs-reply-persona").textContent = payload.personaName;
-    $("#obs-reply-text").textContent = payload.text;
-    reply.hidden = false;
-  }
-
-  if (type === "speech") {
-    const speaking = payload.state === "speaking";
-    $("#obs-speaking").hidden = !speaking;
-    if (speaking) $("#obs-speaking-name").textContent = `ON AIR — ${payload.personaName}`;
-  }
-};
+const client = new ObsClient({
+  transport: {
+    start(listener) { return transport.start((message) => { if (message?.protocolVersion) listener(message); else render(message?.type, message?.payload ?? {}); }); },
+    send: (message) => transport.send(message), stop: () => transport.stop(),
+  },
+  onState(status) { connection.textContent = ({ connected: "接続済み", stale: "再接続中（表示は保持）", disconnected: "操作卓未接続", incompatible: "protocol 非互換", error: "通信エラー", waiting: "接続待機中" })[status] ?? status; connection.dataset.state = status; },
+  onSnapshot(snapshot) { if (snapshot.comment) render("comment", snapshot.comment); if (snapshot.reply) render("reply", snapshot.reply); if (snapshot.speech) render("speech", snapshot.speech); },
+});
+client.start();
+setInterval(() => client.tick(), 1_000);

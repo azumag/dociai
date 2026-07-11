@@ -19,6 +19,7 @@ export const CHANNELS = Object.freeze({
   SYSTEM_OPEN_EXTERNAL: "system:open-external",
   SYSTEM_SHOW_ITEM: "system:show-item",
   APP_EVENT: "app:event",
+  OBS_MESSAGE: "obs:message",
 });
 
 export type IpcChannel = typeof CHANNELS[keyof typeof CHANNELS];
