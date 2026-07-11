@@ -53,6 +53,22 @@ try {
   const tally = await page.$eval("#tally", (el) => el.textContent);
   check("タリーランプにペルソナ表示", tally.includes("相棒AI") && tally.includes("ツッコミAI"), tally);
 
+  // ---- issue #115: integration health summary/detail/diagnostic export ----
+  const integrationHealth = await page.evaluate(() => ({
+    summary: document.querySelector("#integration-health-summary")?.textContent,
+    cards: document.querySelectorAll("#integration-health-mini-list .integration-card").length,
+    labels: [...document.querySelectorAll("#integration-health-summary [data-status]")].map((element) => element.getAttribute("aria-label")),
+  }));
+  check("連携ヘルスの一画面サマリー", integrationHealth.cards > 0 && integrationHealth.summary.includes("正常") && integrationHealth.labels.every(Boolean), JSON.stringify(integrationHealth));
+  await page.click("#btn-integrations-open");
+  const integrationDialog = await page.$eval("#integration-health-dialog", (dialog) => ({ open: dialog.open, title: dialog.querySelector("h2")?.textContent, list: dialog.querySelectorAll(".integration-card").length }));
+  check("連携ヘルス詳細パネルが開く", integrationDialog.open && integrationDialog.title.includes("連携ヘルス") && integrationDialog.list > 0, JSON.stringify(integrationDialog));
+  await page.click("#integration-health-dialog > .btn-row button:nth-child(3)");
+  const exportDialog = await page.$eval("#diagnostic-export-dialog", (dialog) => ({ open: dialog.open, preview: dialog.querySelector("pre")?.textContent }));
+  check("診断エクスポートのプレビュー", exportDialog.open && exportDialog.preview.includes("dociai.integration-diagnostic.v1") && !/apiKey|token|prompt|payload|absolutePath/i.test(exportDialog.preview), exportDialog.preview.slice(0, 100));
+  await page.click("#diagnostic-export-dialog .btn-row button");
+  await page.click("#integration-health-dialog > .btn-row button:last-child");
+
   // ---- issue #35: コメント読み上げ主体の画面構成 ----
   const commentFirstUi = await page.evaluate(() => ({
     heading: document.querySelector(".panel-comments-primary h1")?.textContent,

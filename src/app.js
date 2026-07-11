@@ -32,6 +32,8 @@ import { ResponseCoordinator } from "./app/response-coordinator.js";
 import { SourceCoordinator } from "./app/source-coordinator.js";
 import { ObsBridge } from "./obs/obs-bridge.js";
 import { ElectronIpcTransport } from "./obs/transports/electron-ipc-transport.js";
+import { IntegrationPanel } from "./ui/integrations/integration-panel.js";
+import { DiagnosticExportDialog } from "./ui/integrations/diagnostic-export-dialog.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -45,6 +47,8 @@ const appStore = new AppStore(createAppState({
 const state = appStore.createLegacyAdapter();
 const consoleView = new ConsoleView(document);
 const obsBridge = new ObsBridge({ transport: state.obs, getGeneration: () => state.generation });
+let integrationPanel = null;
+let diagnosticExportDialog = null;
 
 const scrub = (text) => scrubSecrets(text, state.secrets);
 const hhmmss = (d = new Date()) => new Date(d).toTimeString().slice(0, 8);
@@ -384,6 +388,71 @@ function renderAll() {
   renderTopicPanel();
   renderComments();
   renderDebug();
+  renderIntegrationHealth();
+}
+
+function normalizeExternalHealth(status) {
+  if (["healthy", "connected", "ready", "online"].includes(status)) return "ready";
+  if (["checking", "connecting", "starting"].includes(status)) return "checking";
+  if (["degraded", "reconnecting", "retry_wait"].includes(status)) return "degraded";
+  if (["unavailable", "error", "offline", "failed"].includes(status)) return "error";
+  return "unknown";
+}
+
+function integrationHealthServices() {
+  const config = state.config;
+  if (!config) return [{ serviceId: "config", name: "設定", category: "runtime", status: "unknown", critical: true, enabled: true }];
+  const services = [];
+  for (const serviceId of Object.keys(config.connectors ?? {})) {
+    services.push({ serviceId: `connector:${serviceId}`, name: serviceId, category: "model", status: state.connectors.has(serviceId) ? "unknown" : "configuration_required", critical: true, enabled: true, metrics: {}, action: state.connectors.has(serviceId) ? "open_diagnostics" : "open_settings" });
+  }
+  const add = (serviceId, name, category, enabled, status = "unknown", extra = {}) => services.push({ serviceId, name, category, enabled, status: enabled ? status : "disabled", ...extra });
+  add("voicevox", "VOICEVOX", "speech", Boolean(config.voicevox?.enabled));
+  add("bouyomi", "棒読みちゃん", "speech", Boolean(config.bouyomi?.enabled));
+  const twitchStatus = state.twitchStatus;
+  const twitchHealth = twitchStatus?.health?.status ?? twitchStatus?.state;
+  add("twitch", "Twitch Chat", "stream", Boolean(config.commentSources?.twitch?.enabled), normalizeExternalHealth(twitchHealth), { critical: true, retryAt: twitchStatus?.nextRetryAt, metrics: twitchStatus?.latencyMs == null ? {} : { latencyMs: twitchStatus.latencyMs }, action: twitchHealth === "connected" ? "open_diagnostics" : "retry" });
+  add("news", "ニュース", "feed", Boolean(config.news?.enabled));
+  add("topics", "話題", "feed", Boolean(config.topics?.enabled));
+  add("screen", "画面キャプチャ", "context", Boolean(config.context?.screenCapture?.enabled));
+  add("mic", "マイク監視", "context", Boolean(config.micMonitor?.enabled));
+  add("obs", "OBS表示", "output", true, "unknown");
+  return services;
+}
+
+function renderIntegrationHealth() {
+  const services = integrationHealthServices();
+  integrationPanel?.setSnapshot({ services });
+  const header = $("#integration-health-header-summary");
+  if (header) {
+    const ready = services.filter((service) => service.status === "ready").length;
+    const errors = services.filter((service) => ["error", "auth_required", "configuration_required"].includes(service.status)).length;
+    header.textContent = `連携ヘルス: 正常 ${ready} / 要確認 ${errors + services.filter((service) => ["unknown", "degraded", "checking"].includes(service.status)).length}`;
+  }
+}
+
+function renderIntegrationNotice(notification) {
+  const element = $("#integration-health-notice");
+  if (!element || !notification) return;
+  element.hidden = false;
+  if (notification.type === "recovery") element.textContent = `${notification.service.name ?? notification.service.serviceId} が復旧しました`;
+  else if (notification.type === "critical") element.textContent = `重要な連携エラー: ${notification.service.name ?? notification.service.serviceId}`;
+  else if (notification.type === "progress") element.textContent = `全連携を確認中: ${notification.event.completed}/${notification.event.total}`;
+}
+
+function handleIntegrationAction(action, service) {
+  if (["open_settings", "reauth", "open_manager"].includes(action)) { settingsUI.open(); return; }
+  if (["retry", "start_service"].includes(action) && service?.serviceId === "twitch") {
+    const source = state.externalCommentSources.find((candidate) => candidate.id === "twitch");
+    if (source?.reconnectNow) void source.reconnectNow();
+    logEvent("Twitch連携の確認を開始しました");
+    return;
+  }
+  if (action === "open_diagnostics") {
+    diagnosticExportDialog?.open(integrationPanel?.exportPayload({ build: "web" }));
+    return;
+  }
+  logEvent(`${service?.name ?? service?.serviceId ?? "連携"} の操作: ${action}`);
 }
 
 function renderConfigStatus() {
@@ -500,6 +569,7 @@ function renderTwitchChatStatus() {
   const health = status.health?.status ?? status.state;
   const message = status.health?.message ?? "";
   el.textContent = `Twitch: ${health}${channels ? ` · ${channels}` : ""}${retrySeconds !== null ? ` · ${retrySeconds}秒後に再接続` : ""}${message ? ` · ${message}` : ""}`;
+  renderIntegrationHealth();
 }
 
 function renderMicPanel() {
@@ -694,6 +764,9 @@ function createAppActions() {
     readNews: () => { renderNewsPanel(); runNews(); },
     readTopics: () => { renderTopicPanel(); runTopics(); },
     reconnectTwitch: () => { const source = state.externalCommentSources.find((candidate) => candidate.id === "twitch"); if (source?.reconnectNow()) logEvent("Twitchチャットを手動再接続します"); renderTwitchChatStatus(); },
+    openIntegrations: () => integrationPanel?.open(),
+    openIntegrationsPanel: () => integrationPanel?.open(),
+    integrationAction: handleIntegrationAction,
     refreshTimedPanels: () => { if (state.personaRouter) renderPersonas(); if (state.screenContext?.summary) renderScreenPanel(); if (state.twitchStatus?.nextRetryAt) renderTwitchChatStatus(); },
   };
 }
@@ -701,12 +774,23 @@ function createAppActions() {
 function bindUI() {
   const elements = new ElementRegistry(document, {
     loadServer: "#btn-load-server", loadFile: "#btn-load-file", fileInput: "#file-input", settings: "#btn-settings",
+    integrationsOpen: "#btn-integrations-open", integrationsOpenPanel: "#btn-integrations-open-panel",
     commentForm: "#comment-form", commentText: "#comment-text", commentAuthor: "#comment-author",
     speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
     micStart: "#btn-mic-start", micStop: "#btn-mic-stop", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
     newsRead: "#btn-news-read", topicRead: "#btn-topic-read", twitchReconnect: "#btn-twitch-reconnect",
   });
-  return bindConsoleUI(elements, createAppActions());
+  const actions = createAppActions();
+  diagnosticExportDialog = new DiagnosticExportDialog(document.querySelector("#diagnostic-export-dialog"), { document, onStatus: (status) => logEvent(`診断エクスポート: ${status}`) });
+  integrationPanel = new IntegrationPanel(document.querySelector("#integration-health-dialog"), {
+    document,
+    summaryRoot: document.querySelector("#integration-health-summary"),
+    miniRoot: document.querySelector("#integration-health-mini-list"),
+    onAction: actions.integrationAction,
+    onNotify: renderIntegrationNotice,
+    onExport: (services) => diagnosticExportDialog.open(integrationPanel.exportPayload({ build: "web" })),
+  });
+  return bindConsoleUI(elements, actions);
 }
 
 function boot() {
@@ -720,6 +804,7 @@ function boot() {
     .catch((e) => logEvent(`自動読込は見送り: ${scrub(e.message)}`, "warn"));
   addEventListener("pagehide", () => {
     teardown("window unloaded");
+    integrationPanel?.dispose();
     obsBridge.dispose();
     state.runtime.dispose("window unloaded");
   }, { once: true });
