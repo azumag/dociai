@@ -556,6 +556,35 @@ test("TwitchTokenProvider.handleTokenObtained: a client_id mismatch on the very 
   }
 });
 
+test("TwitchTokenProvider.handleTokenObtained: a transient failure on the very first validate throws a distinct, retryable error instead of forcing reauth_required", async () => {
+  const { modules } = await loadModules();
+  const server = http.createServer((req, res) => {
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ message: "server hiccup" }));
+  });
+  const { baseUrl } = await listen(server);
+  let provider;
+  let reauthReasons = [];
+  try {
+    const client = new modules.TwitchOAuthClient({ fetchImpl: fetch, baseUrl });
+    const secretStore = new modules.MemorySecretStore();
+    provider = new modules.TwitchTokenProvider(client, CLIENT_ID, secretStore, { sleep: makeStepSleep().sleep, onReauthRequired: (reason) => reauthReasons.push(reason) });
+
+    await assert.rejects(
+      () => provider.handleTokenObtained(createHandoff({ accessToken: "fresh-access-secret", refreshToken: "fresh-refresh-secret" })),
+      (error) => error instanceof modules.TwitchTokenProviderError && error.reason === "transient",
+    );
+
+    assert.equal(provider.status, "unauthenticated", "a transient confirmation failure must not force reauth_required for a token that was never persisted");
+    assert.equal(reauthReasons.length, 0, "reauth_required callback must not fire for a merely transient validate failure");
+    assert.equal(await accessTokenSecret(modules, secretStore), null);
+    assert.equal(await refreshTokenSecret(modules, secretStore), null);
+  } finally {
+    provider?.dispose();
+    await closeServer(server);
+  }
+});
+
 test("TwitchTokenProvider: a user_id mismatch discovered on a later validate (after the account was already established) transitions to reauth_required", async () => {
   const { modules } = await loadModules();
   let validateCount = 0;
@@ -769,6 +798,44 @@ test("TwitchTokenProvider: refresh always rotates to Twitch's new refresh_token,
     assert.equal(await refreshTokenSecret(modules, secretStore), "gen3-refresh-secret");
     assert.equal(provider.getMetadataSnapshot().authGeneration, 3);
     assert.equal(refreshCall, 2, "gen1's refresh_token must never be presented again on the second refresh");
+  } finally {
+    provider?.dispose();
+    await closeServer(server);
+  }
+});
+
+test("TwitchTokenProvider: a transient failure on the post-refresh confirmation validate keeps the freshly-rotated token instead of forcing reauth_required", async () => {
+  const { modules } = await loadModules();
+  let validateAttempts = 0;
+  const server = http.createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/oauth2/validate") {
+      validateAttempts += 1;
+      if (validateAttempts === 1) return jsonResponse(res, 200, { client_id: CLIENT_ID, login: "streamer", user_id: "12345", scopes: DEFAULT_SCOPES, expires_in: 14400 });
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ message: "server hiccup" }));
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => jsonResponse(res, 200, { access_token: "gen2-access-secret", refresh_token: "gen2-refresh-secret", scope: DEFAULT_SCOPES, token_type: "bearer" }));
+  });
+  const { baseUrl } = await listen(server);
+  let provider;
+  let reauthReasons = [];
+  try {
+    const client = new modules.TwitchOAuthClient({ fetchImpl: fetch, baseUrl });
+    const secretStore = new modules.MemorySecretStore();
+    provider = new modules.TwitchTokenProvider(client, CLIENT_ID, secretStore, { sleep: makeStepSleep().sleep, onReauthRequired: (reason) => reauthReasons.push(reason) });
+    await provider.handleTokenObtained(createHandoff({ accessToken: "gen1-access-secret", refreshToken: "gen1-refresh-secret" }));
+    assert.equal(provider.status, "valid");
+
+    await provider.reportUnauthorized("gen1-access-secret");
+
+    assert.equal(await accessTokenSecret(modules, secretStore), "gen2-access-secret", "the rotated pair must already be persisted even though its confirming validate was transient");
+    assert.equal(await refreshTokenSecret(modules, secretStore), "gen2-refresh-secret");
+    assert.equal(provider.status, "valid", "a transient confirmation failure must not discard freshly-rotated, presumably-good credentials");
+    assert.equal(reauthReasons.length, 0);
+    assert.equal(await provider.getValidAccessToken(), "gen2-access-secret");
   } finally {
     provider?.dispose();
     await closeServer(server);

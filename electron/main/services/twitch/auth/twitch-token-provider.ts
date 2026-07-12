@@ -51,7 +51,7 @@ const REFRESH_TOKEN_KEY = parseSecretKey(TWITCH_REFRESH_TOKEN_SECRET_KEY);
 
 export type TwitchTokenProviderStatus = "unauthenticated" | "valid" | "reauth_required";
 
-export type TwitchTokenProviderErrorReason = "unauthenticated" | "insufficient_scope" | "reauth_required" | "disposed";
+export type TwitchTokenProviderErrorReason = "unauthenticated" | "insufficient_scope" | "reauth_required" | "disposed" | "transient";
 
 /** Thrown by getValidAccessToken() — callers (future Twitch service modules) are expected to
  * catch this and branch on `.reason`: `reauth_required`/`unauthenticated` mean "stop and surface a
@@ -164,6 +164,16 @@ export class TwitchTokenProvider {
       if (this.#isCancelled(error)) return;
       await this.#enterReauthRequired("validating the newly obtained token failed unexpectedly");
       return;
+    }
+    if (outcome.status === "transient") {
+      // A network blip / 429 / 5xx confirming a brand-new token is not evidence the token is
+      // bad (same semantic the main validate loop already applies) — nothing has been persisted
+      // yet, so there is no trust state to protect, but forcing reauth_required here would be
+      // misleading (it specifically means "the grant itself is dead, redo Device Code Flow") and
+      // would fire the reauth-required callback needlessly. Surface it as a distinct, retryable
+      // failure instead so the caller (the Device Code Flow completion handler) can decide to
+      // retry rather than restart the whole authorization from scratch.
+      throw new TwitchTokenProviderError("transient", `could not confirm the newly obtained token (${outcome.message})`);
     }
     if (outcome.status !== "valid") {
       await this.#enterReauthRequired(`newly obtained token failed validation (${outcome.status})`);
@@ -371,6 +381,15 @@ export class TwitchTokenProvider {
     }
     if (outcome.status === "valid") {
       this.#applyValidated(outcome);
+      return;
+    }
+    if (outcome.status === "transient") {
+      // Same "leave trust state alone" semantic as the main validate loop's transient case
+      // (twitch-token-provider.ts's `#validate` switch below) — the new access/refresh pair is
+      // already persisted by #refreshAndRevalidate before this method runs, so a network blip /
+      // 429 / 5xx here must not discard freshly-rotated, presumably-good credentials. The next
+      // validate trigger (hourly timer, reactive 401, resume) gets another chance to confirm it.
+      this.#log("post-refresh validate was transient; keeping rotated token, will re-validate later", { message: outcome.message });
       return;
     }
     await this.#enterReauthRequired(`post-refresh validate rejected the rotated token (${outcome.status})`);
