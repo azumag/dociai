@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Inherited entitlements for dociai's Electron helper processes (#73): "dociai Helper
+  (Renderer).app", "dociai Helper (GPU).app", "dociai Helper (Plugin).app" under
+  Contents/Frameworks. electron-builder/@electron/osx-sign signs each helper with this file
+  automatically (build/entitlements.mac.inherit.plist is a recognized filename) whenever a main
+  entitlements file is also provided.
+
+  Only the three keys every Electron helper process needs are listed. Device/network entitlements
+  (com.apple.security.device.audio-input, com.apple.security.network.client) belong on the main
+  app's entitlements (build/entitlements.mac.plist) only: on macOS, TCC permission prompts and
+  outbound-network hardened-runtime checks are keyed to the top-level app's bundle identifier and
+  code signature, not the helper processes.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>
