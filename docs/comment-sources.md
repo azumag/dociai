@@ -14,7 +14,7 @@
 }
 ```
 
-`app.js` 側は `source.start((raw) => addComment(raw))` と接続するだけで、トリガー判定・ペルソナ応答は共通フローに乗る。現在は `ManualCommentSource` と `TwitchChatSource` を実装済み。
+`src/app/runtime-factory.js` 側は `source.start((raw) => addComment(raw))` と接続するだけで、トリガー判定・ペルソナ応答は共通フローに乗る。現在は `ManualCommentSource` と `TwitchChatSource` を実装済み。
 
 ## YouTube Live Chat 取得方式の調査
 
