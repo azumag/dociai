@@ -16,6 +16,7 @@ import { ConsoleView } from "../ui/console-view.js";
 import { ObsBridge } from "../obs/obs-bridge.js";
 import { IntegrationPanel } from "../ui/integrations/integration-panel.js";
 import { DiagnosticExportDialog } from "../ui/integrations/diagnostic-export-dialog.js";
+import { TwitchOverviewApp } from "../twitch-ui/views/overview.js";
 import { AppRuntime } from "./app-runtime.js";
 import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } from "./runtime-factory.js";
 import { createAppActions } from "./app-actions.js";
@@ -35,6 +36,7 @@ let appRuntime;
 const obsBridge = new ObsBridge({ transport: platform.createObsTransport(), getGeneration: () => appRuntime.currentGeneration() });
 let integrationPanel = null;
 let diagnosticExportDialog = null;
+let twitchOverviewApp = null;
 let screenSources = [];
 
 const scrub = (text) => scrubSecrets(text, state.secrets);
@@ -149,6 +151,7 @@ function renderAll() {
   renderComments();
   renderDebug();
   renderIntegrationHealth();
+  renderTwitchOverviewContext();
 }
 
 function normalizeExternalHealth(status) {
@@ -190,6 +193,19 @@ function renderIntegrationHealth() {
     const errors = services.filter((service) => ["error", "auth_required", "configuration_required"].includes(service.status)).length;
     header.textContent = `連携ヘルス: 正常 ${ready} / 要確認 ${errors + services.filter((service) => ["unknown", "degraded", "checking"].includes(service.status)).length}`;
   }
+}
+
+// Issue #94: the 3 preflight rows twitch-ui has no other way to observe (rule/speech/OBS are owned
+// by other subsystems entirely — see components/preflight-check.js's own doc comment). `obsAvailable`
+// is deliberately always `true` once a config is loaded: the OBS display page (obs.html) is a
+// static, always-reachable view in this app, not something that can fail to be "available" the way
+// a running service can — there is no real per-install signal to check here beyond "config loaded".
+function renderTwitchOverviewContext() {
+  if (!twitchOverviewApp) return;
+  if (!state.config) { twitchOverviewApp.setContext({ triggerRulesConfigured: "unknown", speechAvailable: "unknown", obsAvailable: "unknown" }); return; }
+  const ruleCount = Object.keys(state.config.triggers ?? {}).length + Object.keys(state.config.eventTriggers ?? {}).length;
+  const speechAvailable = Boolean(state.config.voicevox?.enabled || state.config.bouyomi?.enabled || state.config.commentReader?.enabled);
+  twitchOverviewApp.setContext({ triggerRulesConfigured: ruleCount > 0, speechAvailable, obsAvailable: true });
 }
 
 function renderIntegrationNotice(notification) {
@@ -568,6 +584,7 @@ function bindUI() {
   const elements = new ElementRegistry(document, {
     loadServer: "#btn-load-server", loadFile: "#btn-load-file", fileInput: "#file-input", settings: "#btn-settings",
     integrationsOpen: "#btn-integrations-open", integrationsOpenPanel: "#btn-integrations-open-panel",
+    twitchOverviewOpen: "#btn-twitch-overview-open",
     commentForm: "#comment-form", commentText: "#comment-text", commentAuthor: "#comment-author",
     speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
     micStart: "#btn-mic-start", micStop: "#btn-mic-stop", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
@@ -592,6 +609,7 @@ function bindUI() {
     // actions.integrationAction), so actions can only reach them through these getters.
     getIntegrationPanel: () => integrationPanel,
     getDiagnosticExportDialog: () => diagnosticExportDialog,
+    getTwitchOverviewApp: () => twitchOverviewApp,
     render: { mic: renderMicPanel, screen: renderScreenPanel, screenSources: renderScreenSources, news: renderNewsPanel, topics: renderTopicPanel, twitchStatus: renderTwitchChatStatus, timed: refreshTimedPanels },
   });
   diagnosticExportDialog = new DiagnosticExportDialog(document.querySelector("#diagnostic-export-dialog"), { document, onStatus: (status) => logEvent(`診断エクスポート: ${status}`) });
@@ -603,6 +621,8 @@ function bindUI() {
     onNotify: renderIntegrationNotice,
     onExport: () => diagnosticExportDialog.open(integrationPanel.exportPayload({ build: "web" })),
   });
+  twitchOverviewApp = new TwitchOverviewApp(document.querySelector("#twitch-overview-dialog"), { document, onOpenSettings: () => settingsUI.open() });
+  renderTwitchOverviewContext();
   return bindConsoleUI(elements, actions);
 }
 
@@ -623,6 +643,7 @@ function boot() {
   addEventListener("pagehide", () => {
     unbindUI();
     integrationPanel?.dispose();
+    twitchOverviewApp?.dispose();
     obsBridge.dispose();
     void appRuntime.dispose("window unloaded");
   }, { once: true });

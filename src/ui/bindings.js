@@ -14,6 +14,7 @@ export function bindConsoleUI(elements, actions, { setIntervalImpl = setInterval
   on("settings", "click", () => actions.openSettings());
   optionalOn("integrationsOpen", "click", () => actions.openIntegrations());
   optionalOn("integrationsOpenPanel", "click", () => actions.openIntegrationsPanel());
+  optionalOn("twitchOverviewOpen", "click", () => actions.openTwitchOverview());
   optionalOn("screenSourceRefresh", "click", () => actions.refreshScreenSources());
   optionalOn("screenSourceSelect", "change", (event) => actions.selectScreenSource(event.target.value));
   on("commentForm", "submit", (event) => {

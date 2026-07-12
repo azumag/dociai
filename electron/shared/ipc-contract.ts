@@ -5,6 +5,7 @@ import type { FeedFetchInput, FeedFetchResponse } from "./services/feed-contract
 import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./services/topic-contract";
 import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
 import type { StreamEventListInput, StreamEventListResult } from "./services/stream-event-ipc-contract";
+import type { TwitchAuthOverview, TwitchConnectionOverview, TwitchSubscriptionsOverview } from "./twitch/overview-contract";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PublicError };
 export type WindowRole = "console" | "obs";
@@ -53,6 +54,28 @@ export type DociaiApi = {
     start(config: Record<string, unknown>): Promise<Result<{ state: string; sessionId: string; channels: string[]; attempt: number }>>;
     stop(): Promise<Result<{ state: string; sessionId: string; channels: string[]; attempt: number }>>;
     reconnect(): Promise<Result<{ reconnected: boolean }>>;
+    // Issue #94: auth (#83-85) + EventSub (#86-88) overview surface — a SEPARATE Twitch integration
+    // from the `start`/`stop`/`reconnect` IRC chat-reading service above (that one is
+    // TwitchChatService, driven by config.commentSources.twitch; this one is TwitchComposition,
+    // driven by config.twitch, for the Bits/Subscriptions/Redemptions EventSub topics).
+    auth: {
+      status(): Promise<Result<TwitchAuthOverview>>;
+      start(input?: { features?: string[] }): Promise<Result<TwitchAuthOverview>>;
+      cancel(): Promise<Result<TwitchAuthOverview>>;
+      upgradeScopes(): Promise<Result<TwitchAuthOverview>>;
+      openVerificationUri(): Promise<Result<{ opened: boolean }>>;
+      switchAccount(input?: { features?: string[] }): Promise<Result<TwitchAuthOverview>>;
+      logout(): Promise<Result<{ revoked: boolean }>>;
+    };
+    eventSub: {
+      status(): Promise<Result<TwitchConnectionOverview>>;
+      connect(): Promise<Result<TwitchConnectionOverview>>;
+      reconnect(): Promise<Result<TwitchConnectionOverview>>;
+      stop(): Promise<Result<TwitchConnectionOverview>>;
+    };
+    subscriptions: {
+      status(): Promise<Result<TwitchSubscriptionsOverview>>;
+    };
   };
   windows: {
     openObs(): Promise<Result<{ opened: true }>>;

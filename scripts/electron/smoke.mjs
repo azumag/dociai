@@ -89,6 +89,25 @@ try {
   assert.equal(checks.invalidExternal.ok, false);
   const serviceCancels = await consolePage.evaluate(async () => ({ feed: await window.dociai.feeds.cancel("no-feed-request"), topic: await window.dociai.topics.cancel("no-topic-request") }));
   assert.deepEqual(serviceCancels, { feed: { ok: true, value: { cancelled: false } }, topic: { ok: true, value: { cancelled: false } } });
+  // Issue #94: the twitch.auth/eventSub/subscriptions namespace added alongside the pre-existing
+  // twitch.start/stop/reconnect (TwitchChatService) — no new top-level `window.dociai` key, since
+  // this nests under the "twitch" key already asserted above. TWITCH_CLIENT_ID is unset in this dev
+  // smoke run, so the real TwitchComposition constructed in electron/main/index.ts should report an
+  // unconfigured, signed-out, disconnected overview end to end through real IPC.
+  const twitchOverviewChecks = await consolePage.evaluate(async () => ({
+    auth: await window.dociai.twitch.auth.status(),
+    eventSub: await window.dociai.twitch.eventSub.status(),
+    subscriptions: await window.dociai.twitch.subscriptions.status(),
+  }));
+  assert.equal(twitchOverviewChecks.auth.ok, true, JSON.stringify(twitchOverviewChecks.auth));
+  assert.equal(twitchOverviewChecks.auth.value.clientIdConfigured, false, "TWITCH_CLIENT_ID is unset in this dev smoke run");
+  assert.equal(twitchOverviewChecks.auth.value.flow.state, "signed_out");
+  assert.equal(twitchOverviewChecks.auth.value.tokenStatus, "unauthenticated");
+  assert.equal(twitchOverviewChecks.eventSub.ok, true, JSON.stringify(twitchOverviewChecks.eventSub));
+  assert.equal(twitchOverviewChecks.subscriptions.ok, true, JSON.stringify(twitchOverviewChecks.subscriptions));
+  assert.deepEqual(twitchOverviewChecks.subscriptions.value.entries, []);
+  const twitchAuthStartRejected = await consolePage.evaluate(() => window.dociai.twitch.auth.start());
+  assert.equal(twitchAuthStartRejected.ok, false, "starting auth without a configured client id must fail, not silently no-op");
   // #75: catalog/installed reads must round-trip through Main without ever exposing an absolute
   // filesystem path over IPC. import.begin() is intentionally not exercised here since it opens a
   // real native file dialog that would hang a headless run waiting for user input.
