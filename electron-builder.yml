@@ -49,6 +49,27 @@ mac:
         - x64
   hardenedRuntime: true
   gatekeeperAssess: false
+  # electron-builder auto-discovers these two paths by convention, but they're named explicitly
+  # so a future electron-builder upgrade changing that convention can't silently drop them.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  # electron-builder ships a built-in notarize step (@electron/notarize, triggered automatically
+  # once APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID or APPLE_API_KEY* env vars are set).
+  # It's disabled here because scripts/release/notarize.mjs (wired below as `afterSign`) performs
+  # notarization submit/wait/staple itself via `xcrun notarytool`/`xcrun stapler` directly — see
+  # docs/signing.md for why. Leaving the built-in step enabled too would notarize twice.
+  notarize: false
+  extendInfo:
+    # src/mic-monitor.js getUserMedia (#73 追加TODO): without both this Info.plist string and
+    # build/entitlements.mac.plist's com.apple.security.device.audio-input, packaged (non-dev)
+    # builds fail to acquire the microphone.
+    NSMicrophoneUsageDescription: マイク入力の音量を検知し、発話区間に応じてAIコメント生成を連動させるために使用します。
+    # #117 (desktopCapturer化) はまだmainへmergeされていない。このInfo.plistキーだけを先に
+    # 用意しておく (#73 追加TODO の「フックだけ用意」): declaring it now is inert — it only takes
+    # effect the first time some code actually requests screen-recording access, which doesn't
+    # exist yet. The actual first-run "画面収録" permission UI/guidance is left to a #117
+    # follow-up once desktopCapturer/getDisplayMedia screen-source selection lands on main.
+    NSScreenCaptureUsageDescription: 配信画面を共有するために画面収録を使用します。
 
 win:
   icon: build/icons/icon.ico
@@ -56,12 +77,34 @@ win:
     - target: zip
       arch:
         - x64
+  # Certificate injection (#73 「Windows certificate注入方式を決定」): CSC_LINK/CSC_KEY_PASSWORD
+  # env vars, populated by .github/workflows/package.yml from the WINDOWS_CERTIFICATE_PFX_BASE64/
+  # WINDOWS_CERTIFICATE_PASSWORD secrets (decoded to a workflow-local temp .pfx file, deleted
+  # after the build step). electron-builder reads CSC_LINK/CSC_KEY_PASSWORD itself
+  # (app-builder-lib/out/winPackager.js) — unlike macOS there is no OS-level "keychain" to import
+  # into, so no separate setup/cleanup script is needed here (contrast
+  # scripts/release/setup-macos-keychain.sh). When those env vars are unset (fork PRs, local
+  # dev), electron-builder silently produces an unsigned build unless
+  # `signtoolOptions.forceCodeSigning` were true, which it isn't.
+  signtoolOptions:
+    signingHashAlgorithms:
+      - sha256
+    rfc3161TimeStampServer: http://timestamp.digicert.com
 
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 
 # Corrects build-info.json's platform/arch for the target actually packaged, since a single host
 # can cross-build multiple mac archs (see scripts/release/after-pack.mjs).
 afterPack: scripts/release/after-pack.mjs
+
+# macOS-only in practice: electron-builder calls `afterSign` for every platform once signing
+# actually happened (electron-builder skips the call entirely for an unsigned build — see
+# scripts/release/notarize.mjs's own comment), and notarize.mjs no-ops immediately for non-darwin
+# targets. Runs after codesign has already applied build/entitlements.mac.plist, so notarization
+# submit/wait/staple never touches file contents that were part of the signature — only the
+# stapled ticket is added afterward, which Apple's stapler is designed not to invalidate signing
+# over (see docs/signing.md "package後にfileを書き換えない工程順").
+afterSign: scripts/release/notarize.mjs
 
 # userData (config/secrets/models/logs) is resolved at runtime via app.getPath("userData")
 # (electron/main/paths.ts) and is never copied into the app directory or referenced here, so

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened runtime entitlements for the dociai main app bundle (#73).
+  See docs/signing.md for the rationale behind each key. Keep this list minimal: every key here
+  widens what a compromised renderer/process can do, so a key is only added when a real runtime
+  path in this repo needs it.
+-->
+<plist version="1.0">
+  <dict>
+    <!-- Electron/V8 requires JIT and unsigned executable memory under the hardened runtime,
+         or the app crashes on launch. https://github.com/electron/electron-notarize#prerequisites -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- Native modules placed under build/native (#50, e.g. node-llama-cpp's .node/.dylib) are
+         codesigned by this pipeline but not notarized/library-validated by Apple themselves;
+         without this the hardened runtime refuses to dlopen them at load time.
+         https://github.com/electron-userland/electron-builder/issues/3940 -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Outbound network access for AI connectors, feeds, Twitch chat, OBS WebSocket, and the
+         Bouyomi/VOICEVOX speech backends (all electron/main/services/*). -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- src/mic-monitor.js calls navigator.mediaDevices.getUserMedia({ audio: true }) for
+         speech-triggered volume monitoring. Without this entitlement, packaged (non-dev) builds
+         fail to acquire the microphone even though Info.plist declares
+         NSMicrophoneUsageDescription (see electron-builder.yml mac.extendInfo) and the renderer
+         permission policy allows it (electron/main/security/permissions.ts). #73 追加TODO. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+  </dict>
+</plist>
