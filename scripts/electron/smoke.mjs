@@ -79,7 +79,7 @@ try {
   // BuildInfo(#72) must reach the running app and match what scripts/electron/build.mjs embedded in dist/electron/build-info.json.
   const expectedBuildInfo = JSON.parse(await fs.readFile(path.join(repoRoot, "dist/electron/build-info.json"), "utf8"));
   assert.deepEqual(checks.platform.value.buildInfo, expectedBuildInfo, "dev app buildInfo must match dist/electron/build-info.json");
-  assert.deepEqual(checks.keys, ["ai", "bouyomi", "capture", "config", "events", "feeds", "localLlm", "obs", "platform", "secrets", "shortcuts", "speech", "system", "topics", "twitch", "windows"]);
+  assert.deepEqual(checks.keys, ["ai", "bouyomi", "capture", "config", "events", "feeds", "localLlm", "obs", "platform", "secrets", "shortcuts", "speech", "streamEvents", "system", "topics", "twitch", "windows"]);
   assert.match(checks.csp ?? "", /object-src 'none'/);
   assert.match(checks.csp ?? "", /connect-src 'self'/);
   assert.doesNotMatch(checks.csp ?? "", /connect-src[^;]*(?:https?:|wss?:)/);

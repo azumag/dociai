@@ -41,6 +41,7 @@ export const CHANNELS = Object.freeze({
   LOCAL_LLM_DOWNLOAD_RETRY: "local-llm:download:retry",
   LOCAL_LLM_DOWNLOAD_LIST: "local-llm:download:list",
   LOCAL_LLM_DOWNLOAD_STATUS: "local-llm:download:status",
+  STREAM_EVENTS_LIST: "stream-events:list",
   APP_EVENT: "app:event",
   OBS_MESSAGE: "obs:message",
 });
