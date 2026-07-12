@@ -35,7 +35,14 @@ export type EventSubCloseReason =
   | "keepalive_timeout"
   | "protocol_error"
   | "socket_error"
-  | "socket_closed";
+  | "socket_closed"
+  /** Issue #88: reconnect-coordinator.ts gave up on a Twitch-specified `session_reconnect` attempt
+   * (the new URL failed scheme/host validation, the candidate session never welcomed within the
+   * grace deadline, or the candidate socket died before welcome) and is deliberately closing the
+   * old (retiring) session itself to fall back to a normal backoff-driven reconnect. Category
+   * "normal" — this IS worth retrying, via the normal reconnect path the coordinator schedules
+   * right after this close, same as any other unexpected disconnect. */
+  | "reconnect_abandoned";
 
 /** "切断理由を通常切断・auth・explicit stopへ分類できる" (issue #86 acceptance criteria) — the
  * three buckets #88's reconnect policy is expected to branch on: `normal` (a recoverable
@@ -57,6 +64,7 @@ export const CLOSE_REASON_CATEGORY: Readonly<Record<EventSubCloseReason, EventSu
   protocol_error: "normal",
   socket_error: "normal",
   socket_closed: "normal",
+  reconnect_abandoned: "normal",
 });
 
 export function closeCategoryFor(reason: EventSubCloseReason): EventSubCloseCategory {

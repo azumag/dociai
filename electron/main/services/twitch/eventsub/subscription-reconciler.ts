@@ -226,6 +226,23 @@ export class SubscriptionReconciler {
     this.#emitSnapshot();
   }
 
+  /** Issue #88: a Twitch-SPECIFIED (graceful) `session_reconnect` migrates every existing
+   * subscription to the new session automatically, server-side — "new welcome後に既存subscription
+   * を再作成せず引継ぐ". Unlike onWelcome() this deliberately does NOT call reconcile() (no Helix
+   * list/create calls at all — see reconnect-coordinator.ts's own test asserting the Helix
+   * create-endpoint request count is unchanged across a specified reconnect): it only retargets
+   * which session id a FUTURE create call (for something desired later, e.g. after a config change)
+   * should attach to. Bumps the generation like every other trigger (see onSessionEnded's doc
+   * comment) so an in-flight reconcile() pass from BEFORE the specified reconnect can't clobber this
+   * with a stale session id. */
+  retarget(sessionId: string, atMs?: number): void {
+    if (this.#disposed) return;
+    this.#generation += 1;
+    this.#sessionId = sessionId;
+    this.#welcomeAtMs = atMs ?? this.#now();
+    this.#emitSnapshot();
+  }
+
   setEnabledFeatures(features: readonly string[]): Promise<void> {
     if (this.#disposed) return Promise.resolve();
     this.#enabledFeatures = [...features];
