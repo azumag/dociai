@@ -1,6 +1,12 @@
 import { CURRENT_SCHEMA_VERSION, failureResult, issue, successResult } from "./config-contract.js";
 import { CONFIG_REGISTRY, registryIds } from "./config-registry.js";
 import { CURRENT_CONFIG_SCHEMA } from "./config-schema.js";
+// Issue #91's "config migration/validationを#64へ登録": src/triggers/* (StreamEvent condition
+// triggers) owns its own field/operator/type registry and is validated by its own module, not
+// re-implemented here — this file only registers the hook (below) into this shared
+// validateConfigStructure() pipeline, the same way every other section's own validation rule
+// lives inline just below.
+import { validateEventTriggersConfig } from "../triggers/trigger-validation.js";
 
 export function validateConfigStructure(config) {
   const issues = [];
@@ -11,6 +17,8 @@ export function validateConfigStructure(config) {
   for (const [id, connector] of Object.entries(config.connectors ?? {})) if (!registryIds("providers").includes(connector?.provider)) issues.push(issue(["connectors", id, "provider"], "enum", "Unsupported provider", { meta: { options: registryIds("providers") } }));
   for (const [id, trigger] of Object.entries(config.triggers ?? {})) if (!registryIds("triggerTypes").includes(trigger?.type)) issues.push(issue(["triggers", id, "type"], "enum", "Unsupported trigger type"));
   for (const [index, persona] of (config.personas ?? []).entries()) if (persona?.voice?.engine && !registryIds("voiceEngines").includes(persona.voice.engine)) issues.push(issue(["personas", index, "voice", "engine"], "enum", "Unsupported voice engine"));
+  const eventTriggersResult = validateEventTriggersConfig(config.eventTriggers);
+  for (const entry of eventTriggersResult.issues) issues.push(issue(entry.path, entry.code, entry.message, { severity: entry.severity, meta: entry.meta }));
   const errors = issues.filter((entry) => entry.severity === "error");
   return errors.length ? failureResult("structural-validation", issues, config) : successResult(config, issues);
 }
