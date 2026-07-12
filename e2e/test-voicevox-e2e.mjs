@@ -60,7 +60,7 @@ try {
   const vvOk = await page.evaluate(() => {
     return window.__dociaiState?.config?.voicevox?.enabled === true;
   });
-  // app.js が state を globalThis に出すかどうかで分岐。出していない場合は event-log から確認。
+  // boot.js が state を globalThis に出すかどうかで分岐。出していない場合は event-log から確認。
   const vvLog = await page.$eval("#event-log", (el) => el.textContent);
   check("VOICEVOX 接続ログが出る", vvLog.includes("VOICEVOX 接続OK"), vvLog.slice(0, 200));
 

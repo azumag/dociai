@@ -2,7 +2,7 @@
 // connectors / personas / triggers / context(screenCapture) / voicevox / news / topics / commentSources を
 // UIから追加・編集・削除できる。編集した設定はメモリ上の draft に保持し、「保存して適用」で
 // onApply(config) を呼ぶ。onApply は scripts/serve.py の PUT /config.local.json 経由でディスクへ
-// 保存してから現在のアプリ状態に反映する (src/app.js の applyEditedConfig)。保存に対応しない
+// 保存してから現在のアプリ状態に反映する (src/app/boot.js の applyEditedConfig)。保存に対応しない
 // サーバー (python -m http.server 等) では失敗し、モーダルは閉じずエラーを表示する。
 // APIキーは localStorage/sessionStorage には書かない (issue #13)。「JSONエクスポート」は
 // ファイルダウンロードによる手動バックアップ/保存失敗時のフォールバック用。
