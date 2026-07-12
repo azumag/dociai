@@ -19,6 +19,11 @@ export function createAppActions({
   // them through a getter that resolves once boot.js has finished wiring the UI shell.
   getIntegrationPanel = () => null,
   getDiagnosticExportDialog = () => null,
+  // Same "constructed after AppActions, reached through a getter" shape as IntegrationPanel above
+  // — TwitchOverviewApp (issue #94) is constructed after AppActions since its own onOpenSettings
+  // callback wants settingsUI, which this factory already has directly (unlike IntegrationPanel it
+  // needs no actions.* callback of its own, but boot.js still wires it after bindUI() for symmetry).
+  getTwitchOverviewApp = () => null,
   log = () => {},
   scrub = (text) => text,
   loadServer,
@@ -84,6 +89,7 @@ export function createAppActions({
     openIntegrations: () => getIntegrationPanel()?.open(),
     openIntegrationsPanel: () => getIntegrationPanel()?.open(),
     integrationAction: (action, service) => handleIntegrationAction(action, service, { appRuntime, settingsUI, getIntegrationPanel, getDiagnosticExportDialog, log }),
+    openTwitchOverview: () => getTwitchOverviewApp()?.open(),
     refreshTimedPanels: () => render.timed?.(),
   };
 }

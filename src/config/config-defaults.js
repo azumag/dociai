@@ -10,6 +10,11 @@ export function applyConfigDefaults(config) {
   copy.news = { enabled: false, mode: "topic", maxItems: 3, dedupe: true, sources: [], ...(copy.news ?? {}), retry: { maxAttempts: 3, initialDelaySeconds: 30, maxDelaySeconds: 900, ...(copy.news?.retry ?? {}) } };
   copy.topics = { enabled: false, maxItems: 3, dedupe: true, sources: [], intro: "上のお題について、あなたのキャラクターとして自由にコメントしてください。", style: "雑談のお題として、自然な自分の言葉で自由にコメントする", ...(copy.topics ?? {}), retry: { maxAttempts: 3, initialDelaySeconds: 30, maxDelaySeconds: 900, ...(copy.topics?.retry ?? {}) } };
   copy.commentSources = { ...(copy.commentSources ?? {}), twitch: { enabled: false, ...(copy.commentSources?.twitch ?? {}) } };
+  // Issue #94: broadcaster identity + enabled EventSub features for the Twitch auth/EventSub
+  // overview screen. Deliberately does NOT include a client id field — that is a build/deploy-time
+  // constant (`TWITCH_CLIENT_ID`, Main-process only), never user-editable config; see
+  // electron/main/services/twitch/twitch-composition.ts's own doc comment for why.
+  copy.twitch = { broadcasterUserId: null, enabledFeatures: ["bits", "subscriptions", "redemptions"], ...(copy.twitch ?? {}) };
   copy.triggers = Object.fromEntries(Object.entries(copy.triggers ?? {}).map(([id, trigger]) => [id, { ...(trigger ?? {}), ...(trigger?.type === "hotkey" ? { global: Boolean(trigger.global) } : {}) }]));
   // Issue #91: `eventTriggers` (StreamEvent condition-based triggers) is a separate section from
   // the existing `triggers` above (keyword/hotkey/interval/random/manual) — additive, not a

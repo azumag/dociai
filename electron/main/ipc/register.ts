@@ -23,9 +23,10 @@ import type { BuildInfo } from "../../shared/build-info";
 import type { ModelRepository } from "../services/local-llm/models/model-repository";
 import type { DownloadStartInput, ModelLicense } from "../../shared/local-llm/model-contract";
 import type { StreamEventBus } from "../services/stream-events/stream-event-bus";
+import type { TwitchComposition } from "../services/twitch/twitch-composition";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; streamEventBus: StreamEventBus; buildInfo: BuildInfo; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; streamEventBus: StreamEventBus; buildInfo: BuildInfo; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -44,6 +45,14 @@ function requestMetadata(payload: Record<string, unknown>): Pick<FeedFetchInput,
     ...(typeof payload.generation === "number" && Number.isSafeInteger(payload.generation) ? { generation: payload.generation } : {}),
     ...(typeof payload.ownerId === "string" ? { ownerId: payload.ownerId } : {}),
   };
+}
+
+function parseOptionalFeatures(input: unknown): string[] | undefined {
+  if (input === undefined || input === null) return undefined;
+  const payload = expectRecord(input, "Twitch auth request");
+  if (payload.features === undefined) return undefined;
+  if (!Array.isArray(payload.features) || payload.features.length > 16 || !payload.features.every((entry) => typeof entry === "string")) throw new PublicIpcError("INVALID_INPUT", "featuresは文字列配列で指定してください");
+  return payload.features as string[];
 }
 
 function sourceIndex(payload: Record<string, unknown>): number {
@@ -172,6 +181,18 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
   register(CHANNELS.TWITCH_START, (event, input) => options.twitchService.start(expectRecord(input, "Twitch config") as never), options);
   register(CHANNELS.TWITCH_STOP, (event, input) => { expectNoInput(input); return options.twitchService.stop(); }, options);
   register(CHANNELS.TWITCH_RECONNECT, (event, input) => { expectNoInput(input); return { reconnected: options.twitchService.reconnect() }; }, options);
+  register(CHANNELS.TWITCH_AUTH_STATUS, (event, input) => { expectNoInput(input); return options.twitchComposition.authOverview; }, options);
+  register(CHANNELS.TWITCH_AUTH_START, (event, input) => options.twitchComposition.startInitialAuth(parseOptionalFeatures(input)), options);
+  register(CHANNELS.TWITCH_AUTH_CANCEL, (event, input) => { expectNoInput(input); return options.twitchComposition.cancelAuth(); }, options);
+  register(CHANNELS.TWITCH_AUTH_UPGRADE_SCOPES, (event, input) => { expectNoInput(input); return options.twitchComposition.startScopeUpgrade(); }, options);
+  register(CHANNELS.TWITCH_AUTH_OPEN_VERIFICATION_URI, (event, input) => { expectNoInput(input); return options.twitchComposition.openVerificationUri(); }, options);
+  register(CHANNELS.TWITCH_AUTH_SWITCH_ACCOUNT, (event, input) => options.twitchComposition.switchAccount(parseOptionalFeatures(input)), options);
+  register(CHANNELS.TWITCH_AUTH_LOGOUT, (event, input) => { expectNoInput(input); return options.twitchComposition.logout(); }, options);
+  register(CHANNELS.TWITCH_EVENTSUB_STATUS, (event, input) => { expectNoInput(input); return options.twitchComposition.connectionOverview; }, options);
+  register(CHANNELS.TWITCH_EVENTSUB_CONNECT, (event, input) => { expectNoInput(input); return options.twitchComposition.connect(); }, options);
+  register(CHANNELS.TWITCH_EVENTSUB_RECONNECT, (event, input) => { expectNoInput(input); return options.twitchComposition.reconnect(); }, options);
+  register(CHANNELS.TWITCH_EVENTSUB_STOP, (event, input) => { expectNoInput(input); return options.twitchComposition.stop(); }, options);
+  register(CHANNELS.TWITCH_SUBSCRIPTIONS_STATUS, (event, input) => { expectNoInput(input); return options.twitchComposition.subscriptionsOverview; }, options);
   register(CHANNELS.WINDOW_OBS_OPEN, (event, input) => { expectNoInput(input); options.controller.openObsWindow(); return { opened: true }; }, options);
   register(CHANNELS.WINDOW_OBS_CLOSE, (event, input) => { expectNoInput(input); options.controller.closeObsWindow(); return { closed: true }; }, options);
   register(CHANNELS.WINDOW_STATE_GET, (event, input) => {

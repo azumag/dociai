@@ -53,6 +53,24 @@ const api: DociaiApi = {
     start: (config) => invoke(CHANNELS.TWITCH_START, config),
     stop: () => invoke(CHANNELS.TWITCH_STOP),
     reconnect: () => invoke(CHANNELS.TWITCH_RECONNECT),
+    auth: {
+      status: () => invoke(CHANNELS.TWITCH_AUTH_STATUS),
+      start: (input) => invoke(CHANNELS.TWITCH_AUTH_START, input),
+      cancel: () => invoke(CHANNELS.TWITCH_AUTH_CANCEL),
+      upgradeScopes: () => invoke(CHANNELS.TWITCH_AUTH_UPGRADE_SCOPES),
+      openVerificationUri: () => invoke(CHANNELS.TWITCH_AUTH_OPEN_VERIFICATION_URI),
+      switchAccount: (input) => invoke(CHANNELS.TWITCH_AUTH_SWITCH_ACCOUNT, input),
+      logout: () => invoke(CHANNELS.TWITCH_AUTH_LOGOUT),
+    },
+    eventSub: {
+      status: () => invoke(CHANNELS.TWITCH_EVENTSUB_STATUS),
+      connect: () => invoke(CHANNELS.TWITCH_EVENTSUB_CONNECT),
+      reconnect: () => invoke(CHANNELS.TWITCH_EVENTSUB_RECONNECT),
+      stop: () => invoke(CHANNELS.TWITCH_EVENTSUB_STOP),
+    },
+    subscriptions: {
+      status: () => invoke(CHANNELS.TWITCH_SUBSCRIPTIONS_STATUS),
+    },
   },
   bouyomi: {
     talk: (input) => invoke(CHANNELS.SPEECH_BOUYOMI_TALK, input),

@@ -14,6 +14,9 @@ import { installPermissionPolicy } from "./security/permissions";
 import { registerIpcHandlers } from "./ipc/register";
 import { SpeechBackendService } from "./services/speech/speech-backend-service";
 import { TwitchChatService } from "./services/twitch/twitch-chat-service";
+import { TwitchComposition } from "./services/twitch/twitch-composition";
+import { openAllowedExternalUrl } from "./security/navigation";
+import { TWITCH_AUTH_EVENT_TYPE, TWITCH_CONNECTION_EVENT_TYPE, TWITCH_RECONNECT_DIAGNOSTIC_EVENT_TYPE, TWITCH_SUBSCRIPTIONS_EVENT_TYPE } from "../shared/twitch/overview-contract";
 import { ShortcutService } from "./services/shortcut-service";
 import { CaptureService } from "./services/capture/capture-service";
 import { installDisplayMediaHandler } from "./services/capture/display-media-handler";
@@ -185,13 +188,50 @@ if (!hasLock) {
     shortcutService.sync((currentConfig.config.triggers ?? {}) as Record<string, unknown>);
     const screenCapture = object(object(currentConfig.config.context).screenCapture);
     captureService.setPreferredSourceName(screenCapture.sourceName);
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, shortcutService, captureService, modelRepository, streamEventBus, buildInfo, devServerUrl });
+    // Issue #94: constructs the real TwitchAuthCoordinator/ReconnectCoordinator/SubscriptionReconciler
+    // graph (electron/main/services/twitch/twitch-composition.ts) — the first place #83-88's
+    // Main-process services are wired into anything real. `TWITCH_CLIENT_ID` is a build/deploy-time
+    // env var (a Device Code Grant public client id, not a secret — see twitch-composition.ts's own
+    // doc comment); `config.twitch.{broadcasterUserId,enabledFeatures}` persist across restarts.
+    const twitchOverviewConfig = object(currentConfig.config.twitch);
+    const twitchBroadcasterUserId = typeof twitchOverviewConfig.broadcasterUserId === "string" && twitchOverviewConfig.broadcasterUserId ? twitchOverviewConfig.broadcasterUserId : null;
+    const twitchEnabledFeatures = Array.isArray(twitchOverviewConfig.enabledFeatures)
+      ? twitchOverviewConfig.enabledFeatures.filter((entry): entry is string => typeof entry === "string")
+      : ["bits", "subscriptions", "redemptions"];
+    const persistTwitchBroadcasterUserId = (broadcasterUserId: string): void => {
+      void (async () => {
+        try {
+          const loaded = await configRepository.getPublic();
+          const nextTwitch = { ...object(loaded.config.twitch), broadcasterUserId };
+          await configRepository.save({ ...loaded.config, twitch: nextTwitch }, loaded.revision);
+        } catch (error) {
+          logError("twitch-broadcaster-persist", error);
+        }
+      })();
+    };
+    const twitchComposition = new TwitchComposition({
+      clientId: process.env.TWITCH_CLIENT_ID ?? "",
+      secretStore,
+      broadcasterUserId: twitchBroadcasterUserId,
+      enabledFeatures: twitchEnabledFeatures,
+      socketFactory: TwitchWebSocket,
+      openVerificationUri: (url) => openAllowedExternalUrl(url).then(() => ({ opened: true })),
+      onAuthEvent: (overview) => controller?.emitToConsole(TWITCH_AUTH_EVENT_TYPE, overview),
+      onConnectionEvent: (overview) => controller?.emitToConsole(TWITCH_CONNECTION_EVENT_TYPE, overview),
+      onSubscriptionsEvent: (overview) => controller?.emitToConsole(TWITCH_SUBSCRIPTIONS_EVENT_TYPE, overview),
+      onReconnectDiagnostic: (push) => controller?.emitToConsole(TWITCH_RECONNECT_DIAGNOSTIC_EVENT_TYPE, push),
+      onBroadcasterConfirmed: persistTwitchBroadcasterUserId,
+      log: (message, fields) => console.error(`[dociai:twitch-composition] ${message}`, fields ?? {}),
+    });
+    await twitchComposition.initialize();
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, streamEventBus, buildInfo, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
     app.once("before-quit", () => feedService.dispose());
     app.once("before-quit", () => topicService.dispose());
     app.once("before-quit", () => speechService.dispose());
     app.once("before-quit", () => twitchService.dispose());
+    app.once("before-quit", () => twitchComposition.dispose());
     app.once("before-quit", () => shortcutService.dispose());
     app.once("before-quit", () => { uninstallDisplayMediaHandler(); captureService.dispose(); });
     app.once("before-quit", () => modelRepository.dispose());
