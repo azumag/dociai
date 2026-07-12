@@ -1,0 +1,88 @@
+import { isCancellation } from "../runtime/request-registry.js";
+
+// AppActions is the facade ui/bindings.js drives. It never keeps its own reference to a
+// service instance — every call resolves the live component through appRuntime.getComponent()
+// so it automatically follows whatever RuntimeBundle is currently committed, and never
+// operates on a service a config reload has already disposed.
+export function createAppActions({
+  appRuntime,
+  runtimeController,
+  store,
+  manualSource,
+  settingsUI,
+  // Functions, not values: IntegrationPanel/DiagnosticExportDialog are constructed after
+  // AppActions (their constructors need actions.integrationAction), so actions can only see
+  // them through a getter that resolves once boot.js has finished wiring the UI shell.
+  getIntegrationPanel = () => null,
+  getDiagnosticExportDialog = () => null,
+  log = () => {},
+  scrub = (text) => text,
+  loadServer,
+  loadFile,
+  applyLoadedConfig,
+  reportConfigError = () => {},
+  render = {},
+}) {
+  const component = (name) => appRuntime.getComponent(name);
+  const report = (promise) => Promise.resolve(promise).catch(reportConfigError);
+  const setManualSpeechHold = (value) => store.dispatch({ type: "set", key: "manualSpeechHold", value });
+
+  return {
+    loadServer: () => report(loadServer().then(applyLoadedConfig)),
+    loadFile: (file) => report(loadFile(file).then(applyLoadedConfig)),
+    openSettings: () => settingsUI.open(),
+    submitComment: (comment) => manualSource.submit(comment),
+    holdSpeech: () => { setManualSpeechHold(true); component("speechQueue")?.hold("manual"); },
+    releaseSpeech: () => { setManualSpeechHold(false); component("speechQueue")?.release("manual"); },
+    skipSpeech: () => component("speechQueue")?.skip(),
+    clearSpeech: () => component("speechQueue")?.clear(),
+    startMic: async () => {
+      try { await component("micMonitor")?.start(); }
+      catch (error) { log(`マイク監視を開始できません: ${scrub(error.message)}`, "error"); }
+      render.mic?.();
+    },
+    stopMic: () => { component("micMonitor")?.stop(); render.mic?.(); },
+    startScreen: async () => {
+      try { await component("screenContext")?.start(); }
+      catch (error) { log(`画面共有を開始できません: ${scrub(error.message)}`, "error"); }
+      render.screen?.();
+    },
+    stopScreen: () => component("screenContext")?.stop(),
+    readScreen: async () => {
+      const screenContext = component("screenContext");
+      const generation = appRuntime.currentGeneration();
+      if (!screenContext) return;
+      const request = runtimeController.createRequest({ generation, ownerId: `screen:${generation}`, kind: "screen-analysis" });
+      try { await screenContext.updateContext({ ...request.context, isCurrent: () => appRuntime.isCurrent(generation) }); }
+      catch (error) { if (!isCancellation(error)) log(`画面の読み取りに失敗: ${scrub(error.message)}`, "error"); }
+      finally { request.complete(); }
+      if (appRuntime.isCurrent(generation)) render.screen?.();
+    },
+    readNews: () => { render.news?.(); component("automationCoordinator")?.run("news", component("newsReader")); },
+    readTopics: () => { render.topics?.(); component("automationCoordinator")?.run("topics", component("topicReader")); },
+    reconnectTwitch: () => {
+      const source = component("sourceCoordinator")?.sources.get("twitch");
+      if (source?.reconnectNow?.()) log("Twitchチャットを手動再接続します");
+      render.twitchStatus?.();
+    },
+    openIntegrations: () => getIntegrationPanel()?.open(),
+    openIntegrationsPanel: () => getIntegrationPanel()?.open(),
+    integrationAction: (action, service) => handleIntegrationAction(action, service, { appRuntime, settingsUI, getIntegrationPanel, getDiagnosticExportDialog, log }),
+    refreshTimedPanels: () => render.timed?.(),
+  };
+}
+
+export function handleIntegrationAction(action, service, { appRuntime, settingsUI, getIntegrationPanel = () => null, getDiagnosticExportDialog = () => null, log = () => {} }) {
+  if (["open_settings", "reauth", "open_manager"].includes(action)) { settingsUI.open(); return; }
+  if (["retry", "start_service"].includes(action) && service?.serviceId === "twitch") {
+    const source = appRuntime.getComponent("sourceCoordinator")?.sources.get("twitch");
+    if (source?.reconnectNow) void source.reconnectNow();
+    log("Twitch連携の確認を開始しました");
+    return;
+  }
+  if (action === "open_diagnostics") {
+    getDiagnosticExportDialog()?.open(getIntegrationPanel()?.exportPayload({ build: "web" }));
+    return;
+  }
+  log(`${service?.name ?? service?.serviceId ?? "連携"} の操作: ${action}`);
+}

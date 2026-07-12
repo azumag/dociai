@@ -1,6 +1,6 @@
 // マイク監視 (issue #32)
 // getUserMedia + Web Audio API でマイク入力のRMS音量を継続監視し、発話区間を検出する。
-// 発話検出時/無音復帰時の SpeechQueue 連動 (stop/resume) は app.js 側の配線が担う。
+// 発話検出時/無音復帰時の SpeechQueue 連動 (stop/resume) は src/app/runtime-factory.js 側の配線が担う。
 // 構造は ScreenContext (screen-capture.js, issue #9) に倣う: 手動 start()/stop()、
 // onChange リスナー、status() でUIに現況を渡す。
 
