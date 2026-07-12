@@ -33,6 +33,11 @@ export const CHANNELS = Object.freeze({
   LOCAL_LLM_IMPORT_BEGIN: "local-llm:import:begin",
   LOCAL_LLM_IMPORT_COMMIT: "local-llm:import:commit",
   LOCAL_LLM_IMPORT_CANCEL: "local-llm:import:cancel",
+  LOCAL_LLM_DOWNLOAD_START: "local-llm:download:start",
+  LOCAL_LLM_DOWNLOAD_CANCEL: "local-llm:download:cancel",
+  LOCAL_LLM_DOWNLOAD_RETRY: "local-llm:download:retry",
+  LOCAL_LLM_DOWNLOAD_LIST: "local-llm:download:list",
+  LOCAL_LLM_DOWNLOAD_STATUS: "local-llm:download:status",
   APP_EVENT: "app:event",
   OBS_MESSAGE: "obs:message",
 });

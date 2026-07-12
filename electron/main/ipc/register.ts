@@ -20,6 +20,7 @@ import type { TwitchChatService } from "../services/twitch/twitch-chat-service";
 import type { ShortcutService } from "../services/shortcut-service";
 import type { BuildInfo } from "../../shared/build-info";
 import type { ModelRepository } from "../services/local-llm/models/model-repository";
+import type { DownloadStartInput, ModelLicense } from "../../shared/local-llm/model-contract";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
 type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; modelRepository: ModelRepository; buildInfo: BuildInfo; devServerUrl?: string };
@@ -46,6 +47,38 @@ function requestMetadata(payload: Record<string, unknown>): Pick<FeedFetchInput,
 function sourceIndex(payload: Record<string, unknown>): number {
   if (typeof payload.sourceIndex !== "number" || !Number.isSafeInteger(payload.sourceIndex) || payload.sourceIndex < 0 || payload.sourceIndex > 1_000) throw new PublicIpcError("INVALID_INPUT", "sourceIndexが不正です");
   return payload.sourceIndex;
+}
+
+function parseModelLicense(value: unknown): ModelLicense {
+  const record = expectRecord(value, "license");
+  if (typeof record.id !== "string" || !record.id) throw new PublicIpcError("INVALID_INPUT", "license.idが必要です");
+  if (typeof record.name !== "string" || !record.name) throw new PublicIpcError("INVALID_INPUT", "license.nameが必要です");
+  if (record.url !== undefined && typeof record.url !== "string") throw new PublicIpcError("INVALID_INPUT", "license.urlが不正です");
+  return { id: record.id, name: record.name, ...(typeof record.url === "string" ? { url: record.url } : {}) };
+}
+
+function parseDownloadStartInput(value: unknown): DownloadStartInput {
+  const payload = expectRecord(value, "download start");
+  const licenseAccepted = payload.licenseAccepted === true;
+  if (payload.kind === "catalog") {
+    return { kind: "catalog", catalogModelId: expectString(payload.catalogModelId, "catalogModelId", 256), licenseAccepted };
+  }
+  if (payload.kind === "huggingface") {
+    if (typeof payload.expectedSizeBytes !== "number" || !Number.isFinite(payload.expectedSizeBytes) || payload.expectedSizeBytes <= 0) throw new PublicIpcError("INVALID_INPUT", "expectedSizeBytesが不正です");
+    if (payload.expectedSha256 !== undefined && typeof payload.expectedSha256 !== "string") throw new PublicIpcError("INVALID_INPUT", "expectedSha256が不正です");
+    return {
+      kind: "huggingface",
+      repo: expectString(payload.repo, "repo", 256),
+      revision: expectString(payload.revision, "revision", 256),
+      filename: expectString(payload.filename, "filename", 256),
+      displayName: expectString(payload.displayName, "displayName", 256),
+      expectedSizeBytes: payload.expectedSizeBytes,
+      ...(typeof payload.expectedSha256 === "string" ? { expectedSha256: payload.expectedSha256 } : {}),
+      license: parseModelLicense(payload.license),
+      licenseAccepted,
+    };
+  }
+  throw new PublicIpcError("INVALID_INPUT", "download start kindが不正です");
 }
 
 function register<T>(channel: string, handler: Handler<T>, options: RegisterOptions, roles = ["console"] as const): void {
@@ -156,6 +189,16 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
   register(CHANNELS.LOCAL_LLM_IMPORT_BEGIN, (event, input) => { expectNoInput(input); return options.modelRepository.beginImport(); }, options);
   register(CHANNELS.LOCAL_LLM_IMPORT_COMMIT, (event, input) => options.modelRepository.commitImport(expectString(input, "import token", 256)), options);
   register(CHANNELS.LOCAL_LLM_IMPORT_CANCEL, (event, input) => ({ cancelled: options.modelRepository.cancelImport(expectString(input, "import token", 256)) }), options);
+  register(CHANNELS.LOCAL_LLM_DOWNLOAD_START, (event, input) => options.modelRepository.startDownload(parseDownloadStartInput(input)), options);
+  register(CHANNELS.LOCAL_LLM_DOWNLOAD_CANCEL, async (event, input) => {
+    const payload = expectRecord(input, "download cancel");
+    const jobId = expectString(payload.jobId, "jobId", 256);
+    if (payload.deletePartial !== undefined && typeof payload.deletePartial !== "boolean") throw new PublicIpcError("INVALID_INPUT", "deletePartialが不正です");
+    return { cancelled: await options.modelRepository.cancelDownload(jobId, payload.deletePartial as boolean | undefined) };
+  }, options);
+  register(CHANNELS.LOCAL_LLM_DOWNLOAD_RETRY, (event, input) => options.modelRepository.retryDownload(expectString(input, "jobId", 256)), options);
+  register(CHANNELS.LOCAL_LLM_DOWNLOAD_LIST, async (event, input) => { expectNoInput(input); return { jobs: await options.modelRepository.listDownloads() }; }, options);
+  register(CHANNELS.LOCAL_LLM_DOWNLOAD_STATUS, async (event, input) => ({ job: await options.modelRepository.getDownload(expectString(input, "jobId", 256)) }), options);
   ipcMain.on(CHANNELS.OBS_MESSAGE, (event, message) => {
     try {
       assertTrustedSender(event, options.devServerUrl, ["console", "obs"]);

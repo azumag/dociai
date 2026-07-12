@@ -3,7 +3,7 @@ import type { PublicError } from "./errors";
 import type { AiChatInput, AiChatResponse } from "./services/ai-contract";
 import type { FeedFetchInput, FeedFetchResponse } from "./services/feed-contract";
 import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./services/topic-contract";
-import type { CatalogListResult, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
+import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PublicError };
 export type WindowRole = "console" | "obs";
@@ -71,6 +71,13 @@ export type DociaiApi = {
       begin(): Promise<Result<ImportBeginResult>>;
       commit(token: string): Promise<Result<ImportCommitResult>>;
       cancel(token: string): Promise<Result<{ cancelled: boolean }>>;
+    };
+    download: {
+      start(input: DownloadStartInput): Promise<Result<DownloadJobRecord>>;
+      cancel(input: { jobId: string; deletePartial?: boolean }): Promise<Result<{ cancelled: boolean }>>;
+      retry(jobId: string): Promise<Result<DownloadJobRecord>>;
+      list(): Promise<Result<{ jobs: DownloadJobRecord[] }>>;
+      status(jobId: string): Promise<Result<{ job: DownloadJobRecord | null }>>;
     };
   };
   events: {

@@ -79,6 +79,13 @@ const api: DociaiApi = {
       commit: (token) => invoke(CHANNELS.LOCAL_LLM_IMPORT_COMMIT, token),
       cancel: (token) => invoke(CHANNELS.LOCAL_LLM_IMPORT_CANCEL, token),
     },
+    download: {
+      start: (input) => invoke(CHANNELS.LOCAL_LLM_DOWNLOAD_START, input),
+      cancel: (input) => invoke(CHANNELS.LOCAL_LLM_DOWNLOAD_CANCEL, input),
+      retry: (jobId) => invoke(CHANNELS.LOCAL_LLM_DOWNLOAD_RETRY, jobId),
+      list: () => invoke(CHANNELS.LOCAL_LLM_DOWNLOAD_LIST),
+      status: (jobId) => invoke(CHANNELS.LOCAL_LLM_DOWNLOAD_STATUS, jobId),
+    },
   },
   events: {
     subscribe(type, listener) {

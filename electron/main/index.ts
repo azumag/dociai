@@ -157,7 +157,17 @@ if (!hasLock) {
       const result = activeWindow ? await dialog.showOpenDialog(activeWindow, dialogOptions) : await dialog.showOpenDialog(dialogOptions);
       return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
     };
-    const modelRepository = new ModelRepository({ modelsDir: paths.modelsDir, catalogFile: path.join(appPath, "resources/catalog/local-models.json"), chooseFile: chooseGgufFile });
+    const modelRepository = new ModelRepository({
+      modelsDir: paths.modelsDir,
+      catalogFile: path.join(appPath, "resources/catalog/local-models.json"),
+      chooseFile: chooseGgufFile,
+      secretStore,
+      emitDownloadProgress: (event) => controller?.emitToConsole("local-llm:download:progress", event),
+    });
+    // Reclassifies any download job an unclean shutdown left mid-flight into resumable/cleanup
+    // candidates (#76) before any IPC request can observe a stale "downloading" job with no
+    // active controller behind it.
+    await modelRepository.initializeDownloads();
     const currentConfig = await configRepository.getPublic();
     shortcutService.sync((currentConfig.config.triggers ?? {}) as Record<string, unknown>);
     const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, shortcutService, modelRepository, buildInfo, devServerUrl });
