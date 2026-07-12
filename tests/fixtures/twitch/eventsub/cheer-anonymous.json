@@ -1,0 +1,37 @@
+{
+  "metadata": {
+    "message_id": "9f6e2d3a-5c1b-4a8e-9d2f-1a2b3c4d5e6f",
+    "message_type": "notification",
+    "message_timestamp": "2019-11-16T10:12:44.634234626Z",
+    "subscription_type": "channel.cheer",
+    "subscription_version": "1"
+  },
+  "payload": {
+    "subscription": {
+      "id": "a2c3b498-272b-5a0a-b276-1032e8b5f2d5",
+      "type": "channel.cheer",
+      "version": "1",
+      "status": "enabled",
+      "cost": 0,
+      "condition": {
+        "broadcaster_user_id": "1337"
+      },
+      "transport": {
+        "method": "websocket",
+        "session_id": "AQoQILE98gtqShGmLD7AM6yJThAB"
+      },
+      "created_at": "2019-11-16T10:11:12.634234626Z"
+    },
+    "event": {
+      "is_anonymous": true,
+      "user_id": null,
+      "user_login": null,
+      "user_name": null,
+      "broadcaster_user_id": "1337",
+      "broadcaster_user_login": "cooler_user",
+      "broadcaster_user_name": "Cooler_User",
+      "message": "anonymous pogchamp",
+      "bits": 100
+    }
+  }
+}

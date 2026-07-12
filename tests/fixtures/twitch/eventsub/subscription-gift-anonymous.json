@@ -1,0 +1,38 @@
+{
+  "metadata": {
+    "message_id": "e4d5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a",
+    "message_type": "notification",
+    "message_timestamp": "2019-11-16T10:13:02.634234626Z",
+    "subscription_type": "channel.subscription.gift",
+    "subscription_version": "1"
+  },
+  "payload": {
+    "subscription": {
+      "id": "a2c3b498-272b-5a0a-b276-1032e8b5f2d5",
+      "type": "channel.subscription.gift",
+      "version": "1",
+      "status": "enabled",
+      "cost": 0,
+      "condition": {
+        "broadcaster_user_id": "1337"
+      },
+      "transport": {
+        "method": "websocket",
+        "session_id": "AQoQILE98gtqShGmLD7AM6yJThAB"
+      },
+      "created_at": "2019-11-16T10:11:12.634234626Z"
+    },
+    "event": {
+      "user_id": null,
+      "user_login": null,
+      "user_name": null,
+      "broadcaster_user_id": "1337",
+      "broadcaster_user_login": "cooler_user",
+      "broadcaster_user_name": "Cooler_User",
+      "total": 5,
+      "tier": "2000",
+      "cumulative_total": null,
+      "is_anonymous": true
+    }
+  }
+}
