@@ -119,6 +119,13 @@
           <button id="btn-screen-stop" type="button">共有停止</button>
           <button id="btn-screen-read" type="button">画面を読み取る</button>
         </div>
+        <div id="screen-source-controls" class="screen-source-controls" hidden>
+          <select id="screen-source-select" aria-label="画面キャプチャ対象">
+            <option value="">メイン画面</option>
+          </select>
+          <button id="btn-screen-source-refresh" type="button">対象を更新</button>
+        </div>
+        <div id="screen-source-help" class="muted" hidden></div>
         <div id="screen-status" class="muted"></div>
       </section>
       <section class="panel">

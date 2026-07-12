@@ -10,6 +10,10 @@ export function createAppActions({
   store,
   manualSource,
   settingsUI,
+  platform = null,
+  // Screen capture source select control (issue #117) needs the last list() result to resolve
+  // a chosen <option> back to {id, name} — that list lives in boot.js, alongside the DOM it renders.
+  getScreenSources = () => [],
   // Functions, not values: IntegrationPanel/DiagnosticExportDialog are constructed after
   // AppActions (their constructors need actions.integrationAction), so actions can only see
   // them through a getter that resolves once boot.js has finished wiring the UI shell.
@@ -48,6 +52,18 @@ export function createAppActions({
       render.screen?.();
     },
     stopScreen: () => component("screenContext")?.stop(),
+    refreshScreenSources: () => render.screenSources?.(),
+    selectScreenSource: async (id) => {
+      const source = getScreenSources().find((candidate) => candidate.id === id);
+      if (!source || !platform) return;
+      try {
+        const result = await platform.selectCaptureSource({ id: source.id, name: source.name });
+        if (result?.ok) log(`画面キャプチャ対象を選択: ${source.name}`);
+        else log(`画面キャプチャ対象を選択できません: ${scrub(result?.error?.message ?? "unknown")}`, "warn");
+      } catch (error) {
+        log(`画面キャプチャ対象を選択できません: ${scrub(error.message)}`, "warn");
+      }
+    },
     readScreen: async () => {
       const screenContext = component("screenContext");
       const generation = appRuntime.currentGeneration();

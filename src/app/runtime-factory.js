@@ -16,6 +16,7 @@ import { AutomationCoordinator } from "./automation-coordinator.js";
 import { SourceCoordinator } from "./source-coordinator.js";
 import { TwitchChatSource, stripEmotes } from "../comment-sources.js";
 import { ElectronTwitchSource } from "../platform/electron-services.js";
+import { listCaptureSources, selectCaptureSource } from "../platform/capture-adapter.js";
 import { ElectronIpcTransport } from "../obs/transports/electron-ipc-transport.js";
 
 const COMMENT_READER_ID = "__comment_reader__";
@@ -68,12 +69,20 @@ export function personaColorFor(config, personaId) {
 // so tests can swap adapters without a real Electron preload bridge or browser globals.
 export function selectPlatformAdapter(globalScope = globalThis) {
   const hasTwitchService = () => typeof globalScope.dociai?.twitch?.start === "function";
+  const hasCaptureService = () => typeof globalScope.dociai?.capture?.listSources === "function";
   const electron = Boolean(globalScope.dociai?.obs);
   return Object.freeze({
     kind: electron ? "electron" : "browser",
     createObsTransport: () => (electron ? new ElectronIpcTransport(globalScope.dociai.obs) : new BroadcastChannel("dociai-obs")),
     hasTwitchService,
     createTwitchSource: (config, opts) => (hasTwitchService() ? new ElectronTwitchSource(config, opts) : new TwitchChatSource(config, opts)),
+    // Screen capture source selection (issue #117): Electron-only, since Browser relies on
+    // getDisplayMedia's native picker. Backed by src/platform/capture-adapter.js, the same
+    // globalThis.dociai.capture boundary the screenContext component's getDisplayMedia() call
+    // is transparently intercepted by on the Main side (session.setDisplayMediaRequestHandler).
+    hasCaptureService,
+    listCaptureSources,
+    selectCaptureSource,
   });
 }
 

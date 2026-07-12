@@ -68,6 +68,11 @@ const api: DociaiApi = {
     showItemInFolder: (kind) => invoke(CHANNELS.SYSTEM_SHOW_ITEM, kind),
   },
   shortcuts: { status: () => invoke(CHANNELS.SHORTCUT_STATUS) },
+  capture: {
+    listSources: () => invoke(CHANNELS.CAPTURE_LIST_SOURCES),
+    selectSource: (input) => invoke(CHANNELS.CAPTURE_SELECT_SOURCE, input),
+    status: () => invoke(CHANNELS.CAPTURE_STATUS),
+  },
   localLlm: {
     catalog: { list: () => invoke(CHANNELS.LOCAL_LLM_CATALOG_LIST) },
     installed: {

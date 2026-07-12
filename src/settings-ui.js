@@ -892,6 +892,7 @@ export class SettingsUI {
     scBody.append(this.#pathSelect("screenCapture.connector", ["", ...connectorIds], "context.screenCapture.connector", { value: sc.connector ?? "" }));
     const scGrid = document.createElement("div");
     scGrid.className = "card-grid";
+    scGrid.append(this.#pathField("sourceName (画面/ウィンドウ名)", "context.screenCapture.sourceName", { value: sc.sourceName ?? "", attrs: { spellcheck: "false" } }));
     scGrid.append(this.#pathField("maxAgeSeconds", "context.screenCapture.maxAgeSeconds", { type: "number", value: sc.maxAgeSeconds ?? 120 }));
     scGrid.append(this.#pathField("maxTokens", "context.screenCapture.maxTokens", { type: "number", value: sc.maxTokens ?? 768 }));
     scGrid.append(this.#pathField("commentHistoryLimit", "context.commentHistoryLimit", { type: "number", value: ctx.commentHistoryLimit ?? 80 }));
