@@ -35,6 +35,7 @@ let appRuntime;
 const obsBridge = new ObsBridge({ transport: platform.createObsTransport(), getGeneration: () => appRuntime.currentGeneration() });
 let integrationPanel = null;
 let diagnosticExportDialog = null;
+let screenSources = [];
 
 const scrub = (text) => scrubSecrets(text, state.secrets);
 const hhmmss = (d = new Date()) => new Date(d).toTimeString().slice(0, 8);
@@ -142,6 +143,7 @@ function renderAll() {
   renderTwitchChatStatus();
   renderMicPanel();
   renderScreenPanel();
+  void renderScreenSources();
   renderNewsPanel();
   renderTopicPanel();
   renderComments();
@@ -372,6 +374,39 @@ function renderScreenPanel() {
   el.textContent = parts.join(" / ");
 }
 
+// Electron専用: desktopCapturerで列挙したsource一覧をセレクタへ反映する (issue #117)。
+// Browser版はgetDisplayMediaのOSピッカーに任せるため、コントロールごと非表示にする。
+async function renderScreenSources() {
+  const controls = $("#screen-source-controls");
+  const select = $("#screen-source-select");
+  const refresh = $("#btn-screen-source-refresh");
+  const help = $("#screen-source-help");
+  if (!controls || !select || !refresh) return;
+  const available = platform.hasCaptureService();
+  controls.hidden = !available;
+  refresh.disabled = !available;
+  if (!available) return;
+  const result = await platform.listCaptureSources();
+  if (!result?.ok) {
+    if (help) { help.hidden = false; help.textContent = "画面ソースを取得できません。macOS は「システム設定 > プライバシーとセキュリティ > 画面収録」で dociai を許可してから再試行してください。"; }
+    logEvent(`画面ソース一覧を取得できません: ${scrub(result?.error?.message ?? "unknown")}`, "warn");
+    return;
+  }
+  screenSources = result.value ?? [];
+  if (help) {
+    help.hidden = screenSources.length > 0;
+    help.textContent = "画面ソースがありません。macOS は「システム設定 > プライバシーとセキュリティ > 画面収録」で dociai を許可してから再試行してください。";
+  }
+  select.replaceChildren(new Option("メイン画面", ""));
+  for (const source of screenSources) {
+    const option = new Option(`${source.type === "window" ? "ウィンドウ" : "画面"}: ${source.name}`, source.id);
+    option.dataset.sourceName = source.name;
+    select.append(option);
+  }
+  const preferred = state.config?.context?.screenCapture?.sourceName ?? "";
+  select.value = screenSources.find((source) => source.name === preferred)?.id ?? "";
+}
+
 function renderNewsPanel() {
   const el = $("#news-status");
   const failures = $("#news-failures");
@@ -536,6 +571,7 @@ function bindUI() {
     commentForm: "#comment-form", commentText: "#comment-text", commentAuthor: "#comment-author",
     speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
     micStart: "#btn-mic-start", micStop: "#btn-mic-stop", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
+    screenSourceRefresh: "#btn-screen-source-refresh", screenSourceSelect: "#screen-source-select",
     newsRead: "#btn-news-read", topicRead: "#btn-topic-read", twitchReconnect: "#btn-twitch-reconnect",
   });
   const actions = createAppActions({
@@ -544,6 +580,8 @@ function bindUI() {
     store: appStore,
     manualSource,
     settingsUI,
+    platform,
+    getScreenSources: () => screenSources,
     log: (m, level) => logEvent(m, level),
     scrub,
     loadServer: loadFromServer,
@@ -554,7 +592,7 @@ function bindUI() {
     // actions.integrationAction), so actions can only reach them through these getters.
     getIntegrationPanel: () => integrationPanel,
     getDiagnosticExportDialog: () => diagnosticExportDialog,
-    render: { mic: renderMicPanel, screen: renderScreenPanel, news: renderNewsPanel, topics: renderTopicPanel, twitchStatus: renderTwitchChatStatus, timed: refreshTimedPanels },
+    render: { mic: renderMicPanel, screen: renderScreenPanel, screenSources: renderScreenSources, news: renderNewsPanel, topics: renderTopicPanel, twitchStatus: renderTwitchChatStatus, timed: refreshTimedPanels },
   });
   diagnosticExportDialog = new DiagnosticExportDialog(document.querySelector("#diagnostic-export-dialog"), { document, onStatus: (status) => logEvent(`診断エクスポート: ${status}`) });
   integrationPanel = new IntegrationPanel(document.querySelector("#integration-health-dialog"), {

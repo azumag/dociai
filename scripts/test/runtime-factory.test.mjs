@@ -33,22 +33,25 @@ test("selectPlatformAdapter swaps between Browser and Electron implementations b
   const browser = selectPlatformAdapter({});
   assert.equal(browser.kind, "browser");
   assert.equal(browser.hasTwitchService(), false);
+  assert.equal(browser.hasCaptureService(), false);
   const browserTwitchSource = browser.createTwitchSource({ channels: ["a"] }, { onStatus: () => {} });
   assert.equal(browserTwitchSource.constructor.name, "TwitchChatSource");
 
-  const electronScope = { dociai: { obs: {}, twitch: { start: () => {} } } };
+  const electronScope = { dociai: { obs: {}, twitch: { start: () => {} }, capture: { listSources: () => {} } } };
   const electron = selectPlatformAdapter(electronScope);
   assert.equal(electron.kind, "electron");
   assert.equal(electron.hasTwitchService(), true);
+  assert.equal(electron.hasCaptureService(), true);
   const electronTwitchSource = electron.createTwitchSource({ channels: ["a"] }, { onStatus: () => {} });
   assert.equal(electronTwitchSource.constructor.name, "ElectronTwitchSource");
 
-  // Electron obs transport present but the twitch bridge missing: falls back per-service,
-  // exactly like app.js's original hasElectronTwitchService() guard did.
+  // Electron obs transport present but the twitch bridge / capture bridge missing: falls back
+  // per-service, exactly like app.js's original hasElectronTwitchService() guard did.
   const partialScope = { dociai: { obs: {} } };
   const partial = selectPlatformAdapter(partialScope);
   assert.equal(partial.kind, "electron");
   assert.equal(partial.hasTwitchService(), false);
+  assert.equal(partial.hasCaptureService(), false);
   assert.equal(partial.createTwitchSource({}, {}).constructor.name, "TwitchChatSource");
 });
 

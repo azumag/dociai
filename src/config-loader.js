@@ -338,6 +338,7 @@ export function applyDefaults(cfg) {
         enabled: false,
         maxAgeSeconds: 120,
         maxTokens: 768,
+        sourceName: "",
         ...(cfg.context?.screenCapture ?? {}),
       },
     },
