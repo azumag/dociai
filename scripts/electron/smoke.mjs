@@ -79,7 +79,7 @@ try {
   // BuildInfo(#72) must reach the running app and match what scripts/electron/build.mjs embedded in dist/electron/build-info.json.
   const expectedBuildInfo = JSON.parse(await fs.readFile(path.join(repoRoot, "dist/electron/build-info.json"), "utf8"));
   assert.deepEqual(checks.platform.value.buildInfo, expectedBuildInfo, "dev app buildInfo must match dist/electron/build-info.json");
-  assert.deepEqual(checks.keys, ["ai", "bouyomi", "config", "events", "feeds", "obs", "platform", "secrets", "shortcuts", "speech", "system", "topics", "twitch", "windows"]);
+  assert.deepEqual(checks.keys, ["ai", "bouyomi", "config", "events", "feeds", "localLlm", "obs", "platform", "secrets", "shortcuts", "speech", "system", "topics", "twitch", "windows"]);
   assert.match(checks.csp ?? "", /object-src 'none'/);
   assert.match(checks.csp ?? "", /connect-src 'self'/);
   assert.doesNotMatch(checks.csp ?? "", /connect-src[^;]*(?:https?:|wss?:)/);
@@ -89,6 +89,24 @@ try {
   assert.equal(checks.invalidExternal.ok, false);
   const serviceCancels = await consolePage.evaluate(async () => ({ feed: await window.dociai.feeds.cancel("no-feed-request"), topic: await window.dociai.topics.cancel("no-topic-request") }));
   assert.deepEqual(serviceCancels, { feed: { ok: true, value: { cancelled: false } }, topic: { ok: true, value: { cancelled: false } } });
+  // #75: catalog/installed reads must round-trip through Main without ever exposing an absolute
+  // filesystem path over IPC. import.begin() is intentionally not exercised here since it opens a
+  // real native file dialog that would hang a headless run waiting for user input.
+  const localLlmChecks = await consolePage.evaluate(async () => ({
+    catalog: await window.dociai.localLlm.catalog.list(),
+    installed: await window.dociai.localLlm.installed.list(),
+    missing: await window.dociai.localLlm.installed.get("does-not-exist"),
+    cancel: await window.dociai.localLlm.import.cancel("no-such-token"),
+  }));
+  assert.equal(localLlmChecks.catalog.ok, true, JSON.stringify(localLlmChecks.catalog));
+  assert.equal(localLlmChecks.catalog.value.schemaVersion, 1);
+  assert.ok(localLlmChecks.catalog.value.models.length >= 2, JSON.stringify(localLlmChecks.catalog.value));
+  assert.ok(localLlmChecks.catalog.value.models.every((model) => model.source.url.startsWith("https://")));
+  assert.equal(localLlmChecks.installed.ok, true, JSON.stringify(localLlmChecks.installed));
+  assert.deepEqual(localLlmChecks.installed.value, { models: [], repairNeeded: false });
+  assert.equal(localLlmChecks.missing.ok, true, JSON.stringify(localLlmChecks.missing));
+  assert.deepEqual(localLlmChecks.missing.value, { model: null });
+  assert.deepEqual(localLlmChecks.cancel, { ok: true, value: { cancelled: false } });
   const configResult = await consolePage.evaluate(() => window.dociai.config.get());
   assert.equal(configResult.ok, true, JSON.stringify(configResult));
   assert.equal(typeof configResult.value.revision, "string");

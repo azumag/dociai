@@ -27,6 +27,12 @@ export const CHANNELS = Object.freeze({
   SYSTEM_OPEN_EXTERNAL: "system:open-external",
   SYSTEM_SHOW_ITEM: "system:show-item",
   SHORTCUT_STATUS: "shortcut:status",
+  LOCAL_LLM_CATALOG_LIST: "local-llm:catalog:list",
+  LOCAL_LLM_INSTALLED_LIST: "local-llm:installed:list",
+  LOCAL_LLM_INSTALLED_GET: "local-llm:installed:get",
+  LOCAL_LLM_IMPORT_BEGIN: "local-llm:import:begin",
+  LOCAL_LLM_IMPORT_COMMIT: "local-llm:import:commit",
+  LOCAL_LLM_IMPORT_CANCEL: "local-llm:import:cancel",
   APP_EVENT: "app:event",
   OBS_MESSAGE: "obs:message",
 });

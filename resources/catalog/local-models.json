@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-12T00:00:00.000Z",
+  "models": [
+    {
+      "id": "qwen2.5-0.5b-instruct-q4_k_m",
+      "name": "Qwen2.5 0.5B Instruct (Q4_K_M)",
+      "architecture": "qwen2",
+      "quantization": "Q4_K_M",
+      "parameterCount": "0.5B",
+      "fileName": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+      "sizeBytes": 491400032,
+      "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+      "license": { "id": "apache-2.0", "name": "Apache License 2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0" },
+      "capabilities": ["chat"],
+      "recommendation": { "minRamGb": 2, "recommendedRamGb": 4, "contextLength": 32768, "note": "小型・低リソース環境向け。応答は速いが長い推論には不向き。" },
+      "source": { "kind": "download", "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf" },
+      "description": "Alibaba QwenチームによるQwen2.5シリーズ最小モデルのGGUF量子化版。軽量なlocal chat/コメント生成の動作確認に適する。"
+    },
+    {
+      "id": "llama-3.2-1b-instruct-q4_k_m",
+      "name": "Llama 3.2 1B Instruct (Q4_K_M)",
+      "architecture": "llama",
+      "quantization": "Q4_K_M",
+      "parameterCount": "1B",
+      "fileName": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "sizeBytes": 807694464,
+      "sha256": "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
+      "license": { "id": "llama3.2", "name": "Llama 3.2 Community License", "url": "https://www.llama.com/llama3_2/license/" },
+      "capabilities": ["chat"],
+      "recommendation": { "minRamGb": 3, "recommendedRamGb": 6, "contextLength": 131072, "note": "128Kの長context対応。バランス型の汎用local chatモデル。" },
+      "source": { "kind": "download", "url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf" },
+      "description": "MetaのLlama 3.2 1B InstructをbartowskiがGGUF量子化した版。汎用性の高いchat/instruction-followingモデル。"
+    },
+    {
+      "id": "gemma-2-2b-it-q4_k_m",
+      "name": "Gemma 2 2B IT (Q4_K_M)",
+      "architecture": "gemma2",
+      "quantization": "Q4_K_M",
+      "parameterCount": "2B",
+      "fileName": "gemma-2-2b-it-Q4_K_M.gguf",
+      "sizeBytes": 1708582752,
+      "sha256": "e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787",
+      "license": { "id": "gemma", "name": "Gemma Terms of Use", "url": "https://ai.google.dev/gemma/terms" },
+      "capabilities": ["chat"],
+      "recommendation": { "minRamGb": 4, "recommendedRamGb": 8, "contextLength": 8192, "note": "GoogleのGemma 2系。日本語を含む多言語応答の品質が比較的高い。" },
+      "source": { "kind": "download", "url": "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf" },
+      "description": "GoogleのGemma 2 2B ITをbartowskiがGGUF量子化した版。中規模構成での配信コメント生成向け候補。"
+    },
+    {
+      "id": "phi-3.5-mini-instruct-q4_k_m",
+      "name": "Phi-3.5 Mini Instruct (Q4_K_M)",
+      "architecture": "phi3",
+      "quantization": "Q4_K_M",
+      "parameterCount": "3.8B",
+      "fileName": "Phi-3.5-mini-instruct-Q4_K_M.gguf",
+      "sizeBytes": 2393232672,
+      "sha256": "e4165e3a71af97f1b4820da61079826d8752a2088e313af0c7d346796c38eff5",
+      "license": { "id": "mit", "name": "MIT License", "url": "https://opensource.org/licenses/MIT" },
+      "capabilities": ["chat", "tool-use"],
+      "recommendation": { "minRamGb": 6, "recommendedRamGb": 8, "contextLength": 131072, "note": "4モデル中もっとも高性能だが必要RAMも大きい。128Kの長context対応。" },
+      "source": { "kind": "download", "url": "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf" },
+      "description": "MicrosoftのPhi-3.5-mini-instructをbartowskiがGGUF量子化した版。4モデル中最大だが品質重視の用途向け。"
+    }
+  ]
+}
