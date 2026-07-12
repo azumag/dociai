@@ -9,11 +9,37 @@ name: Package
 # Split out from ci.yml (which stays fast/cheap on ubuntu-latest) because macOS/Windows runners
 # are materially more expensive; if that cost becomes a concern, gate this workflow's
 # `pull_request` trigger behind a label or path filter without touching the job bodies below.
+#
+# workflow_call (#74): .github/workflows/release.yml invokes this workflow directly instead of
+# duplicating the build/sign/verify steps below. `channel` reaches BuildInfo (DOCIAI_RELEASE_CHANNEL,
+# see scripts/release/build-info.mjs) so a real release embeds "stable"/"beta" instead of the
+# "dev" default every PR/push/workflow_dispatch build gets. `ref` lets a caller pin the exact
+# commit to package — required for release.yml's workflow_dispatch path, where `github.ref` alone
+# would resolve to whatever branch the run itself was started from, not necessarily the tag being
+# released. `upload_packages` additionally uploads the real artifact binaries (zip/dmg/exe), which
+# ordinary PR/push runs skip on purpose to avoid paying GitHub Actions storage for every commit.
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      channel:
+        description: "Release channel embedded into BuildInfo (stable/beta/dev)"
+        type: string
+        required: false
+        default: dev
+      ref:
+        description: "Explicit ref/commit to check out (defaults to github.ref)"
+        type: string
+        required: false
+        default: ""
+      upload_packages:
+        description: "Upload the actual packaged artifact binaries, not just checksums/manifest"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -28,6 +54,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -71,6 +99,9 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # #74: empty (every non-workflow_call trigger) falls back to build-info.mjs's own "dev"
+          # default via resolveChannel(), so this is a no-op outside release.yml.
+          DOCIAI_RELEASE_CHANNEL: ${{ inputs.channel }}
 
       - name: Verify artifact contents (arm64)
         run: node scripts/release/verify-artifact.mjs dist/release/mac-arm64/dociai.app
@@ -106,6 +137,22 @@ jobs:
             dist/release/release-manifest.json
           if-no-files-found: warn
           retention-days: 14
+          overwrite: true
+      # #74: skipped on ordinary PR/push/workflow_dispatch runs (inputs.upload_packages is only
+      # set true by release.yml) so those keep paying for checksums/manifest only, not the
+      # multi-hundred-MB binaries. `overwrite: true` so re-running this same workflow run (rerun
+      # failed jobs, or the whole run) never fails on "artifact already exists".
+      - name: Upload packaged artifacts
+        if: ${{ inputs.upload_packages == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-macos-artifacts-${{ github.run_id }}
+          path: |
+            dist/release/*.zip
+            dist/release/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
       - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -120,6 +167,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -155,6 +204,10 @@ jobs:
 
       - name: Build + package
         run: npm run electron:package
+        env:
+          # #74: empty (every non-workflow_call trigger) falls back to build-info.mjs's own "dev"
+          # default via resolveChannel(), so this is a no-op outside release.yml.
+          DOCIAI_RELEASE_CHANNEL: ${{ inputs.channel }}
 
       - name: Verify artifact contents
         run: node scripts/release/verify-artifact.mjs dist/release/win-unpacked
@@ -184,3 +237,17 @@ jobs:
             dist/release/release-manifest.json
           if-no-files-found: warn
           retention-days: 14
+          overwrite: true
+      # See the equivalent step in package-macos above for why this is gated/overwrite:true.
+      - name: Upload packaged artifacts
+        if: ${{ inputs.upload_packages == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-windows-artifacts-${{ github.run_id }}
+          path: |
+            dist/release/*.zip
+            dist/release/*.exe
+            dist/release/*.msi
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true

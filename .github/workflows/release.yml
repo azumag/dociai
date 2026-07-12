@@ -1,0 +1,187 @@
+name: Release
+
+# Tag-triggered release pipeline (#74). Deliberately does NOT duplicate the build/sign/verify
+# steps from .github/workflows/package.yml (#72/#73) — it calls that workflow directly via
+# `workflow_call` and only adds what a *release* needs on top of "PR-quality package build":
+# tag/version validation, channel classification, a hard signing-required gate, cross-platform
+# manifest consolidation, release notes, and publishing to a GitHub Release.
+#
+# validate-tag (cheap, ubuntu-latest, fails fast) -> package (reused package.yml, macOS+Windows)
+#   -> publish (verify manifest completeness, create/replace the GitHub Release)
+#
+# See docs/release.md for the full runbook, including channel determination, what happens on a
+# re-run/interrupted release, and rollback/redistribution of a previous version.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (vX.Y.Z or vX.Y.Z-beta.N). Required so a manual re-run always targets an explicit, already-pushed tag rather than whatever ref the workflow happens to be dispatched from."
+        required: true
+
+permissions:
+  contents: read
+
+# One release attempt per tag at a time. Re-running this workflow (either "re-run failed jobs" or
+# a brand-new run triggered by deleting+re-pushing the same tag) reuses this same group so a
+# stale in-flight attempt for a tag is never left racing a newer one for it — but
+# cancel-in-progress is false: cancelling a run mid-`gh release create` risks leaving a
+# half-uploaded GitHub Release behind, which is worse than letting it finish (or fail cleanly) and
+# then re-running. See docs/release.md "中断・再実行・既存tag/artifactの扱い".
+concurrency:
+  group: dociai-release-${{ github.workflow }}-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-tag:
+    name: validate-tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.resolved_tag }}
+      version: ${{ steps.validate.outputs.version }}
+      channel: ${{ steps.validate.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate tag matches package.json version, classify stable/beta channel
+        id: validate
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "resolved_tag=$TAG" >> "$GITHUB_OUTPUT"
+          node scripts/release/validate-version-tag.mjs "$TAG"
+
+      # Enforced here, before the expensive macOS/Windows package job even starts — not left to
+      # package.yml's own graceful unsigned fallback. package.yml's signing steps only *skip*
+      # (exit 0) when secrets are absent, by design, so an ordinary PR build never fails just for
+      # being unsigned; a release must never publish an unsigned artifact, so this workflow adds
+      # its own hard gate on top.
+      - name: Require signing credentials for release
+        run: |
+          missing=0
+          if [ -z "${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}" ]; then
+            echo "::error::MACOS_CERTIFICATE_P12_BASE64 is not set; refusing to publish an unsigned macOS release artifact."
+            missing=1
+          fi
+          if [ -z "${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}" ]; then
+            echo "::error::WINDOWS_CERTIFICATE_PFX_BASE64 is not set; refusing to publish an unsigned Windows release artifact."
+            missing=1
+          fi
+          if [ "$missing" = "1" ]; then
+            echo "::error::See docs/release.md and docs/signing.md for how to configure signing secrets before releasing."
+            exit 1
+          fi
+
+  package:
+    name: package
+    needs: validate-tag
+    uses: ./.github/workflows/package.yml
+    with:
+      channel: ${{ needs.validate-tag.outputs.channel }}
+      ref: ${{ needs.validate-tag.outputs.tag }}
+      upload_packages: true
+    secrets: inherit
+
+  publish:
+    name: publish
+    needs: [validate-tag, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag }}
+          # Full history + tags: generate-release-notes.mjs needs `git describe`/`git log` across
+          # the range since the previous release tag, which a shallow clone cannot see.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci
+
+      # package.yml's package-macos/package-windows jobs ran as part of *this same* workflow run
+      # (workflow_call keeps the run_id shared), so their uploaded artifacts are directly
+      # downloadable here without any cross-run lookup.
+      - name: Download all package manifests + artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: release-artifacts
+
+      - name: Verify manifest completeness across all targets, build publish-manifest.json + SHA256SUMS
+        env:
+          # Reaching this step already implies both signing secrets were present (validate-tag's
+          # "Require signing credentials for release" gate) AND package.yml's own
+          # verify-macos-signing.sh/verify-windows-signing.ps1 steps passed (they fail the
+          # `package` job outright when signing was attempted but didn't actually succeed, which
+          # would have skipped this job via `needs:`) — so "true" is a correct, not just assumed,
+          # value here.
+          DOCIAI_MACOS_SIGNED: "true"
+          DOCIAI_WINDOWS_SIGNED: "true"
+        run: node scripts/release/publish-manifest.mjs release-artifacts
+
+      - name: Generate release notes
+        run: |
+          node scripts/release/generate-release-notes.mjs \
+            "${{ needs.validate-tag.outputs.version }}" \
+            "${{ needs.validate-tag.outputs.tag }}" \
+            "${{ github.repository }}" \
+            > release-artifacts/RELEASE_NOTES.md
+
+      - name: Publish (create or replace) GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          mkdir -p test-results/release-publish
+          {
+            TAG="${{ needs.validate-tag.outputs.tag }}"
+            PRERELEASE_FLAG=""
+            if [ "${{ needs.validate-tag.outputs.channel }}" = "beta" ]; then PRERELEASE_FLAG="--prerelease"; fi
+
+            # Re-running this workflow for the same tag must never leave two Releases, or a stale
+            # partial one, behind (docs/release.md "中断・再実行"). If a Release already exists
+            # for this tag, delete it and recreate from scratch using the artifacts this run just
+            # verified — the tag itself is left alone (--cleanup-tag=false).
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Existing GitHub Release for $TAG found; deleting before recreating it from this run's verified artifacts."
+              gh release delete "$TAG" --yes --cleanup-tag=false
+            fi
+
+            ASSETS=(release-artifacts/publish-manifest.json release-artifacts/SHA256SUMS)
+            while IFS= read -r -d '' asset; do ASSETS+=("$asset"); done < <(find release-artifacts -maxdepth 2 -type f \( -name "*.zip" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" \) -print0)
+
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file release-artifacts/RELEASE_NOTES.md \
+              $PRERELEASE_FLAG \
+              "${ASSETS[@]}"
+          } 2>&1 | tee test-results/release-publish/publish.log
+
+      - name: Scrub failure diagnostics before upload
+        if: failure()
+        run: node scripts/release/redact-log.mjs test-results/release-publish/publish.log GH_TOKEN
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-publish-diagnostics-${{ github.run_id }}
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 14
