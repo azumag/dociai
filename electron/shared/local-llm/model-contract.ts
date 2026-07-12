@@ -48,13 +48,25 @@ export type ModelCatalog = {
   models: CatalogModelEntry[];
 };
 
-export type InstalledModelSource = {
+export type LocalImportSource = {
   kind: "local-import";
   originalFileName: string;
   /** Set when the imported file's hash matched a bundled catalog entry. */
   catalogModelId?: string;
   catalogSchemaVersionAtImport?: number;
 };
+
+/** A model that landed in installed/ via the download service (#76) rather than a local file
+ * picker. `url` is the resolved source URL actually fetched (post redirect-resolution start
+ * point, not necessarily the final redirect target) — kept for provenance/debugging only. */
+export type DownloadedModelSource = {
+  kind: "download";
+  url: string;
+  catalogModelId?: string;
+  huggingFace?: { repo: string; revision: string; filename: string };
+};
+
+export type InstalledModelSource = LocalImportSource | DownloadedModelSource;
 
 export type InstalledModelEntry = {
   id: string;
@@ -83,3 +95,70 @@ export type ImportCommitResult =
   | { status: "installed"; model: InstalledModelEntry }
   | { status: "duplicate"; existing: InstalledModelEntry }
   | { status: "failed"; reason: string };
+
+// ---------------------------------------------------------------------------------------------
+// Download jobs (#76): remote GGUF acquisition with progress/cancel/retry/resume, gated on
+// size+hash+GGUF-metadata verification before a job is ever allowed to commit to the installed
+// registry above. See electron/main/services/local-llm/models/model-download-service.ts.
+// ---------------------------------------------------------------------------------------------
+
+export const DOWNLOAD_JOB_SCHEMA_VERSION = 1;
+export const SUPPORTED_DOWNLOAD_JOB_SCHEMA_VERSIONS: readonly number[] = [1];
+
+/** queued: created, not yet connected. downloading: streaming bytes to the partial file.
+ * verifying: stream complete, computing sha256 / reading the GGUF header. installing: verified,
+ * performing the atomic rename + registry commit. completed: installed, terminal. paused:
+ * cancelled-but-kept-partial or recovered-at-restart, resumable via retry(). failed: terminal
+ * unless the caller calls retry() to start a fresh attempt. cancelled: partial discarded, terminal. */
+export type DownloadJobState = "queued" | "downloading" | "verifying" | "installing" | "completed" | "paused" | "failed" | "cancelled";
+
+export type DownloadJobSource =
+  | { kind: "huggingface"; repo: string; revision: string; filename: string }
+  | { kind: "url"; url: string };
+
+export type DownloadResumeValidator = { etag?: string; lastModified?: string };
+
+export type DownloadJobError = { code: string; message: string; retryable: boolean };
+
+export type DownloadJobRecord = {
+  id: string;
+  /** Set when the job was started from a bundled catalog entry. */
+  catalogModelId?: string;
+  displayName: string;
+  fileName: string;
+  source: DownloadJobSource;
+  /** Snapshotted at job-start time so a later catalog update never retroactively changes an
+   * in-flight job's size/hash expectations. */
+  expectedSizeBytes: number;
+  expectedSha256?: string;
+  license: ModelLicense;
+  licenseAcceptedAt: string;
+  state: DownloadJobState;
+  bytesDownloaded: number;
+  /** Path relative to the models base directory of the in-progress/partial file, when one
+   * exists. Same shape rule as InstalledModelEntry.relativePath: never absolute. */
+  partialRelativePath?: string;
+  resumeValidator?: DownloadResumeValidator;
+  attempt: number;
+  createdAt: string;
+  updatedAt: string;
+  error?: DownloadJobError;
+  installedModelId?: string;
+};
+
+export type DownloadJobFile = { schemaVersion: number; updatedAt: string; jobs: DownloadJobRecord[] };
+
+export type DownloadProgressEvent = {
+  jobId: string;
+  state: DownloadJobState;
+  bytesDownloaded: number;
+  totalBytes?: number;
+  bytesPerSecond: number;
+  etaSeconds?: number;
+  percent?: number;
+  at: string;
+};
+
+export type DownloadStartInput =
+  | { kind: "catalog"; catalogModelId: string; licenseAccepted: boolean }
+  | { kind: "huggingface"; repo: string; revision: string; filename: string; displayName: string; expectedSizeBytes: number; expectedSha256?: string; license: ModelLicense; licenseAccepted: boolean };

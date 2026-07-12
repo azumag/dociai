@@ -30,7 +30,9 @@ function isInstalledEntry(value: unknown): value is InstalledModelEntry {
   if (typeof entry.sizeBytes !== "number" || !Number.isFinite(entry.sizeBytes) || entry.sizeBytes < 0) return false;
   if (typeof entry.sha256 !== "string" || !SHA256_PATTERN.test(entry.sha256)) return false;
   if (typeof entry.importedAt !== "string") return false;
-  if (!entry.source || typeof entry.source !== "object" || (entry.source as Record<string, unknown>).kind !== "local-import") return false;
+  if (!entry.source || typeof entry.source !== "object") return false;
+  const sourceKind = (entry.source as Record<string, unknown>).kind;
+  if (sourceKind !== "local-import" && sourceKind !== "download") return false;
   return true;
 }
 
