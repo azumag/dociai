@@ -79,6 +79,14 @@ export type TwitchTokenProviderDeps = {
    * itself and surface a reauthorize prompt without waiting for its next getValidAccessToken()
    * call to fail. */
   onReauthRequired?: (reason: string) => void;
+  /** Issue #85: fired synchronously immediately after every successful
+   * `#metadataRepository.bumpGeneration()` call (a brand-new Device Code Grant token via
+   * handleTokenObtained(), a successful refresh rotation, or logout()) — the wiring point for
+   * twitch-auth-coordinator.ts's own auth-generation-changed subscription, which future EventSub/
+   * IRC/health modules use to know "your token/account just changed, drop your session".
+   * Deliberately reuses AuthMetadataRepository.bumpGeneration() as the sole counter rather than
+   * introducing a second one here — see that method's doc comment. */
+  onGenerationChanged?: (generation: number) => void;
 };
 
 export class TwitchTokenProvider {
@@ -98,6 +106,7 @@ export class TwitchTokenProvider {
   readonly #validateIntervalMs: number;
   readonly #retryPolicy: RetryPolicy | undefined;
   readonly #onReauthRequired: (reason: string) => void;
+  readonly #onGenerationChanged: (generation: number) => void;
 
   constructor(
     private readonly oauthClient: TwitchOAuthClient,
@@ -110,6 +119,7 @@ export class TwitchTokenProvider {
     this.#validateIntervalMs = deps.validateIntervalMs ?? DEFAULT_VALIDATE_INTERVAL_MS;
     this.#retryPolicy = deps.retryPolicy;
     this.#onReauthRequired = deps.onReauthRequired ?? (() => {});
+    this.#onGenerationChanged = deps.onGenerationChanged ?? (() => {});
   }
 
   get status(): TwitchTokenProviderStatus {
@@ -184,8 +194,13 @@ export class TwitchTokenProvider {
     // (including a stale one left over from a prior reauth_required) — never let a previous
     // grant's scopes linger against the new token's identity.
     this.#metadataRepository.resetIdentity();
-    this.#metadataRepository.bumpGeneration();
+    const generation = this.#metadataRepository.bumpGeneration();
+    // #applyValidated() flips `#status` to "valid" — onGenerationChanged must fire AFTER that, not
+    // before, so a listener reading `status` synchronously from within its callback (issue #85's
+    // twitch-auth-coordinator.ts does exactly this) observes the already-updated status rather than
+    // a stale "unauthenticated"/"reauth_required" left over from before this token was obtained.
     this.#applyValidated(outcome);
+    this.#onGenerationChanged(generation);
   }
 
   /** "suspend/resume後の即時validateを実装" — wire to Electron's `powerMonitor.on("resume", ...)`.
@@ -195,6 +210,32 @@ export class TwitchTokenProvider {
   onSystemResume(): void {
     if (this.#disposed) return;
     void this.#validateCoalesced("resume").catch(() => {});
+  }
+
+  /** Issue #85: user-initiated logout — NOT the same as dispose() (app quit). Clears the token
+   * pair from #42's SecretStore and memory, stops the hourly validate timer, and resets
+   * account/scope metadata back to empty while keeping authGeneration monotonic (the same
+   * resetIdentity()+bumpGeneration() idiom handleTokenObtained() already uses for "a new identity
+   * supersedes whatever was recorded before" — here the new identity is "none"). The provider
+   * itself remains usable afterward: a subsequent initialize()/handleTokenObtained() for a fresh
+   * login both still work normally, unlike dispose() which is terminal.
+   *
+   * Waits for any in-flight validate/refresh to settle FIRST (via waitForIdle()) so a
+   * late-resolving validate/refresh triggered before logout() was called can never resurrect a
+   * status this call is about to clear. */
+  async logout(): Promise<void> {
+    if (this.#disposed) return;
+    await this.waitForIdle();
+    if (this.#disposed) return;
+    this.#stopHourlyTimer();
+    await this.secretStore.remove(ACCESS_TOKEN_KEY).catch(() => {});
+    await this.secretStore.remove(REFRESH_TOKEN_KEY).catch(() => {});
+    this.#accessToken = null;
+    this.#refreshToken = null;
+    this.#lastValidatedAtMs = null;
+    this.#status = "unauthenticated";
+    this.#metadataRepository.resetIdentity();
+    this.#onGenerationChanged(this.#metadataRepository.bumpGeneration());
   }
 
   /** App quit: stops the hourly loop immediately and aborts any in-flight validate/refresh HTTP
@@ -349,8 +390,15 @@ export class TwitchTokenProvider {
         // together (before either is trusted) means the old refresh_token is never written back
         // and never reused for a subsequent refresh attempt.
         await this.#persistToken(outcome.token.accessToken, outcome.token.refreshToken);
-        this.#metadataRepository.bumpGeneration();
+        const generation = this.#metadataRepository.bumpGeneration();
+        // Same ordering rationale as handleTokenObtained(): fire onGenerationChanged only after
+        // #validateAfterRefresh() has settled `#status` to its final value (valid/reauth_required/
+        // unchanged-on-transient), never before. Skipped entirely when that lands in
+        // reauth_required — #enterReauthRequired() (called from inside #validateAfterRefresh) has
+        // already invoked onReauthRequired for that same transition, so firing onGenerationChanged
+        // too would double-notify subscribers about one logical event.
         await this.#validateAfterRefresh();
+        if (this.#status !== "reauth_required") this.#onGenerationChanged(generation);
         return;
       }
       if (outcome.status === "reauth_required") {
