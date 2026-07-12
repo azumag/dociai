@@ -92,6 +92,9 @@ const api: DociaiApi = {
       status: (jobId) => invoke(CHANNELS.LOCAL_LLM_DOWNLOAD_STATUS, jobId),
     },
   },
+  streamEvents: {
+    list: (input) => invoke(CHANNELS.STREAM_EVENTS_LIST, input),
+  },
   events: {
     subscribe(type, listener) {
       if (typeof type !== "string" || type.length === 0 || type.length > 128 || typeof listener !== "function") return () => {};

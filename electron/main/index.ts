@@ -19,6 +19,8 @@ import { CaptureService } from "./services/capture/capture-service";
 import { installDisplayMediaHandler } from "./services/capture/display-media-handler";
 import { ModelRepository } from "./services/local-llm/models/model-repository";
 import { resolveRuntimeLayout, readBuildInfo } from "./runtime-layout";
+import { StreamEventBus } from "./services/stream-events/stream-event-bus";
+import { STREAM_EVENT_APP_EVENT_TYPE } from "../shared/services/stream-event-ipc-contract";
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "dociai",
@@ -152,6 +154,13 @@ if (!hasLock) {
     const shortcutService = new ShortcutService(globalShortcut, (event) => controller?.emitToConsole("shortcut:status", event), (event) => controller?.emitToConsole("shortcut:trigger", event));
     const captureService = new CaptureService(desktopCapturer);
     const uninstallDisplayMediaHandler = installDisplayMediaHandler(session, captureService);
+    // Single fan-out bus (#89) — every subscriber category (future Trigger engine per #91/#92,
+    // console window, OBS window) observes the identical validated/deduped event. Trigger/UI/OBS
+    // delivery for the two windows is wired here as ordinary bus subscribers, same shape as
+    // aiService's "ai:token"/twitchService's own forwarding just above.
+    const streamEventBus = new StreamEventBus();
+    streamEventBus.subscribe((published) => controller?.emitToConsole(STREAM_EVENT_APP_EVENT_TYPE, published));
+    streamEventBus.subscribe((published) => controller?.emitToObs(STREAM_EVENT_APP_EVENT_TYPE, published));
     // The native file dialog runs here, in Main, so the renderer only ever gets an opaque import
     // token back (electron/main/services/local-llm/models/local-import.ts) — it never learns or
     // chooses an arbitrary filesystem path itself.
@@ -176,7 +185,7 @@ if (!hasLock) {
     shortcutService.sync((currentConfig.config.triggers ?? {}) as Record<string, unknown>);
     const screenCapture = object(object(currentConfig.config.context).screenCapture);
     captureService.setPreferredSourceName(screenCapture.sourceName);
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, shortcutService, captureService, modelRepository, buildInfo, devServerUrl });
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, shortcutService, captureService, modelRepository, streamEventBus, buildInfo, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
     app.once("before-quit", () => feedService.dispose());
@@ -186,6 +195,7 @@ if (!hasLock) {
     app.once("before-quit", () => shortcutService.dispose());
     app.once("before-quit", () => { uninstallDisplayMediaHandler(); captureService.dispose(); });
     app.once("before-quit", () => modelRepository.dispose());
+    app.once("before-quit", () => streamEventBus.dispose());
     controller.createConsoleWindow();
     app.on("activate", () => controller?.createConsoleWindow());
   }).catch((error) => { logError("startup", error); if (!quitting) app.quit(); });

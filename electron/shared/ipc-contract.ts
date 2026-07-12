@@ -4,6 +4,7 @@ import type { AiChatInput, AiChatResponse } from "./services/ai-contract";
 import type { FeedFetchInput, FeedFetchResponse } from "./services/feed-contract";
 import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./services/topic-contract";
 import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
+import type { StreamEventListInput, StreamEventListResult } from "./services/stream-event-ipc-contract";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PublicError };
 export type WindowRole = "console" | "obs";
@@ -86,6 +87,9 @@ export type DociaiApi = {
       list(): Promise<Result<{ jobs: DownloadJobRecord[] }>>;
       status(jobId: string): Promise<Result<{ job: DownloadJobRecord | null }>>;
     };
+  };
+  streamEvents: {
+    list(input?: StreamEventListInput): Promise<Result<StreamEventListResult>>;
   };
   events: {
     subscribe(type: string, listener: (event: unknown) => void): () => void;

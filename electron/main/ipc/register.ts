@@ -1,7 +1,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import { CHANNELS } from "../../shared/ipc-channels";
 import { toPublicError, PublicIpcError } from "../../shared/errors";
-import type { Result, ShowItemKind } from "../../shared/ipc-contract";
+import type { Result, ShowItemKind, WindowRole } from "../../shared/ipc-contract";
 import { expectExternalHttpsUrl, expectNoInput, expectRecord, expectString } from "../../shared/validation";
 import { assertTrustedSender } from "./guard";
 import { getWindowRole } from "../window-roles";
@@ -22,9 +22,10 @@ import type { CaptureService } from "../services/capture/capture-service";
 import type { BuildInfo } from "../../shared/build-info";
 import type { ModelRepository } from "../services/local-llm/models/model-repository";
 import type { DownloadStartInput, ModelLicense } from "../../shared/local-llm/model-contract";
+import type { StreamEventBus } from "../services/stream-events/stream-event-bus";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; buildInfo: BuildInfo; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; streamEventBus: StreamEventBus; buildInfo: BuildInfo; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -82,10 +83,10 @@ function parseDownloadStartInput(value: unknown): DownloadStartInput {
   throw new PublicIpcError("INVALID_INPUT", "download start kindが不正です");
 }
 
-function register<T>(channel: string, handler: Handler<T>, options: RegisterOptions, roles = ["console"] as const): void {
+function register<T>(channel: string, handler: Handler<T>, options: RegisterOptions, roles: WindowRole[] = ["console"]): void {
   ipcMain.handle(channel, async (event, input): Promise<Result<T>> => {
     try {
-      assertTrustedSender(event, options.devServerUrl, [...roles]);
+      assertTrustedSender(event, options.devServerUrl, roles);
       return { ok: true, value: await handler(event, input) };
     } catch (error) {
       return { ok: false, error: toPublicError(error) };
@@ -215,6 +216,16 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
   register(CHANNELS.LOCAL_LLM_DOWNLOAD_RETRY, (event, input) => options.modelRepository.retryDownload(expectString(input, "jobId", 256)), options);
   register(CHANNELS.LOCAL_LLM_DOWNLOAD_LIST, async (event, input) => { expectNoInput(input); return { jobs: await options.modelRepository.listDownloads() }; }, options);
   register(CHANNELS.LOCAL_LLM_DOWNLOAD_STATUS, async (event, input) => ({ job: await options.modelRepository.getDownload(expectString(input, "jobId", 256)) }), options);
+  register(CHANNELS.STREAM_EVENTS_LIST, (event, input) => {
+    const payload = input === undefined || input === null ? {} : expectRecord(input, "stream events list");
+    let limit: number | undefined;
+    if (payload.limit !== undefined) {
+      if (typeof payload.limit !== "number" || !Number.isInteger(payload.limit) || payload.limit < 0 || payload.limit > 10_000) throw new PublicIpcError("INVALID_INPUT", "limitが不正です");
+      limit = payload.limit;
+    }
+    const stats = options.streamEventBus.stats;
+    return { events: options.streamEventBus.list(limit), stats: { totalPublished: stats.totalPublished, totalRejected: stats.totalRejected, totalDuplicates: stats.totalDuplicates, listenerCount: stats.listenerCount } };
+  }, options, ["console", "obs"]);
   ipcMain.on(CHANNELS.OBS_MESSAGE, (event, message) => {
     try {
       assertTrustedSender(event, options.devServerUrl, ["console", "obs"]);
