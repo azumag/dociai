@@ -1,0 +1,69 @@
+# Electron packager config (#72). See docs/adr/electron-packager.md for the tool choice.
+#
+# `directories.app: dist/electron` uses electron-builder's "two package.json" layout:
+# `scripts/electron/build.mjs` produces a self-contained app directory (Main/Preload bundled by
+# esbuild, `electron` left external, static Renderer assets copied, plus its own minimal
+# package.json). Root devDependencies never enter the asar.
+appId: com.dociai.desktop
+productName: dociai
+executableName: dociai
+copyright: "Copyright (c) dociai contributors"
+
+directories:
+  app: dist/electron
+  output: dist/release
+  buildResources: build
+
+# Main/Preload/Renderer output (dist/electron) is packed into app.asar as-is; no native modules
+# are bundled into it today (esbuild's only external is `electron`, which the runtime provides).
+asar: true
+files:
+  - "**/*"
+  - "!**/*.map"
+
+# Everything here lives outside app.asar, at <resources>/, so it stays readable without unpacking
+# the archive and so future native binaries never end up inside it.
+extraResources:
+  - from: build/generated/build-info.json
+    to: build-info.json
+  - from: build/generated/licenses.json
+    to: licenses.json
+  - from: build/native
+    to: native
+
+# `dociai://` is already registered in-process (electron/main/index.ts) for loading packaged
+# Renderer assets; declaring it here keeps OS-level protocol registration consistent for any
+# future deep-link use.
+protocols:
+  - name: dociai
+    schemes:
+      - dociai
+
+mac:
+  category: public.app-category.utilities
+  icon: build/icons/icon.icns
+  target:
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+
+win:
+  icon: build/icons/icon.ico
+  target:
+    - target: zip
+      arch:
+        - x64
+
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+# Corrects build-info.json's platform/arch for the target actually packaged, since a single host
+# can cross-build multiple mac archs (see scripts/release/after-pack.mjs).
+afterPack: scripts/release/after-pack.mjs
+
+# userData (config/secrets/models/logs) is resolved at runtime via app.getPath("userData")
+# (electron/main/paths.ts) and is never copied into the app directory or referenced here, so
+# app updates never touch it.
+publish: null

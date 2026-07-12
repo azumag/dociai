@@ -6,3 +6,4 @@ test-results/
 config.local.json
 *.log
 .DS_Store
+build/generated/

@@ -1,3 +1,5 @@
+import type { BuildInfo } from "./build-info";
+
 export type Runtime = "browser" | "electron";
 
 export type PlatformInfo = {
@@ -6,4 +8,5 @@ export type PlatformInfo = {
   arch: string;
   appVersion: string;
   isPackaged: boolean;
+  buildInfo: BuildInfo;
 };
