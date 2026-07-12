@@ -50,10 +50,19 @@ test("formatReleaseNotes describes an unbounded range as a first release when th
 });
 
 test("generateReleaseNotes against this repository's real git log: no tags exist yet, so it falls back to full history", async () => {
+  // CI's checkout runs with the default shallow fetch-depth (1 commit), while a normal
+  // developer clone has full history — assert only what's true in both: the fixture-repo
+  // test above already proves the exact commit-range/reference-extraction logic in detail.
+  const { stdout } = await execFileAsync("git", ["rev-parse", "--is-shallow-repository"], { cwd: repoRoot });
+  const isShallow = stdout.trim() === "true";
+
   const result = await generateReleaseNotes({ version: "0.1.0", toRef: "HEAD", repoRoot, repoSlug: "azumag/dociai" });
   assert.equal(result.previousTag, null, "this repository has never cut a tag as of #74");
-  assert.ok(result.commits.length > 50, `expected a substantial real commit history, got ${result.commits.length}`);
-  assert.ok(result.referencedNumbers.includes(150), "PR #150 should be discoverable in this repo's real commit log");
+  assert.ok(result.commits.length >= 1, `expected at least the current commit, got ${result.commits.length}`);
+  if (!isShallow) {
+    assert.ok(result.commits.length > 50, `expected a substantial real commit history, got ${result.commits.length}`);
+    assert.ok(result.referencedNumbers.includes(150), "PR #150 should be discoverable in this repo's real commit log");
+  }
   assert.match(result.markdown, /^# 0\.1\.0/);
   assert.match(result.markdown, /## Manual notes/);
 });
