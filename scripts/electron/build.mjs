@@ -14,7 +14,7 @@ await fs.mkdir(outDir, { recursive: true });
 const bundleOptions = { bundle: true, platform: "node", format: "cjs", target: "node22", external: ["electron"], sourcemap: process.env.NODE_ENV === "development", metafile: true };
 const mainResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/main/index.ts")], outfile: path.join(outDir, "main.cjs") });
 const preloadResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/preload/index.ts")], outfile: path.join(outDir, "preload.cjs") });
-for (const relativePath of ["index.html", "obs.html", "src", "styles", "config.local.example.json"]) {
+for (const relativePath of ["index.html", "obs.html", "src", "styles", "config.local.example.json", "resources"]) {
   await fs.cp(path.join(repoRoot, relativePath), path.join(outDir, relativePath), { recursive: true, force: true });
 }
 

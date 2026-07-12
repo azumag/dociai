@@ -19,9 +19,10 @@ import type { SpeechBackendService } from "../services/speech/speech-backend-ser
 import type { TwitchChatService } from "../services/twitch/twitch-chat-service";
 import type { ShortcutService } from "../services/shortcut-service";
 import type { BuildInfo } from "../../shared/build-info";
+import type { ModelRepository } from "../services/local-llm/models/model-repository";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; buildInfo: BuildInfo; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; modelRepository: ModelRepository; buildInfo: BuildInfo; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -149,6 +150,12 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     return { shown: true };
   }, options);
   register(CHANNELS.SHORTCUT_STATUS, (event, input) => { expectNoInput(input); return options.shortcutService.status(); }, options);
+  register(CHANNELS.LOCAL_LLM_CATALOG_LIST, (event, input) => { expectNoInput(input); return options.modelRepository.listCatalog(); }, options);
+  register(CHANNELS.LOCAL_LLM_INSTALLED_LIST, (event, input) => { expectNoInput(input); return options.modelRepository.listInstalled(); }, options);
+  register(CHANNELS.LOCAL_LLM_INSTALLED_GET, async (event, input) => ({ model: await options.modelRepository.getInstalled(expectString(input, "modelId", 256)) }), options);
+  register(CHANNELS.LOCAL_LLM_IMPORT_BEGIN, (event, input) => { expectNoInput(input); return options.modelRepository.beginImport(); }, options);
+  register(CHANNELS.LOCAL_LLM_IMPORT_COMMIT, (event, input) => options.modelRepository.commitImport(expectString(input, "import token", 256)), options);
+  register(CHANNELS.LOCAL_LLM_IMPORT_CANCEL, (event, input) => ({ cancelled: options.modelRepository.cancelImport(expectString(input, "import token", 256)) }), options);
   ipcMain.on(CHANNELS.OBS_MESSAGE, (event, message) => {
     try {
       assertTrustedSender(event, options.devServerUrl, ["console", "obs"]);

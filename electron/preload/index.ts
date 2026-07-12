@@ -68,6 +68,18 @@ const api: DociaiApi = {
     showItemInFolder: (kind) => invoke(CHANNELS.SYSTEM_SHOW_ITEM, kind),
   },
   shortcuts: { status: () => invoke(CHANNELS.SHORTCUT_STATUS) },
+  localLlm: {
+    catalog: { list: () => invoke(CHANNELS.LOCAL_LLM_CATALOG_LIST) },
+    installed: {
+      list: () => invoke(CHANNELS.LOCAL_LLM_INSTALLED_LIST),
+      get: (modelId) => invoke(CHANNELS.LOCAL_LLM_INSTALLED_GET, modelId),
+    },
+    import: {
+      begin: () => invoke(CHANNELS.LOCAL_LLM_IMPORT_BEGIN),
+      commit: (token) => invoke(CHANNELS.LOCAL_LLM_IMPORT_COMMIT, token),
+      cancel: (token) => invoke(CHANNELS.LOCAL_LLM_IMPORT_CANCEL, token),
+    },
+  },
   events: {
     subscribe(type, listener) {
       if (typeof type !== "string" || type.length === 0 || type.length > 128 || typeof listener !== "function") return () => {};
