@@ -18,9 +18,10 @@ import type { FeedFetchInput } from "../../shared/services/feed-contract";
 import type { SpeechBackendService } from "../services/speech/speech-backend-service";
 import type { TwitchChatService } from "../services/twitch/twitch-chat-service";
 import type { ShortcutService } from "../services/shortcut-service";
+import type { BuildInfo } from "../../shared/build-info";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; shortcutService: ShortcutService; buildInfo: BuildInfo; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -60,7 +61,7 @@ function register<T>(channel: string, handler: Handler<T>, options: RegisterOpti
 export function registerIpcHandlers(options: RegisterOptions): () => void {
   register(CHANNELS.PLATFORM_GET_INFO, (event, input) => {
     expectNoInput(input);
-    return { runtime: "electron", platform: process.platform, arch: process.arch, appVersion: require("electron").app.getVersion(), isPackaged: require("electron").app.isPackaged };
+    return { runtime: "electron", platform: process.platform, arch: process.arch, appVersion: require("electron").app.getVersion(), isPackaged: require("electron").app.isPackaged, buildInfo: options.buildInfo };
   }, options);
   register(CHANNELS.CONFIG_GET, (event, input) => { expectNoInput(input); return options.configRepository.getPublic(); }, options);
   register(CHANNELS.CONFIG_SAVE, async (event, input) => {

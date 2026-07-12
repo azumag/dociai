@@ -75,6 +75,10 @@ try {
   }));
   assert.equal(checks.platform.ok, true, JSON.stringify(checks.platform));
   assert.equal(checks.platform.value.runtime, "electron");
+  assert.equal(checks.platform.value.isPackaged, false, "dev smoke runs unpacked, isPackaged must be false");
+  // BuildInfo(#72) must reach the running app and match what scripts/electron/build.mjs embedded in dist/electron/build-info.json.
+  const expectedBuildInfo = JSON.parse(await fs.readFile(path.join(repoRoot, "dist/electron/build-info.json"), "utf8"));
+  assert.deepEqual(checks.platform.value.buildInfo, expectedBuildInfo, "dev app buildInfo must match dist/electron/build-info.json");
   assert.deepEqual(checks.keys, ["ai", "bouyomi", "config", "events", "feeds", "obs", "platform", "secrets", "shortcuts", "speech", "system", "topics", "twitch", "windows"]);
   assert.match(checks.csp ?? "", /object-src 'none'/);
   assert.match(checks.csp ?? "", /connect-src 'self'/);

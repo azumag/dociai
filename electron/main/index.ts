@@ -15,6 +15,7 @@ import { registerIpcHandlers } from "./ipc/register";
 import { SpeechBackendService } from "./services/speech/speech-backend-service";
 import { TwitchChatService } from "./services/twitch/twitch-chat-service";
 import { ShortcutService } from "./services/shortcut-service";
+import { resolveRuntimeLayout, readBuildInfo } from "./runtime-layout";
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "dociai",
@@ -104,6 +105,8 @@ if (!hasLock) {
     const paths = resolveAppPaths(app.getPath("userData"));
     ensureAppPaths(paths);
     const appPath = app.getAppPath();
+    const runtimeLayout = resolveRuntimeLayout({ isPackaged: app.isPackaged, appPath, resourcesPath: process.resourcesPath });
+    const buildInfo = readBuildInfo(runtimeLayout.buildInfoFile);
     const devServerUrl = process.env.DOCIAI_DEV_SERVER_URL;
     const configRepository = new ConfigRepository(paths);
     const secretStore = new SafeStorageSecretStore(safeStorage, paths.secretsFile, paths.secretsBackupFile);
@@ -146,7 +149,7 @@ if (!hasLock) {
     const shortcutService = new ShortcutService(globalShortcut, (event) => controller?.emitToConsole("shortcut:status", event), (event) => controller?.emitToConsole("shortcut:trigger", event));
     const currentConfig = await configRepository.getPublic();
     shortcutService.sync((currentConfig.config.triggers ?? {}) as Record<string, unknown>);
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, shortcutService, devServerUrl });
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, shortcutService, buildInfo, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
     app.once("before-quit", () => feedService.dispose());
