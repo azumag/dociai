@@ -40,20 +40,30 @@ async function tempDir(prefix) {
 }
 
 /** Builds a real (spec-shaped) GGUF byte buffer: magic + version + tensor_count + kv_count,
- * followed by string-typed KV entries (type=8 is GGUF_TYPE.STRING). Good enough to exercise the
- * real header parser end-to-end without needing an actual model file. */
+ * followed by KV entries. Good enough to exercise the real header parser end-to-end without
+ * needing an actual model file. Each entry is `[key, value]` (string-typed, GGUF_TYPE.STRING —
+ * the original/default shape) or `[key, value, "uint32"]` (GGUF_TYPE.UINT32, added for #78's
+ * numeric architecture-field parsing — see gguf-metadata-reader.ts's readGgufScalar()). */
 function buildGgufBuffer({ magic = "GGUF", version = 3, tensorCount = 0n, kvEntries = [] } = {}) {
   const parts = [Buffer.from(magic, "ascii")];
   const versionBuf = Buffer.alloc(4); versionBuf.writeUInt32LE(version, 0); parts.push(versionBuf);
   const tensorCountBuf = Buffer.alloc(8); tensorCountBuf.writeBigUInt64LE(BigInt(tensorCount), 0); parts.push(tensorCountBuf);
   const kvCountBuf = Buffer.alloc(8); kvCountBuf.writeBigUInt64LE(BigInt(kvEntries.length), 0); parts.push(kvCountBuf);
-  for (const [key, value] of kvEntries) {
+  for (const [key, value, type = "string"] of kvEntries) {
     const keyBuf = Buffer.from(key, "utf8");
     const keyLenBuf = Buffer.alloc(8); keyLenBuf.writeBigUInt64LE(BigInt(keyBuf.length), 0);
-    const typeBuf = Buffer.alloc(4); typeBuf.writeUInt32LE(8, 0); // GGUF_TYPE.STRING
-    const valueBuf = Buffer.from(value, "utf8");
-    const valueLenBuf = Buffer.alloc(8); valueLenBuf.writeBigUInt64LE(BigInt(valueBuf.length), 0);
-    parts.push(keyLenBuf, keyBuf, typeBuf, valueLenBuf, valueBuf);
+    if (type === "string") {
+      const typeBuf = Buffer.alloc(4); typeBuf.writeUInt32LE(8, 0); // GGUF_TYPE.STRING
+      const valueBuf = Buffer.from(value, "utf8");
+      const valueLenBuf = Buffer.alloc(8); valueLenBuf.writeBigUInt64LE(BigInt(valueBuf.length), 0);
+      parts.push(keyLenBuf, keyBuf, typeBuf, valueLenBuf, valueBuf);
+    } else if (type === "uint32") {
+      const typeBuf = Buffer.alloc(4); typeBuf.writeUInt32LE(4, 0); // GGUF_TYPE.UINT32
+      const valueBuf = Buffer.alloc(4); valueBuf.writeUInt32LE(value, 0);
+      parts.push(keyLenBuf, keyBuf, typeBuf, valueBuf);
+    } else {
+      throw new Error(`buildGgufBuffer: unsupported test fixture KV type ${type}`);
+    }
   }
   return Buffer.concat(parts);
 }
@@ -224,6 +234,71 @@ test("gguf-metadata-reader: parses a real header (magic/version/counts/KV string
     const truncated = await modules.readGgufHeader(truncatedPath);
     assert.equal(truncated.valid, false);
     assert.match(truncated.reason, /smaller than the GGUF header/);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("gguf-metadata-reader: extracts numeric architecture fields (#78's planning layer input) by KV key suffix, leaving genuinely absent fields undefined rather than 0", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    const fullBuffer = buildGgufBuffer({
+      version: 3,
+      kvEntries: [
+        ["general.architecture", "llama"],
+        ["llama.context_length", 4096, "uint32"],
+        ["llama.embedding_length", 4096, "uint32"],
+        ["llama.block_count", 32, "uint32"],
+        ["llama.attention.head_count", 32, "uint32"],
+        ["llama.attention.head_count_kv", 8, "uint32"],
+        ["llama.feed_forward_length", 11008, "uint32"],
+        ["tokenizer.ggml.model", "llama"], // an unrelated string field must not disturb numeric parsing
+      ],
+    });
+    const fullPath = path.join(directory, "full.gguf");
+    await fs.writeFile(fullPath, fullBuffer);
+    const full = await modules.readGgufHeader(fullPath);
+    assert.equal(full.valid, true);
+    assert.equal(full.contextLength, 4096);
+    assert.equal(full.embeddingLength, 4096);
+    assert.equal(full.blockCount, 32);
+    assert.equal(full.attentionHeadCount, 32);
+    assert.equal(full.attentionHeadCountKv, 8);
+    assert.equal(full.feedForwardLength, 11008);
+
+    // A model with NO attention.head_count_kv (classic multi-head attention, no GQA) — the reader
+    // must leave it `undefined`, never default it to attentionHeadCount or to 0. Defaulting
+    // head_count_kv when absent is fit-estimator.ts's job (computeMemoryBreakdown), not this
+    // reader's — this test guards the layering boundary between the two.
+    const mhaBuffer = buildGgufBuffer({
+      version: 3,
+      kvEntries: [
+        ["general.architecture", "llama"],
+        ["llama.context_length", 2048, "uint32"],
+        ["llama.embedding_length", 2048, "uint32"],
+        ["llama.block_count", 16, "uint32"],
+        ["llama.attention.head_count", 16, "uint32"],
+      ],
+    });
+    const mhaPath = path.join(directory, "mha.gguf");
+    await fs.writeFile(mhaPath, mhaBuffer);
+    const mha = await modules.readGgufHeader(mhaPath);
+    assert.equal(mha.valid, true);
+    assert.equal(mha.attentionHeadCount, 16);
+    assert.equal(mha.attentionHeadCountKv, undefined);
+    assert.equal(mha.blockCount, 16);
+
+    // A header with none of these numeric fields at all: every one of them stays undefined —
+    // never coerced to 0, which would look like "a real, tiny, zero-layer model" instead of "we
+    // don't have this data".
+    const bareBuffer = buildGgufBuffer({ version: 3, kvEntries: [["general.architecture", "unknown-arch"]] });
+    const barePath = path.join(directory, "bare.gguf");
+    await fs.writeFile(barePath, bareBuffer);
+    const bare = await modules.readGgufHeader(barePath);
+    assert.equal(bare.valid, true);
+    for (const field of ["contextLength", "embeddingLength", "blockCount", "attentionHeadCount", "attentionHeadCountKv", "feedForwardLength"]) {
+      assert.equal(bare[field], undefined, `expected ${field} to be undefined, not defaulted to 0, when absent from the file`);
+    }
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
