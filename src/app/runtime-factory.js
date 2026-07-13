@@ -161,6 +161,7 @@ function buildEventTriggerRunner({ config, deps, generation, isCurrent, personaR
     obs: { publish: (type, payload) => deps.broadcast(type, payload) },
     dispatch: (event) => deps.onEventTriggerAction?.(event),
     clock: () => Date.now(),
+    commonRules: config.context?.commonRules,
   });
 
   const state = { unsubscribe: null, lastError: null, lastEventAt: null };

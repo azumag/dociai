@@ -246,6 +246,7 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 | `commentHistoryLimit` | 80 | 保持する生コメント数 (リングバッファ) |
 | `includeRecentComments` | 20 | プロンプトに入れる直近コメント数 |
 | `maxPromptChars` | 4000 | プロンプト全体の文字数上限。超えると履歴を古い側から削る |
+| `commonRules` | (下記既定文言) | 全ペルソナの `systemPrompt` の後ろに `# 共通ルール` として自動で付加される指示文。空文字にすると何も付加されない。既定値は `src/config/config-defaults.js` の `DEFAULT_COMMON_RULES` (「音声読み上げ前提で2文以内」等) |
 | `screenCapture.enabled` | false | 画面キャプチャ文脈のON/OFF |
 | `screenCapture.connector` | — | 画面説明に使うVision対応コネクタID |
 | `screenCapture.maxAgeSeconds` | 120 | これより古い画面説明はプロンプトに入れない |

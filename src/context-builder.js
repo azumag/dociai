@@ -2,12 +2,7 @@
 // コメント履歴・画面文脈・ニュース文脈を設定に応じて出し分け、1箇所でまとめる。
 // build() の戻り値 debugText をUIのデバッグパネルにそのまま表示できる。
 
-const COMMON_RULES = [
-  "あなたはライブ配信に出演するAIです。",
-  "返答は音声読み上げ前提。話し言葉で2文以内、80文字程度までにする。",
-  "絵文字、顔文字、記号の羅列、URLは使わない。",
-  "配信者や視聴者を不快にさせる発言はしない。",
-].join("\n");
+import { DEFAULT_COMMON_RULES } from "./config/config-defaults.js";
 
 const NEWS_MODE_INSTRUCTIONS = {
   topic: "トピックモード: 現状の配信トピックとして自然に紹介し、配信の流れに接続してください。",
@@ -35,8 +30,9 @@ export class ContextBuilder {
   build({ persona, comment = null, includeScreen = "auto", news = null, topic = null, task = null }) {
     const ctx = this.config.context ?? {};
     const maxChars = ctx.maxPromptChars ?? 4000;
+    const commonRules = ctx.commonRules ?? DEFAULT_COMMON_RULES;
 
-    const system = `${persona.systemPrompt ?? ""}\n\n# 共通ルール\n${COMMON_RULES}`.trim();
+    const system = `${persona.systemPrompt ?? ""}\n\n# 共通ルール\n${commonRules}`.trim();
 
     let recentCount = news || topic ? 0 : (ctx.includeRecentComments ?? 20);
     let userContent = this.#compose({ recentCount, includeScreen, news, topic, comment, task });

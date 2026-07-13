@@ -4,10 +4,10 @@
 // the exact convention src/context-builder.js already established for the analogous
 // comment-text-is-untrusted problem:
 //   - src/context-builder.js#build() ALWAYS emits exactly `messages = [{role:"system",...},
-//     {role:"user",...}]`; `persona.systemPrompt` + its own COMMON_RULES constant are the ONLY
-//     things that ever reach the system message, and a comment's free text is only ever placed in
-//     the USER message. This module keeps that same two-message shape and the same
-//     system-is-config-only / user-carries-live-data split.
+//     {role:"user",...}]`; `persona.systemPrompt` + config.context.commonRules (config/config-
+//     defaults.js's DEFAULT_COMMON_RULES if unset) are the ONLY things that ever reach the system
+//     message, and a comment's free text is only ever placed in the USER message. This module keeps
+//     that same two-message shape and the same system-is-config-only / user-carries-live-data split.
 //
 // What this module ADDS on top of that baseline (the issue's own stronger bar for Twitch-sourced
 // text, since a chat comment's author is at least a known Twitch identity flowing through the
@@ -27,13 +27,7 @@
 //      neutralized — so a viewer cannot fake a section boundary and "escape" the quotation, even if
 //      they guess or vary our exact marker text.
 import { sanitizeInlineText } from "../actions/action-schema.js";
-
-const COMMON_RULES = [
-  "あなたはライブ配信に出演するAIです。",
-  "返答は音声読み上げ前提。話し言葉で2文以内、80文字程度までにする。",
-  "絵文字、顔文字、記号の羅列、URLは使わない。",
-  "配信者や視聴者を不快にさせる発言はしない。",
-].join("\n");
+import { DEFAULT_COMMON_RULES } from "../config/config-defaults.js";
 
 /** The explicit anti-injection instruction — placed in the TRUSTED system message, never derived
  * from event data, so its wording can never be influenced by a viewer. */
@@ -149,8 +143,9 @@ export function buildStreamEventContext({
   action = null,
   maxUntrustedChars = DEFAULT_MAX_UNTRUSTED_CHARS,
   maxPromptChars = DEFAULT_MAX_PROMPT_CHARS,
+  commonRules = DEFAULT_COMMON_RULES,
 } = {}) {
-  const system = [persona?.systemPrompt ?? "", "# 共通ルール", COMMON_RULES, "# タスク", taskDescriptionFor(event, action), "# 引用テキストの扱い", UNTRUSTED_SECTION_POLICY]
+  const system = [persona?.systemPrompt ?? "", "# 共通ルール", commonRules, "# タスク", taskDescriptionFor(event, action), "# 引用テキストの扱い", UNTRUSTED_SECTION_POLICY]
     .filter(Boolean)
     .join("\n\n")
     .trim();

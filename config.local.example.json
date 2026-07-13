@@ -34,6 +34,7 @@
     "commentHistoryLimit": 80,
     "includeRecentComments": 20,
     "maxPromptChars": 4000,
+    "commonRules": "あなたはライブ配信に出演するAIです。\n返答は音声読み上げ前提。話し言葉で2文以内、80文字程度までにする。\n絵文字、顔文字、記号の羅列、URLは使わない。\n配信者や視聴者を不快にさせる発言はしない。",
     "screenCapture": {
       "enabled": true,
       "connector": "vision_model",
