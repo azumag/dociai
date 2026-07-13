@@ -133,46 +133,65 @@ scrubbed with `scripts/release/redact-log.mjs` (reusing `signing-credentials.mjs
 - **A tag pushed with the wrong version** never gets past `validate-tag` (see "Channel
   determination" above) — no package/publish work happens for it at all.
 
-## Auto-update (macOS)
+## Auto-update (macOS + Windows)
 
-The macOS build auto-updates via `electron-updater`, reusing this same tag-triggered release
+Both desktop builds auto-update via `electron-updater`, reusing this same tag-triggered release
 pipeline as its update feed — no separate infrastructure. See
 `electron/main/services/update/update-service.ts`'s header comment for the in-app mechanics
-(check/download/install gating, broadcast-safety UX) and `electron-builder.yml`'s `publish:` block
-for why `package.yml`'s build step never itself talks to GitHub (`--publish never` — only this
-workflow's own `gh release create` step, below, ever uploads anything).
+(check/download/install gating, broadcast-safety UX — the same class handles both platforms,
+electron-updater's `autoUpdater` singleton auto-selects `MacUpdater`/`NsisUpdater`) and
+`electron-builder.yml`'s `publish:` block for why `package.yml`'s build step never itself talks to
+GitHub (`--publish never` — only this workflow's own `gh release create` step, below, ever uploads
+anything).
 
-- **Windows has no auto-update yet.** `win.target` is `zip` only (no NSIS installer), so no
-  `latest.yml` is ever produced for it; a Windows install stays a manual re-download until a
-  follow-up adds the NSIS target (see that change's own PR for why this was deliberately deferred —
-  in short, no Windows signing certificate exists yet either, and NSIS needs
-  `publish-manifest.mjs`'s `REQUIRED_TARGETS` check reworked to handle more than one artifact per
-  platform/arch first).
-- **Dormant until signing exists.** `validate-tag`'s "Require signing credentials for release" gate
-  (above) already refuses to publish any release at all without both signing secrets configured, so
-  an unsigned build can never reach the update feed in the first place — no separate feature-flag
-  is needed to keep auto-update off until signing lands. Once it does, treat the GitHub repo/Actions
-  pipeline itself as part of the trust boundary: anyone who can push a `v*` tag or forge a release
-  asset can ship code that auto-installs onto every user's machine. macOS code signing +
-  notarization (`docs/signing.md`) is what lets Gatekeeper/Squirrel.Mac refuse a tampered update
-  after the fact; there is no equivalent check today if the release pipeline's own credentials were
-  compromised upstream of signing.
+- **Windows ships two artifacts, not one.** `win.target` is `zip` (manual/portable download,
+  unrelated to auto-update) + `nsis` (the installer electron-updater's `NsisUpdater` actually
+  needs). `publish-manifest.mjs`'s `REQUIRED_TARGETS` verifies both independently (platform/arch
+  alone can't distinguish them — see that file's own header comment); a release missing the exe
+  fails to publish, same as any other required target.
+- **Update-metadata filenames are NOT symmetric across platforms** — verified against
+  electron-builder's actual source, not assumed: macOS gets a `-mac` suffix (`latest-mac.yml`)
+  while Windows gets none at all (`latest.yml`, not `latest-win.yml`). The `publish` job's asset
+  step asserts both filenames are present among the release's assets before publishing, precisely
+  because a client silently treats a missing/unreadable channel file as "no update available" —
+  see update-service.ts's `isNotFoundError` — so a broken upload here would otherwise ship an
+  update-incapable release with no visible symptom anywhere.
+- **Dormant until signing exists, on both platforms.** `validate-tag`'s "Require signing
+  credentials for release" gate (above) already refuses to publish any release at all without
+  *both* platforms' signing secrets configured, so an unsigned build can never reach the update
+  feed in the first place — no separate feature-flag is needed to keep auto-update off until
+  signing lands. Once it does, treat the GitHub repo/Actions pipeline itself as part of the trust
+  boundary: anyone who can push a `v*` tag or forge a release asset can ship code that
+  auto-installs onto every user's machine. macOS code signing + notarization (`docs/signing.md`) is
+  what lets Gatekeeper/Squirrel.Mac refuse a tampered update after the fact. On Windows,
+  electron-builder normally auto-computes the publisherName electron-updater's `NsisUpdater` checks
+  from the certificate's own CN once a real certificate is configured (as long as
+  `verifyUpdateCodeSignature` is never explicitly disabled) — but `validate-tag`'s "Require
+  win.signtoolOptions.publisherName alongside a Windows signing certificate" step still hard-requires
+  `win.signtoolOptions.publisherName` (NOT `win.publisherName` — that key doesn't exist in this
+  electron-builder version's schema) to be set explicitly, as a belt-and-suspenders check against
+  that verification ever being silently disabled.
 - **Manual end-to-end verification** (not CI-automatable — it needs two real, consecutively
-  published GitHub Releases): once signing secrets are configured, publish `v0.0.x-beta.1`, install
-  it locally, then publish `v0.0.x-beta.2` and confirm the running `beta.1` app detects, downloads,
-  and (after an explicit "restart and install" click) installs `beta.2`. The beta channel exists
-  exactly for this — it never affects `stable`-channel users, so this is safe to do against this
-  repo's real release feed rather than only in an isolated fixture.
+  published GitHub Releases): once signing secrets are configured (both platforms — the release
+  gate won't let you do this for just one), publish `v0.0.x-beta.1`, install it locally, then
+  publish `v0.0.x-beta.2` and confirm the running `beta.1` app detects, downloads, and (after an
+  explicit "restart and install" click) installs `beta.2`. The beta channel exists exactly for
+  this — it never affects `stable`-channel users, so this is safe to do against this repo's real
+  release feed rather than only in an isolated fixture. Do this on both a real macOS and a real
+  Windows machine — the NSIS installer's actual install/uninstall/update behavior has never been
+  exercised end-to-end in this repo (local development only confirmed electron-builder can
+  *package* an NSIS installer from macOS without Wine; CI's package-windows job only verifies
+  `win-unpacked`, never runs the packaged installer itself).
 
 ## Rollback and redistribution of a previous version
 
 Auto-update clients never downgrade — they only ever offer/install a version newer than the one
-currently running. So on a build with auto-update wired (macOS, once signing exists — see above),
-"rollback" for an already-installed app means publishing a *new*, higher version that reverts the
-regression, not un-publishing the bad one. Un-publishing (below) still matters for stopping *new*
-installs/manual downloads of the bad version, and for Windows (no auto-update yet, so
-republishing-as-the-recommended-download, below, is still how a fresh install gets the good
-version).
+currently running. So on a build with auto-update wired (macOS + Windows, once signing exists on
+each — see above), "rollback" for an already-installed app means publishing a *new*, higher version
+that reverts the regression, not un-publishing the bad one. Un-publishing (below) still matters for
+stopping *new* installs/manual downloads of the bad version, and for whichever platform doesn't yet
+have signing configured (no auto-update until then, so republishing-as-the-recommended-download,
+below, is still how a fresh install gets the good version).
 
 1. **The previous version's GitHub Release still exists** (this workflow never deletes a release
    for a *different* tag): point users back at it directly — its assets, `publish-manifest.json`,

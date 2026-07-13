@@ -1,9 +1,13 @@
-// Auto-update, macOS-only for now (electron-builder.yml's own header comment explains why: no
-// Windows NSIS target yet, so no `latest.yml` ever gets published for win — see also
-// docs/release.md/docs/signing.md). electron/main/index.ts only constructs this service, and only
-// wires it live, when `process.platform === "darwin" && app.isPackaged` — everywhere else it's
-// simply never instantiated, so `enabled: false` below is a defensive fallback, not the primary
-// gate.
+// Auto-update, macOS + Windows. Written against electron-updater's platform-generic `AppUpdater`
+// base API (AutoUpdaterLike below) — electron-updater's `autoUpdater` singleton auto-selects
+// MacUpdater or NsisUpdater by platform, both sharing the same event/method surface this class
+// actually touches, so nothing here is platform-specific. electron/main/index.ts only constructs
+// this service, and only wires it live, when `(process.platform === "darwin" || "win32") &&
+// app.isPackaged && channel !== "dev"` — everywhere else it's simply never instantiated, so
+// `enabled: false` below is a defensive fallback, not the primary gate. (Windows also needs a
+// signing certificate + `win.publisherName` before update-downloaded artifacts are actually
+// signature-verified — see electron-builder.yml's `win:` block — same "dormant until signing
+// exists" posture already true for macOS, not a functional gap in this file.)
 //
 // Broadcast-safety UX (this app is typically open, live, on an operator's screen *during* a
 // stream): checking happens automatically, but nothing downloads or installs without an explicit
@@ -109,12 +113,15 @@ export class UpdateService {
     return this.#state;
   }
 
-  // isSilent=false, isForceRunAfter=true: shows the platform's own "installing update" UI instead
-  // of a silent background swap, and relaunches afterward rather than leaving the app closed —
-  // matches what an operator explicitly clicking "restart and install" expects to happen. Returns
-  // whether it actually installed — the IPC layer must not claim success when this was a no-op
-  // (disabled, or nothing downloaded yet), since the renderer's confirm dialog leads the operator
-  // to expect the app is about to restart.
+  // isSilent=false: shows the platform's own "installing update" UI instead of a silent background
+  // swap — matches what an operator explicitly clicking "restart and install" expects to happen.
+  // isForceRunAfter=true relaunches afterward on macOS; on Windows electron-updater's BaseUpdater
+  // ignores this second argument whenever isSilent is false and relaunches based on
+  // `autoRunAppAfterInstall` instead (electron-updater's own default: true) — same net "relaunch
+  // after install" behavior on both platforms, just via a different knob. Returns whether it
+  // actually installed — the IPC layer must not claim success when this was a no-op (disabled, or
+  // nothing downloaded yet), since the renderer's confirm dialog leads the operator to expect the
+  // app is about to restart.
   quitAndInstall(): boolean {
     if (!this.#updater || this.#state.phase !== "downloaded") return false;
     this.#updater.quitAndInstall(false, true);

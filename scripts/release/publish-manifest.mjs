@@ -1,21 +1,31 @@
 #!/usr/bin/env node
-// publish-manifest.mjs (#74): release.ymlのpublish jobが、mac arm64/x64 + win x64の全target分の
-// artifact + checksum + release-manifest.json (#72のgenerate-checksums.mjsが各OS jobで書き出した
-// もの) が揃っていることを確認してから、公開用の publish-manifest.json (1本にまとめたmanifest)
-// と SHA256SUMS を書き出す。1つでも欠落・checksum不一致があれば何も書き出さずexit 1で落ちる —
+// publish-manifest.mjs (#74): release.ymlのpublish jobが、REQUIRED_TARGETS (mac arm64 zip /
+// mac x64 zip / win x64 zip / win x64 nsis exe) 分のartifact + checksum + release-manifest.json
+// (#72のgenerate-checksums.mjsが各OS jobで書き出したもの) が「ちょうど1件ずつ」揃っていることを
+// 確認してから、公開用の publish-manifest.json (1本にまとめたmanifest) と SHA256SUMS を書き出す。
+// 1つでも欠落・重複・想定外artifact混入・checksum不一致があれば何も書き出さずexit 1で落ちる —
 // 「失敗releaseが部分的なstable配布を残さない」を実装する場所。
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { computeSha256 } from "./generate-checksums.mjs";
 
+// `ext` (not just platform/arch) matters now that win/x64 legitimately ships two artifacts (zip +
+// nsis .exe, both needed — see electron-builder.yml's `win.target`) with the SAME platform/arch: a
+// platform/arch-only key can't tell "the exe is here twice, the zip never uploaded" apart from
+// "both present", which is exactly the failure mode #74's "never publish a partial release"
+// contract exists to catch. Each entry below must match EXACTLY ONE artifact — zero is missing,
+// two or more is a duplicate/stale-merge bug — and every artifact in the merged manifest must be
+// consumed by some required target, so an unexpected/unlisted artifact fails loudly instead of
+// silently riding along unverified in the release.
 export const REQUIRED_TARGETS = [
-  { platform: "mac", arch: "arm64" },
-  { platform: "mac", arch: "x64" },
-  { platform: "win", arch: "x64" },
+  { platform: "mac", arch: "arm64", ext: ".zip" },
+  { platform: "mac", arch: "x64", ext: ".zip" },
+  { platform: "win", arch: "x64", ext: ".zip" },
+  { platform: "win", arch: "x64", ext: ".exe" },
 ];
 
-export function targetKey({ platform, arch }) {
-  return `${platform}/${arch}`;
+export function targetKey({ platform, arch, ext }) {
+  return `${platform}/${arch}${ext ?? ""}`;
 }
 
 export async function findFilesRecursive(root) {
@@ -65,10 +75,16 @@ export function mergeReleaseManifests(manifests) {
   };
 }
 
-// 必須targetそれぞれについて、mergeした manifest 上のartifact entryを探し、実fileと
-// .sha256 sidecarの両方がrootDir配下に存在し、かつ実fileの実際のsha256がmanifest記載値と
-// sidecar記載値の両方に一致することを確認する(sidecarだけ・manifestだけの一致では
-// 「stale copyが片方だけ更新された」ケースを見逃す)。
+function artifactExt(fileName) {
+  return path.extname(fileName).toLowerCase();
+}
+
+// 必須targetそれぞれについて、mergeした manifest 上のartifact entry(platform/arch/ext全て一致)を
+// 探し、実fileと.sha256 sidecarの両方がrootDir配下に存在し、かつ実fileの実際のsha256がmanifest
+// 記載値とsidecar記載値の両方に一致することを確認する(sidecarだけ・manifestだけの一致では
+// 「stale copyが片方だけ更新された」ケースを見逃す)。ちょうど1件の一致を要求する: 0件は
+// missing、2件以上は重複/stale mergeとしてduplicateへ。どのrequiredTargetsにも一致しない
+// artifactが残っていたら(=検証を一切通らずreleaseへ混入するfile) unexpectedへ回す。
 export async function verifyManifestCompleteness({ merged, rootDir, requiredTargets = REQUIRED_TARGETS, computeSha256Impl = computeSha256 }) {
   const allFiles = await findFilesRecursive(rootDir);
   const filesByName = new Map();
@@ -76,14 +92,26 @@ export async function verifyManifestCompleteness({ merged, rootDir, requiredTarg
 
   const missing = [];
   const mismatched = [];
+  const duplicate = [];
   const targets = [];
+  const consumed = new Set();
 
   for (const required of requiredTargets) {
-    const artifact = merged.artifacts.find((entry) => entry.platform === required.platform && entry.arch === required.arch);
-    if (!artifact) {
+    const matches = merged.artifacts.filter((entry) => entry.platform === required.platform && entry.arch === required.arch && artifactExt(entry.fileName) === required.ext);
+    if (matches.length === 0) {
       missing.push({ ...required, reason: "no artifact entry in merged release-manifest.json" });
       continue;
     }
+    if (matches.length > 1) {
+      // Marked consumed too, not just recorded in `duplicate` — otherwise these same entries would
+      // ALSO show up in `unexpected` below (nothing else claims them), reporting one real problem
+      // as two separate-looking failures in the output.
+      for (const entry of matches) consumed.add(entry);
+      duplicate.push({ ...required, fileNames: matches.map((entry) => entry.fileName), reason: `${matches.length} artifact entries match this target (expected exactly 1) — stale/duplicate merge?` });
+      continue;
+    }
+    const [artifact] = matches;
+    consumed.add(artifact);
     const artifactPath = filesByName.get(artifact.fileName);
     if (!artifactPath) {
       missing.push({ ...required, fileName: artifact.fileName, reason: `artifact file "${artifact.fileName}" not found under ${rootDir}` });
@@ -103,7 +131,9 @@ export async function verifyManifestCompleteness({ merged, rootDir, requiredTarg
     targets.push({ ...required, fileName: artifact.fileName, sha256: actualSha256, sizeBytes: artifact.sizeBytes });
   }
 
-  return { ok: missing.length === 0 && mismatched.length === 0, missing, mismatched, targets };
+  const unexpected = merged.artifacts.filter((entry) => !consumed.has(entry)).map((entry) => ({ fileName: entry.fileName, platform: entry.platform, arch: entry.arch, reason: "artifact present in merged release-manifest.json but not covered by any required target" }));
+
+  return { ok: missing.length === 0 && mismatched.length === 0 && duplicate.length === 0 && unexpected.length === 0, missing, mismatched, duplicate, unexpected, targets };
 }
 
 export function buildPublishManifest({ merged, verification, signingStatus = {}, now = () => new Date() }) {
@@ -155,7 +185,7 @@ export async function publishManifest({
 
   const verification = await verifyManifestCompleteness({ merged, rootDir, requiredTargets, computeSha256Impl });
   if (!verification.ok) {
-    return { ok: false, reason: "incomplete or inconsistent target set", missing: verification.missing, mismatched: verification.mismatched };
+    return { ok: false, reason: "incomplete or inconsistent target set", missing: verification.missing, mismatched: verification.mismatched, duplicate: verification.duplicate, unexpected: verification.unexpected };
   }
 
   const publish = buildPublishManifest({ merged, verification, signingStatus, now });
@@ -184,6 +214,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     for (const entry of result.missing ?? []) console.error(`  - missing ${targetKey(entry)}: ${entry.reason}`);
     for (const entry of result.mismatched ?? [])
       console.error(`  - checksum mismatch ${targetKey(entry)}: manifest=${entry.manifestSha256} sidecar=${entry.sidecarSha256} actual=${entry.actualSha256}`);
+    for (const entry of result.duplicate ?? []) console.error(`  - duplicate ${targetKey(entry)}: ${entry.reason} (${entry.fileNames?.join(", ")})`);
+    for (const entry of result.unexpected ?? []) console.error(`  - unexpected artifact ${entry.fileName} (${entry.platform}/${entry.arch}): ${entry.reason}`);
     process.exitCode = 1;
   } else {
     console.log(`PASS | publish-manifest | ${result.publish.targets.length} target(s) verified, manifest at ${result.manifestPath}`);

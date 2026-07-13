@@ -154,17 +154,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: package-macos-artifacts-${{ github.run_id }}
-          # `*-mac.yml`, not the broader `*.yml`: electron-builder's update-metadata file is named
-          # `<channel>-mac.yml` (`latest-mac.yml` for this repo, since electron-builder.yml sets no
-          # explicit `channel:` — electron-updater's own client-side fallback from a channel-specific
-          # file to `latest-mac.yml` means this stays correct if a channel ever is configured later)
-          # — a bare `*.yml` would also match `builder-debug.yml` (electron-builder's effective-config
-          # dump, only written when `DEBUG=electron-builder` is set for a debugging re-run) and leak
-          # it into a public release's assets.
+          # `*.yml` picks up electron-builder's update-metadata file (`latest-mac.yml` for this
+          # repo — electron-builder.yml sets no explicit `channel:`) without hardcoding a channel
+          # name, which a bare `*-mac.yml`-style pattern would (breaks the moment a channel is ever
+          # configured, e.g. a beta build's `beta-mac.yml`). The one thing that pattern needs
+          # excluding is `builder-debug.yml`, electron-builder's effective-config dump — only
+          # written when `DEBUG=electron-builder` is set for a debugging re-run, but a bare `*.yml`
+          # would otherwise leak it into a public release's assets.
           path: |
             dist/release/*.zip
             dist/release/*.dmg
-            dist/release/*-mac.yml
+            dist/release/*.yml
+            !dist/release/builder-debug.yml
             dist/release/*.blockmap
           if-no-files-found: error
           retention-days: 14
@@ -264,10 +265,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: package-windows-artifacts-${{ github.run_id }}
+          # *.yml (electron-builder's Windows update-metadata file has NO platform suffix at all —
+          # `latest.yml` for this repo, not `latest-win.yml` — see package-macos's equivalent step
+          # for why the pattern is a bare `*.yml` + builder-debug.yml exclusion rather than a
+          # hardcoded channel/platform name) + *.blockmap (NSIS differential-update support —
+          # missing this wouldn't break anything visibly, just silently force every update to a
+          # full download instead of a delta one, so don't drop it "because nothing failed").
           path: |
             dist/release/*.zip
             dist/release/*.exe
             dist/release/*.msi
+            dist/release/*.yml
+            !dist/release/builder-debug.yml
+            dist/release/*.blockmap
           if-no-files-found: error
           retention-days: 14
           overwrite: true

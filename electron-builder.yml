@@ -96,7 +96,14 @@ mac:
 win:
   icon: build/icons/icon.ico
   target:
+    # zip: manual/portable download (kept — unrelated to auto-update). nsis: required for
+    # electron-updater's Windows auto-update path (NsisUpdater) — a bare zip can't be
+    # auto-installed. See the top-level `nsis:` block below for why oneClick/perMachine are set the
+    # way they are; both targets share this file's win.signtoolOptions signing config.
     - target: zip
+      arch:
+        - x64
+    - target: nsis
       arch:
         - x64
   # Certificate injection (#73 「Windows certificate注入方式を決定」): CSC_LINK/CSC_KEY_PASSWORD
@@ -108,10 +115,51 @@ win:
   # scripts/release/setup-macos-keychain.sh). When those env vars are unset (fork PRs, local
   # dev), electron-builder silently produces an unsigned build unless
   # `signtoolOptions.forceCodeSigning` were true, which it isn't.
+  #
+  # signtoolOptions.publisherName is intentionally NOT set here yet — see the top-level `nsis:`
+  # block below for why it matters for auto-update specifically, and the hard release.yml gate that
+  # exists because of it.
   signtoolOptions:
     signingHashAlgorithms:
       - sha256
     rfc3161TimeStampServer: http://timestamp.digicert.com
+
+# `nsis` is a top-level key (a sibling of `win`, not nested under it — electron-builder's schema
+# rejects it there; confirmed against app-builder-lib's own scheme.json after first getting this
+# wrong and hitting its "configuration.win should be one of these: null" validation error).
+#
+# oneClick:true (not the "assisted" wizard): quitAndInstall() (update-service.ts) already runs
+# non-silently and relaunches after install, and the app-side confirm dialog (src/app/boot.js) is
+# the actual user consent step — a multi-page install wizard on top of that would be a redundant
+# second confirmation, and a genuinely dangerous one for this app specifically: if the operator
+# isn't watching (a live stream can run for hours unattended between checks), an assisted-mode
+# wizard sits waiting for welcome/install-mode/directory/install clicks with the OLD version
+# already quit — worst possible mid-broadcast state. oneClick also collapses away the
+# assisted-mode's per-user/per-machine install-mode picker entirely: perMachine:false below is
+# otherwise only a *default* a user could override into an admin-elevated per-machine install in
+# assisted mode, which would make every later auto-update silently require UAC elevation
+# (electron-updater has no pre-elevation path for that case — see NsisUpdater's EACCES retry
+# fallback). oneClick:true removes that whole failure class.
+#
+# perMachine:false (per-user install, no admin rights needed): matches not having a Windows
+# signing certificate yet either — no reason to add UAC friction before there's even a trusted
+# signer. Revisit together with the cert if that changes.
+#
+# signtoolOptions.publisherName (NOT win.publisherName — that key doesn't exist in electron-builder
+# 26's schema; it moved under win.signtoolOptions, confirmed the hard way by first writing it wrong
+# and hitting the same "configuration.win should be one of these: null" validation error the nsis:
+# nesting mistake above did) is intentionally NOT set here yet — there is no real Windows signing
+# certificate to name (see docs/signing.md). In electron-builder 26, when a real certificate IS
+# configured (CSC_LINK) and `verifyUpdateCodeSignature` isn't explicitly set to `false` (its default
+# is `true`), the publisherName that ends up in `app-update.yml` gets auto-computed from the
+# certificate's own CN — so this normally self-heals the moment a certificate is added, without
+# anyone needing to touch this file. release.yml's validate-tag job still has a hard gate requiring
+# `win.signtoolOptions.publisherName` to be set explicitly alongside the certificate secret anyway,
+# as a belt-and-suspenders check against the case where `verifyUpdateCodeSignature` is ever set to
+# `false` (which would otherwise silently disable Windows update-signature verification entirely).
+nsis:
+  oneClick: true
+  perMachine: false
 
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 
@@ -132,16 +180,17 @@ afterSign: scripts/release/notarize.mjs
 # (electron/main/paths.ts) and is never copied into the app directory or referenced here, so
 # app updates never touch it.
 #
-# Auto-update (electron-updater, macOS-only for now — see electron/main/services/update/
+# Auto-update (electron-updater, macOS + Windows — see electron/main/services/update/
 # update-service.ts): reuses the existing GitHub Releases the tag-triggered release pipeline
 # already publishes to, rather than standing up separate update infrastructure. This config only
-# makes electron-builder EMIT the `latest-mac.yml`/*.blockmap update metadata that
+# makes electron-builder EMIT the `latest-mac.yml`/`latest.yml`/*.blockmap update metadata that
 # electron-updater's GitHub provider reads — it does not make electron-builder itself talk to
 # GitHub. `electron:package`'s `--publish never` flag (package.json) is what enforces that; the
 # existing `gh release create` step in .github/workflows/release.yml uploads the generated
-# metadata files as ordinary release assets alongside the zip/dmg it already uploads. Do not add a
-# GH_TOKEN to the package.yml build steps — its absence is what keeps electron-builder from ever
-# attempting to publish on its own even if `--publish never` were dropped by mistake.
+# metadata files as ordinary release assets alongside the zip/dmg/nsis installer it already
+# uploads. Do not add a GH_TOKEN to the package.yml build steps — its absence is what keeps
+# electron-builder from ever attempting to publish on its own even if `--publish never` were
+# dropped by mistake.
 publish:
   provider: github
   owner: azumag
