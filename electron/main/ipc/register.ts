@@ -248,6 +248,14 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     const stats = options.streamEventBus.stats;
     return { events: options.streamEventBus.list(limit), stats: { totalPublished: stats.totalPublished, totalRejected: stats.totalRejected, totalDuplicates: stats.totalDuplicates, listenerCount: stats.listenerCount } };
   }, options, ["console", "obs"]);
+  // Issue #96: "clear history対象を確認dialogで選択" — restricted to the "console" role only (the
+  // operator-facing Event History UI lives in the main window; the OBS overlay window has no
+  // business clearing the shared replay buffer other windows may still want to snapshot).
+  register(CHANNELS.STREAM_EVENTS_CLEAR, (event, input) => {
+    expectNoInput(input);
+    options.streamEventBus.clearHistory();
+    return { cleared: true };
+  }, options, ["console"]);
   ipcMain.on(CHANNELS.OBS_MESSAGE, (event, message) => {
     try {
       assertTrustedSender(event, options.devServerUrl, ["console", "obs"]);

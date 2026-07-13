@@ -8,3 +8,9 @@ export const TWITCH_AUTH_EVENT_TYPE = "twitch:auth:event";
 export const TWITCH_CONNECTION_EVENT_TYPE = "twitch:connection:event";
 export const TWITCH_SUBSCRIPTIONS_EVENT_TYPE = "twitch:subscriptions:event";
 export const TWITCH_RECONNECT_DIAGNOSTIC_EVENT_TYPE = "twitch:reconnect:diagnostic";
+
+// Issue #96: mirrors electron/shared/services/stream-event-ipc-contract.ts's own
+// `STREAM_EVENT_APP_EVENT_TYPE` (#89) — the `type` discriminant every published StreamEvent (a
+// real production event, forwarded from the Main-process StreamEventBus) is delivered under via
+// the SAME generic `dociai.events.subscribe(type, cb)` mechanism the 4 constants above already use.
+export const STREAM_EVENT_TYPE = "stream-event";

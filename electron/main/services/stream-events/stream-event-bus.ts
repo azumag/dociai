@@ -158,6 +158,16 @@ export class StreamEventBus {
     };
   }
 
+  /** Issue #96: clears ONLY the bounded history (the "recent events" replay buffer a freshly-opened
+   * console/OBS window snapshots via `list()`) — deliberately narrower than `dispose()`, which also
+   * tears down listeners/dedupe and is reserved for app shutdown. Lets the Event History UI's
+   * "clear history" action (scoped to "all", including production) empty the shared replay buffer
+   * without disturbing live subscriptions (Trigger engine / console window / OBS window keep
+   * receiving new events exactly as before). Never throws. */
+  clearHistory(): void {
+    this.#history.clear();
+  }
+
   dispose(): void {
     this.#listeners.clear();
     this.#history.clear();

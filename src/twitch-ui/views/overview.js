@@ -5,6 +5,9 @@ import { renderConnectionCard, updateConnectionCountdown } from "../components/c
 import { renderAuthorizationView, updateAuthorizationCountdown } from "./authorization.js";
 import { renderSubscriptionsView } from "./subscriptions.js";
 import { EventRulesView } from "./event-rules.js";
+import { EventHistoryStore } from "../history/history-store.js";
+import { EventHistoryView } from "./event-history.js";
+import { SimulationView } from "./simulation.js";
 
 // Issue #94: the mount point for the whole Twitch overview screen (dialog root -> tabs ->
 // overview/authorization/subscriptions content), mirroring src/ui/integrations/integration-panel.js's
@@ -21,7 +24,13 @@ import { EventRulesView } from "./event-rules.js";
 // store), `EventRulesView` owns its OWN mutable draft/validation/reward-fetch state across
 // re-renders (mirrors settings-ui.js's `SettingsUI` class, not the other 3 views' stateless render
 // functions) — see event-rules.js's own header comment for why.
-const TAB_LABELS = { overview: "概要", authorization: "認可", subscriptions: "購読", "event-rules": "Event Rule" };
+// Issue #96 adds 2 more tabs — "event-history" (EventHistoryView) and "simulation" (SimulationView)
+// — reachable from the SAME generically-iterated tab bar #95's own comment above describes. Both new
+// views share ONE `EventHistoryStore` instance (constructed once, below, alongside the other
+// per-screen state) so a simulation run recorded by SimulationView is IMMEDIATELY visible from the
+// Event History tab — "event受信から最終action結果まで1件単位で追跡できる" applies to a simulation
+// run exactly as much as a production event, never a second/disconnected history.
+const TAB_LABELS = { overview: "概要", authorization: "認可", subscriptions: "購読", "event-rules": "Event Rule", "event-history": "Event History", simulation: "Simulation" };
 
 function defaultCopyToClipboard(text) {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
@@ -53,6 +62,12 @@ export class TwitchOverviewApp {
     getConfig = () => null,
     onApplyConfig = () => {},
     log = () => {},
+    // Issue #96: an optional REAL `ActionRunner` for the Simulation view's "本番相当で実行" path —
+    // defaults to `null` because no Main-process/Renderer-wide ActionRunner is wired into this app's
+    // boot sequence yet anywhere (see views/simulation.js's own header comment). Injecting one here,
+    // once a future issue builds it, is the only change needed to make production-equivalent
+    // simulation runs actually execute.
+    actionRunner = null,
   } = {}) {
     this.root = root;
     this.document = document;
@@ -67,6 +82,9 @@ export class TwitchOverviewApp {
     this.unsubscribeStore = null;
     this.timer = null;
     this.eventRulesView = new EventRulesView({ document, getConfig, onApplyConfig, client: this.client, log });
+    this.historyStore = new EventHistoryStore();
+    this.eventHistoryView = new EventHistoryView({ document, client: this.client, historyStore: this.historyStore, getConfig, log });
+    this.simulationView = new SimulationView({ document, getConfig, historyStore: this.historyStore, actionRunner, onOpenTrace: (id) => this.#openHistoryTrace(id), log });
     if (!root || !document?.createElement) return;
     this.#build();
   }
@@ -144,7 +162,21 @@ export class TwitchOverviewApp {
       renderSubscriptionsView(this.contentRoot, state, callbacks, this.document);
     } else if (state.view === "event-rules") {
       this.eventRulesView.render(this.contentRoot);
+    } else if (state.view === "event-history") {
+      this.eventHistoryView.render(this.contentRoot);
+    } else if (state.view === "simulation") {
+      this.simulationView.render(this.contentRoot);
     }
+  }
+
+  /** SimulationView's `onOpenTrace` callback — "Event Historyで詳細を見る" — switches to the Event
+   * History tab AND opens that specific run's trace drawer, so a simulation result is never a dead
+   * end even though simulation-result.js only ever renders a quick summary (see that file's own
+   * header comment for why the full trace render lives in ONE place, trigger-trace-drawer.js). */
+  #openHistoryTrace(id) {
+    this.eventHistoryView.selectedEntryId = id;
+    this.eventHistoryView.pendingFocusSelector = "[data-trace-drawer-close]";
+    this.store.dispatch({ type: "twitch/select-view", view: "event-history" });
   }
 
   /** Lets the mounting code (boot.js) feed in the 3 preflight rows this screen has no other way to
@@ -174,6 +206,7 @@ export class TwitchOverviewApp {
   dispose() {
     this.unsubscribeStore?.();
     this.disposeStoreConnection?.();
+    this.eventHistoryView.dispose();
     if (this.timer) this.clearIntervalImpl(this.timer);
     this.timer = null;
   }

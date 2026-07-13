@@ -115,6 +115,7 @@ const api: DociaiApi = {
   },
   streamEvents: {
     list: (input) => invoke(CHANNELS.STREAM_EVENTS_LIST, input),
+    clear: () => invoke(CHANNELS.STREAM_EVENTS_CLEAR),
   },
   events: {
     subscribe(type, listener) {

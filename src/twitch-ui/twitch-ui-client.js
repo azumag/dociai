@@ -10,7 +10,7 @@
 // tests can exercise this against a fake `dociai` object instead of a real preload bridge, and so a
 // Browser-mode build (no `window.dociai`) degrades to a harmless "nothing connected yet" state
 // instead of throwing.
-import { TWITCH_AUTH_EVENT_TYPE, TWITCH_CONNECTION_EVENT_TYPE, TWITCH_RECONNECT_DIAGNOSTIC_EVENT_TYPE, TWITCH_SUBSCRIPTIONS_EVENT_TYPE } from "./twitch-ui-events.js";
+import { STREAM_EVENT_TYPE, TWITCH_AUTH_EVENT_TYPE, TWITCH_CONNECTION_EVENT_TYPE, TWITCH_RECONNECT_DIAGNOSTIC_EVENT_TYPE, TWITCH_SUBSCRIPTIONS_EVENT_TYPE } from "./twitch-ui-events.js";
 
 export function hasTwitchOverviewService(globalScope = globalThis) {
   return typeof globalScope.dociai?.twitch?.auth?.status === "function";
@@ -61,6 +61,21 @@ export class TwitchUiClient {
   // (missing scope / wrong broadcaster / network / …) is returned to the caller as data, so
   // reward-selector.js can render a specific error state instead of a generic thrown message.
   rewardsList() { return unwrap(this.#api.rewards.list()); }
+
+  // -- stream event history (issue #96: Event History view) -----------------------------------
+  // `dociai.streamEvents.{list,clear}` (#89/#96) reuses the Main-process StreamEventBus's OWN
+  // bounded history as the source of truth for production events — this client never re-derives or
+  // re-trims that history itself, it only fetches/clears the snapshot and forwards live pushes.
+  streamEventsList(limit) { return unwrap(this.globalScope.dociai.streamEvents.list(limit ? { limit } : undefined)); }
+  streamEventsClear() { return unwrap(this.globalScope.dociai.streamEvents.clear()); }
+
+  /** Subscribes to every live production StreamEvent forwarded from the Main-process bus. Returns
+   * an unsubscribe function; a no-op subscription (returning a no-op unsubscribe) when this build
+   * has no `dociai` bridge (Browser mode) — mirrors `connectStore()`'s own `available` guard. */
+  subscribeStreamEvents(listener) {
+    if (!this.available) return () => {};
+    return this.globalScope.dociai.events.subscribe(STREAM_EVENT_TYPE, listener);
+  }
 
   /** Fetches the 3 initial snapshots and subscribes to the 4 push-event types, dispatching each
    * into `store` — "auth/connection/subscription initial snapshotを取得" + "generation付きevent
