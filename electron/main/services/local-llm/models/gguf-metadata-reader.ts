@@ -14,7 +14,27 @@ import fs from "node:fs/promises";
 import crypto from "node:crypto";
 
 export type GgufHeaderResult =
-  | { valid: true; version: number; tensorCount: number; kvCount: number; architecture?: string; name?: string }
+  | {
+      valid: true;
+      version: number;
+      tensorCount: number;
+      kvCount: number;
+      architecture?: string;
+      name?: string;
+      // Numeric architecture fields (#78's planning layer needs these for KV-cache/context-fit
+      // estimation — see electron/main/services/local-llm/planning/fit-estimator.ts). Named after
+      // the raw GGUF key's own tail segment (e.g. "{architecture}.context_length"), not the
+      // planning layer's own FitModelInput field names, since more than one consumer may want
+      // these eventually. Absent when the corresponding KV entry isn't present/reachable within
+      // this best-effort scan — never defaulted to 0 here, so a caller can tell "field genuinely
+      // missing" apart from "field is legitimately zero".
+      contextLength?: number;
+      embeddingLength?: number;
+      blockCount?: number;
+      attentionHeadCount?: number;
+      attentionHeadCountKv?: number;
+      feedForwardLength?: number;
+    }
   | { valid: false; reason: string };
 
 const MAGIC_BYTES = "GGUF";
@@ -37,6 +57,36 @@ const FIXED_WIDTH_BY_TYPE: Record<number, number> = {
 function safeNumberFromUint64LE(data: Buffer, offset: number): number {
   const value = data.readBigUInt64LE(offset);
   return value > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(value);
+}
+
+function safeNumberFromInt64LE(data: Buffer, offset: number): number {
+  const value = data.readBigInt64LE(offset);
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) return Number.MAX_SAFE_INTEGER;
+  if (value < BigInt(Number.MIN_SAFE_INTEGER)) return Number.MIN_SAFE_INTEGER;
+  return Number(value);
+}
+
+/** Reads a single FIXED-WIDTH scalar value (every GGUF_TYPE except STRING/ARRAY, which have their
+ * own readers above/below) at `offset`, returning its JS value plus the offset just past it. Used
+ * by readGgufKv() so numeric architecture fields (block_count, context_length, attention.head_
+ * count, ...) are actually captured rather than only skipped-past — see this reader's extended
+ * GgufHeaderResult fields, added for #78's planning layer. Returns null on a truncated buffer or
+ * an unrecognized type, same "stop scanning, don't throw" contract as skipGgufValue(). */
+function readGgufScalar(data: Buffer, offset: number, type: number): { value: number | boolean; next: number } | null {
+  switch (type) {
+    case GGUF_TYPE.UINT8: return offset + 1 <= data.length ? { value: data.readUInt8(offset), next: offset + 1 } : null;
+    case GGUF_TYPE.INT8: return offset + 1 <= data.length ? { value: data.readInt8(offset), next: offset + 1 } : null;
+    case GGUF_TYPE.BOOL: return offset + 1 <= data.length ? { value: data.readUInt8(offset) !== 0, next: offset + 1 } : null;
+    case GGUF_TYPE.UINT16: return offset + 2 <= data.length ? { value: data.readUInt16LE(offset), next: offset + 2 } : null;
+    case GGUF_TYPE.INT16: return offset + 2 <= data.length ? { value: data.readInt16LE(offset), next: offset + 2 } : null;
+    case GGUF_TYPE.UINT32: return offset + 4 <= data.length ? { value: data.readUInt32LE(offset), next: offset + 4 } : null;
+    case GGUF_TYPE.INT32: return offset + 4 <= data.length ? { value: data.readInt32LE(offset), next: offset + 4 } : null;
+    case GGUF_TYPE.FLOAT32: return offset + 4 <= data.length ? { value: data.readFloatLE(offset), next: offset + 4 } : null;
+    case GGUF_TYPE.UINT64: return offset + 8 <= data.length ? { value: safeNumberFromUint64LE(data, offset), next: offset + 8 } : null;
+    case GGUF_TYPE.INT64: return offset + 8 <= data.length ? { value: safeNumberFromInt64LE(data, offset), next: offset + 8 } : null;
+    case GGUF_TYPE.FLOAT64: return offset + 8 <= data.length ? { value: data.readDoubleLE(offset), next: offset + 8 } : null;
+    default: return null;
+  }
 }
 
 function readGgufString(data: Buffer, offset: number): { value: string; next: number } | null {
@@ -74,7 +124,7 @@ function skipGgufValue(data: Buffer, offset: number, type: number): number | nul
   return offset + width <= data.length ? offset + width : null;
 }
 
-function readGgufKv(data: Buffer, offset: number): { key: string; value: string | undefined; next: number } | null {
+function readGgufKv(data: Buffer, offset: number): { key: string; value: string | number | boolean | undefined; next: number } | null {
   const key = readGgufString(data, offset);
   if (!key) return null;
   if (key.next + 4 > data.length) return null;
@@ -84,6 +134,13 @@ function readGgufKv(data: Buffer, offset: number): { key: string; value: string 
     const value = readGgufString(data, valueOffset);
     if (!value) return null;
     return { key: key.value, value: value.value, next: value.next };
+  }
+  if (type !== GGUF_TYPE.ARRAY) {
+    // Every non-string, non-array GGUF_TYPE is a fixed-width scalar readGgufScalar() understands;
+    // a null here means truncation, not "this type has no scalar reader".
+    const scalar = readGgufScalar(data, valueOffset, type);
+    if (!scalar) return null;
+    return { key: key.value, value: scalar.value, next: scalar.next };
   }
   const next = skipGgufValue(data, valueOffset, type);
   if (next === null) return null;
@@ -112,7 +169,16 @@ export async function readGgufHeader(filePath: string): Promise<GgufHeaderResult
     const tensorCount = safeNumberFromUint64LE(data, offset); offset += 8;
     const kvCount = safeNumberFromUint64LE(data, offset); offset += 8;
 
-    const metadata: { architecture?: string; name?: string } = {};
+    const metadata: {
+      architecture?: string;
+      name?: string;
+      contextLength?: number;
+      embeddingLength?: number;
+      blockCount?: number;
+      attentionHeadCount?: number;
+      attentionHeadCountKv?: number;
+      feedForwardLength?: number;
+    } = {};
     const kvLimit = Math.min(kvCount, MAX_KV_ENTRIES_TO_SCAN);
     for (let index = 0; index < kvLimit; index += 1) {
       const entry = readGgufKv(data, offset);
@@ -120,6 +186,22 @@ export async function readGgufHeader(filePath: string): Promise<GgufHeaderResult
       offset = entry.next;
       if (entry.key === "general.architecture" && typeof entry.value === "string") metadata.architecture = entry.value;
       if (entry.key === "general.name" && typeof entry.value === "string") metadata.name = entry.value;
+      // Architecture-prefixed numeric fields (raw key is "{architecture}.<suffix>", e.g.
+      // "llama.attention.head_count_kv") — matched by suffix rather than requiring
+      // general.architecture to have already been seen in this same linear scan, since KV entry
+      // order within a GGUF file is not a guaranteed contract. Suffixes are precise enough (no
+      // architecture defines a KV key ending in these exact strings for anything else) that no
+      // architecture-prefix confirmation is needed. head_count_kv is checked before head_count so
+      // the more specific suffix always wins, even though the two can never actually collide
+      // (".head_count_kv" and ".head_count" cannot both match the same trailing characters).
+      if (typeof entry.value === "number") {
+        if (entry.key.endsWith(".context_length")) metadata.contextLength = entry.value;
+        else if (entry.key.endsWith(".embedding_length")) metadata.embeddingLength = entry.value;
+        else if (entry.key.endsWith(".block_count")) metadata.blockCount = entry.value;
+        else if (entry.key.endsWith(".attention.head_count_kv")) metadata.attentionHeadCountKv = entry.value;
+        else if (entry.key.endsWith(".attention.head_count")) metadata.attentionHeadCount = entry.value;
+        else if (entry.key.endsWith(".feed_forward_length")) metadata.feedForwardLength = entry.value;
+      }
     }
 
     return { valid: true, version, tensorCount, kvCount, ...metadata };
