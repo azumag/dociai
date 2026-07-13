@@ -79,8 +79,8 @@ function handleResponseAction(action) {
 
 // ---- 設定読み込み ----
 
-async function applyLoadedConfig({ config, warnings = [], source, migration = null }) {
-  if (state.config && settingsUI.root?.open) {
+async function applyLoadedConfig({ config, warnings = [], source, migration = null, guardSettingsEditor = true }) {
+  if (guardSettingsEditor && state.config && settingsUI.root?.open) {
     const closeResult = await settingsUI.close("config-reload");
     if (closeResult === "continued") { logEvent("未保存の設定編集があるため再読込を保留しました", "warn"); return { ok: false, stage: "settings-open" }; }
   }
@@ -546,7 +546,11 @@ async function applyEditedConfig(rawConfig) {
   }
   await saveToServer(processed.config);
   const config = processed.config;
-  const result = await applyLoadedConfig({ config, warnings: [...processed.notes, ...warnings], source: "UI編集 (config.local.json に保存済み)", migration: { steps: processed.migrations, secretCandidates: processed.secretCandidates, revision: processed.hash } });
+  // このパスは設定エディタ自身の保存フロー (SettingsUI#apply → onApply) から呼ばれるため、
+  // applyLoadedConfig の「設定エディタが開いていたら閉じるか確認する」ガードは常に自分自身に
+  // 発火してしまい、保存の途中で二重の確認ダイアログが出て保存が失敗扱いになる (settingsUI は
+  // まだ閉じていない状態でここに来る)。ここでは呼び出し元自身が保存後に閉じるので不要。
+  const result = await applyLoadedConfig({ config, warnings: [...processed.notes, ...warnings], source: "UI編集 (config.local.json に保存済み)", migration: { steps: processed.migrations, secretCandidates: processed.secretCandidates, revision: processed.hash }, guardSettingsEditor: false });
   if (!result.ok) throw new Error(`設定の適用に失敗しました (${result.stage})`);
 }
 
