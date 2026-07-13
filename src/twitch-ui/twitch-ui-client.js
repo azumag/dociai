@@ -53,6 +53,15 @@ export class TwitchUiClient {
   // -- subscriptions ------------------------------------------------------------------------------
   subscriptionsStatus() { return unwrap(this.#api.subscriptions.status()); }
 
+  // -- rewards (issue #95: Event Rule editor's reward selector) -------------------------------
+  // Deliberately NOT wrapped in `unwrap()`'s "throw unless ok:true" contract like every action
+  // above: `listCustomRewards()` (Main-process) itself already returns a `{ ok: true, rewards } |
+  // { ok: false, errorCode, message }` result as its VALUE — the OUTER ipc Result envelope is
+  // still unwrapped (a genuine IPC transport failure still throws), but a Helix-level failure
+  // (missing scope / wrong broadcaster / network / …) is returned to the caller as data, so
+  // reward-selector.js can render a specific error state instead of a generic thrown message.
+  rewardsList() { return unwrap(this.#api.rewards.list()); }
+
   /** Fetches the 3 initial snapshots and subscribes to the 4 push-event types, dispatching each
    * into `store` — "auth/connection/subscription initial snapshotを取得" + "generation付きevent
    * をreducerへ適用". Returns a dispose function that unsubscribes everything; safe to call once. */

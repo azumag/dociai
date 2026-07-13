@@ -621,7 +621,17 @@ function bindUI() {
     onNotify: renderIntegrationNotice,
     onExport: () => diagnosticExportDialog.open(integrationPanel.exportPayload({ build: "web" })),
   });
-  twitchOverviewApp = new TwitchOverviewApp(document.querySelector("#twitch-overview-dialog"), { document, onOpenSettings: () => settingsUI.open() });
+  twitchOverviewApp = new TwitchOverviewApp(document.querySelector("#twitch-overview-dialog"), {
+    document,
+    onOpenSettings: () => settingsUI.open(),
+    // Issue #95: the Event Rule editor's save button goes through this SAME applyEditedConfig()
+    // (processConfig -> validateConfig -> saveToServer -> applyLoadedConfig) every other settings
+    // section already uses — see applyEditedConfig's own call site just above for the identical
+    // wiring into SettingsUI's onApply.
+    getConfig: () => state.config,
+    onApplyConfig: (cfg) => applyEditedConfig(cfg),
+    log: (m, level) => logEvent(m, level),
+  });
   renderTwitchOverviewContext();
   return bindConsoleUI(elements, actions);
 }

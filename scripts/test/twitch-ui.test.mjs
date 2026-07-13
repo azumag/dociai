@@ -21,6 +21,7 @@ import { renderConnectionCard } from "../../src/twitch-ui/components/connection-
 import { renderSubscriptionTable } from "../../src/twitch-ui/components/subscription-table.js";
 import { renderAuthorizationView } from "../../src/twitch-ui/views/authorization.js";
 import { renderSubscriptionsView } from "../../src/twitch-ui/views/subscriptions.js";
+import { TwitchOverviewApp } from "../../src/twitch-ui/views/overview.js";
 
 // -------------------------------------------------------------------------------------------
 // Minimal fake DOM — just enough of createElement/append/textContent/dataset/attributes/
@@ -252,6 +253,44 @@ test("TwitchUiClient.runAction: tracks a busy flag around the action and records
   assert.equal(busySnapshots[0], true, "busy flag must be set before the action runs");
   assert.equal(busySnapshots[busySnapshots.length - 1], false, "busy flag must be cleared once the action settles");
   assert.equal(store.getSnapshot().busy.startAuth, false);
+});
+
+test("TwitchUiClient.rewardsList (issue #95): unwraps the IPC envelope but passes a Helix-level failure through as data, never throwing for a 'clear error state' the caller must render", async () => {
+  const okScope = { dociai: { twitch: { rewards: { list: async () => ({ ok: true, value: { ok: true, rewards: [{ id: "r1", title: "x", cost: 1, isEnabled: true, isPaused: false }], updatedAtMs: 1 } }) } } } };
+  const okResult = await new TwitchUiClient(okScope).rewardsList();
+  assert.deepEqual(okResult, { ok: true, rewards: [{ id: "r1", title: "x", cost: 1, isEnabled: true, isPaused: false }], updatedAtMs: 1 });
+
+  const helixFailureScope = { dociai: { twitch: { rewards: { list: async () => ({ ok: true, value: { ok: false, errorCode: "missing_scope", message: "missing scope", updatedAtMs: 2 } }) } } } };
+  const helixFailureResult = await new TwitchUiClient(helixFailureScope).rewardsList();
+  assert.deepEqual(helixFailureResult, { ok: false, errorCode: "missing_scope", message: "missing scope", updatedAtMs: 2 });
+
+  const ipcFailureScope = { dociai: { twitch: { rewards: { list: async () => ({ ok: false, error: { message: "IPC呼び出しに失敗しました" } }) } } } };
+  await assert.rejects(() => new TwitchUiClient(ipcFailureScope).rewardsList(), /IPC呼び出しに失敗しました/, "a genuine IPC transport failure must still throw, unlike a Helix-level failure");
+});
+
+// -------------------------------------------------------------------------------------------
+// views/overview.js: TwitchOverviewApp — issue #95's own "confirm the new view is genuinely
+// reachable/clickable, don't repeat #94's own past 'built but unmounted' mistake" requirement.
+// Traces the actual click path: the tab bar is built generically from `TAB_LABELS`
+// (Object.keys(TAB_LABELS).map(...)), so adding "event-rules" to that map is what makes it a real,
+// clickable tab — this test proves clicking it actually mounts EventRulesView's own render output
+// into the shared contentRoot, not just that the tab button exists.
+// -------------------------------------------------------------------------------------------
+
+test("TwitchOverviewApp: the Event Rule tab is a real, clickable tab that mounts EventRulesView's own rendered content", () => {
+  const document = createFakeDocument();
+  const root = document.createElement("dialog");
+  const app = new TwitchOverviewApp(root, {
+    document,
+    client: new TwitchUiClient({}), // no dociai bridge — .available is false, no network reached
+    getConfig: () => ({ eventTriggers: {}, personas: [] }),
+    onApplyConfig: async () => {},
+  });
+  const eventRuleTabButton = root.findButtonByText("Event Rule");
+  assert.ok(eventRuleTabButton, "the tab bar must include an \"Event Rule\" button");
+  eventRuleTabButton.click();
+  assert.ok(app.contentRoot.findButtonByText("＋ 新規Ruleを追加"), "clicking the tab must mount EventRulesView's real rule-list render output, not a placeholder");
+  app.dispose();
 });
 
 // -------------------------------------------------------------------------------------------

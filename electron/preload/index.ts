@@ -71,6 +71,9 @@ const api: DociaiApi = {
     subscriptions: {
       status: () => invoke(CHANNELS.TWITCH_SUBSCRIPTIONS_STATUS),
     },
+    rewards: {
+      list: () => invoke(CHANNELS.TWITCH_REWARDS_LIST),
+    },
   },
   bouyomi: {
     talk: (input) => invoke(CHANNELS.SPEECH_BOUYOMI_TALK, input),

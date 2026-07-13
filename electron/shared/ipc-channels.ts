@@ -32,6 +32,7 @@ export const CHANNELS = Object.freeze({
   TWITCH_EVENTSUB_RECONNECT: "twitch:eventsub:reconnect",
   TWITCH_EVENTSUB_STOP: "twitch:eventsub:stop",
   TWITCH_SUBSCRIPTIONS_STATUS: "twitch:subscriptions:status",
+  TWITCH_REWARDS_LIST: "twitch:rewards:list",
   PLATFORM_GET_INFO: "platform:get-info",
   WINDOW_OBS_OPEN: "window:obs:open",
   WINDOW_OBS_CLOSE: "window:obs:close",

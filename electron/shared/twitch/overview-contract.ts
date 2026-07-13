@@ -128,6 +128,26 @@ export type TwitchSubscriptionsOverview = {
   updatedAtMs: number;
 };
 
+// Issue #95: "Get Custom Rewards" (GET /helix/channel_points/custom_rewards) result, projected for
+// the Event Rule editor's reward selector (src/twitch-ui/rules/reward-selector.js). Unlike the 3
+// overview shapes above, this is a one-shot pull (the operator presses "更新"), not a
+// generation-stamped push snapshot — a broadcaster's reward list changes rarely enough that polling
+// on every list edit is unnecessary, and the reward SELECTOR itself is the thing that needs live
+// data, not the whole overview screen.
+export type TwitchCustomReward = { id: string; title: string; cost: number; isEnabled: boolean; isPaused: boolean };
+
+/** Mirrors twitch-account-service.ts's/eventsub-subscription-client.ts's own Helix error
+ * classification style. `missing_scope`/`wrong_broadcaster` are both surfaced as Twitch's own 401
+ * for this endpoint (Twitch does not use a different HTTP status for the two) — see
+ * custom-rewards-client.ts's own doc comment for how the 401 body's `message` text is used to tell
+ * them apart on a best-effort basis, and this issue's own note that Get Custom Rewards ONLY ever
+ * works for the broadcaster's own token (never a different channel's, even with a valid token). */
+export type TwitchCustomRewardsErrorCode = "unauthorized" | "missing_scope" | "wrong_broadcaster" | "rate_limited" | "network" | "server" | "unknown";
+
+export type TwitchCustomRewardsOverview =
+  | { ok: true; rewards: TwitchCustomReward[]; updatedAtMs: number }
+  | { ok: false; errorCode: TwitchCustomRewardsErrorCode; message: string; updatedAtMs: number };
+
 /** `dociai.events.subscribe(type, listener)` (electron/preload/index.ts) discriminants — the same
  * generic `{type, event}` APP_EVENT bus every other push-event feature in this app already uses
  * (see electron/shared/services/stream-event-ipc-contract.ts's own doc comment for the mechanism). */

@@ -193,6 +193,7 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
   register(CHANNELS.TWITCH_EVENTSUB_RECONNECT, (event, input) => { expectNoInput(input); return options.twitchComposition.reconnect(); }, options);
   register(CHANNELS.TWITCH_EVENTSUB_STOP, (event, input) => { expectNoInput(input); return options.twitchComposition.stop(); }, options);
   register(CHANNELS.TWITCH_SUBSCRIPTIONS_STATUS, (event, input) => { expectNoInput(input); return options.twitchComposition.subscriptionsOverview; }, options);
+  register(CHANNELS.TWITCH_REWARDS_LIST, (event, input) => { expectNoInput(input); return options.twitchComposition.listCustomRewards(); }, options);
   register(CHANNELS.WINDOW_OBS_OPEN, (event, input) => { expectNoInput(input); options.controller.openObsWindow(); return { opened: true }; }, options);
   register(CHANNELS.WINDOW_OBS_CLOSE, (event, input) => { expectNoInput(input); options.controller.closeObsWindow(); return { closed: true }; }, options);
   register(CHANNELS.WINDOW_STATE_GET, (event, input) => {

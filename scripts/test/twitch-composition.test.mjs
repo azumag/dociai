@@ -77,10 +77,14 @@ function closeServer(server) {
 }
 
 /** One combined server covering everything TwitchComposition's happy path touches: Device Code
- * Grant (/oauth2/device, /oauth2/token), validate, Helix /helix/users, and Helix
+ * Grant (/oauth2/device, /oauth2/token), validate, Helix /helix/users, Helix
  * /helix/eventsub/subscriptions create/list/delete (an in-memory store, same shape as
- * twitch-eventsub-subscriptions.test.mjs's own fixture). */
-function createServer() {
+ * twitch-eventsub-subscriptions.test.mjs's own fixture), and (issue #95) Helix
+ * /helix/channel_points/custom_rewards. `scopes` (default `["bits:read"]`, matching every existing
+ * caller's expectation unchanged) is granted on BOTH the token exchange and validate responses —
+ * issue #95's tests pass `["bits:read", "channel:read:redemptions"]` to exercise the reward-list
+ * success path. */
+function createServer({ scopes = ["bits:read"] } = {}) {
   const subscriptions = new Map();
   let subscriptionSeq = 0;
   const server = http.createServer((req, res) => {
@@ -94,12 +98,18 @@ function createServer() {
       const auth = req.headers.authorization ?? "";
       const token = auth.startsWith("OAuth ") ? auth.slice(6) : "";
       if (token !== ACCESS_TOKEN_VALUE) return jsonResponse(res, 401, { status: 401, message: "invalid access token" });
-      return jsonResponse(res, 200, { client_id: CLIENT_ID, login: "streamer", user_id: BROADCASTER_ID, scopes: ["bits:read"], expires_in: 14400 });
+      return jsonResponse(res, 200, { client_id: CLIENT_ID, login: "streamer", user_id: BROADCASTER_ID, scopes, expires_in: 14400 });
     }
     if (req.method === "GET" && url.pathname === "/helix/eventsub/subscriptions") {
       const auth = req.headers.authorization ?? "";
       if (auth !== `Bearer ${ACCESS_TOKEN_VALUE}`) return jsonResponse(res, 401, { status: 401, message: "Invalid OAuth token" });
       return jsonResponse(res, 200, { data: [...subscriptions.values()], pagination: {} });
+    }
+    if (req.method === "GET" && url.pathname === "/helix/channel_points/custom_rewards") {
+      const auth = req.headers.authorization ?? "";
+      if (auth !== `Bearer ${ACCESS_TOKEN_VALUE}`) return jsonResponse(res, 401, { status: 401, message: "Invalid OAuth token" });
+      if (url.searchParams.get("broadcaster_id") !== BROADCASTER_ID) return jsonResponse(res, 401, { status: 401, message: "The ID in broadcaster_id must match the user ID found in the request's OAuth token." });
+      return jsonResponse(res, 200, { data: [{ id: "reward-1", title: "配信者に一言", cost: 500, is_enabled: true, is_paused: false }] });
     }
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
@@ -108,7 +118,7 @@ function createServer() {
         return jsonResponse(res, 200, { device_code: DEVICE_CODE_VALUE, user_code: "ABCD-1234", verification_uri: "https://www.twitch.tv/activate", expires_in: 1800, interval: 1 });
       }
       if (req.method === "POST" && url.pathname === "/oauth2/token") {
-        return jsonResponse(res, 200, { access_token: ACCESS_TOKEN_VALUE, refresh_token: REFRESH_TOKEN_VALUE, scope: ["bits:read"], token_type: "bearer" });
+        return jsonResponse(res, 200, { access_token: ACCESS_TOKEN_VALUE, refresh_token: REFRESH_TOKEN_VALUE, scope: scopes, token_type: "bearer" });
       }
       if (req.method === "POST" && url.pathname === "/oauth2/revoke") {
         return jsonResponse(res, 200, {});
@@ -187,6 +197,19 @@ async function waitUntil(predicate, maxTicks = 4000) {
 function assertNoSecretLeak(value, secrets) {
   const json = typeof value === "string" ? value : JSON.stringify(value);
   for (const secret of secrets) assert.ok(!json.includes(secret), `payload leaked a secret/internal value: ${secret}`);
+}
+
+/** Drives `composition` through Device Code Grant to a "valid" token status — the exact same
+ * step sequence the big happy-path test above performs, factored out for issue #95's own
+ * listCustomRewards() tests (which only care about what happens AFTER auth succeeds). */
+async function authenticateToValid(composition, stepSleep, features) {
+  await composition.initialize();
+  await composition.startInitialAuth(features);
+  await waitUntil(() => composition.authOverview.flow.state === "awaiting_user");
+  await waitUntil(() => stepSleep.hasPending((entry) => entry.ms === 1000));
+  assert.ok(stepSleep.releaseMatching((entry) => entry.ms === 1000), "no pending device-code poll sleep found");
+  await composition.coordinator.waitForIdle();
+  await waitUntil(() => composition.authOverview.tokenStatus === "valid");
 }
 
 // -------------------------------------------------------------------------------------------
@@ -331,5 +354,85 @@ test("TwitchComposition: cancelAuth returns the flow to signed_out and never lea
   } finally {
     composition.dispose();
     await closeServer(server);
+  }
+});
+
+// -------------------------------------------------------------------------------------------
+// Issue #95: listCustomRewards() — the Main-process Helix wiring behind the Event Rule editor's
+// reward selector, exercised through the REAL TwitchAuthCoordinator/TwitchTokenProvider (never a
+// hand-rolled fake token), proving the whole path end to end: grant with the redemptions scope ->
+// getValidAccessToken() -> real Helix call -> parsed reward list; and the client-side
+// insufficient_scope short-circuit when the grant never included it.
+// -------------------------------------------------------------------------------------------
+
+test("TwitchComposition.listCustomRewards(): succeeds once authenticated with channel:read:redemptions, calling the real Helix custom_rewards endpoint", async () => {
+  const { modules } = await loadModules();
+  const { server } = createServer({ scopes: ["bits:read", "channel:read:redemptions"] });
+  const { baseUrl } = await listen(server);
+  const stepSleep = makeStepSleep();
+  const composition = new modules.TwitchComposition({
+    clientId: CLIENT_ID,
+    secretStore: new modules.MemorySecretStore(),
+    broadcasterUserId: null,
+    enabledFeatures: ["bits", "redemptions"],
+    socketFactory: WebSocket,
+    idBaseUrl: baseUrl,
+    helixBaseUrl: baseUrl,
+    fetchImpl: fetch,
+    sleep: stepSleep.sleep,
+  });
+  try {
+    await authenticateToValid(composition, stepSleep, ["bits", "redemptions"]);
+    const result = await composition.listCustomRewards();
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.rewards, [{ id: "reward-1", title: "配信者に一言", cost: 500, isEnabled: true, isPaused: false }]);
+    assertNoSecretLeak(result, [ACCESS_TOKEN_VALUE, REFRESH_TOKEN_VALUE]);
+  } finally {
+    composition.dispose();
+    await closeServer(server);
+  }
+});
+
+test("TwitchComposition.listCustomRewards(): a grant without channel:read:redemptions fails fast as errorCode 'missing_scope', with no Helix request ever sent", async () => {
+  const { modules } = await loadModules();
+  const { server } = createServer({ scopes: ["bits:read"] }); // no redemptions scope granted
+  const { baseUrl } = await listen(server);
+  const stepSleep = makeStepSleep();
+  const composition = new modules.TwitchComposition({
+    clientId: CLIENT_ID,
+    secretStore: new modules.MemorySecretStore(),
+    broadcasterUserId: null,
+    enabledFeatures: ["bits"],
+    socketFactory: WebSocket,
+    idBaseUrl: baseUrl,
+    helixBaseUrl: baseUrl,
+    fetchImpl: fetch,
+    sleep: stepSleep.sleep,
+  });
+  try {
+    await authenticateToValid(composition, stepSleep, ["bits"]);
+    const result = await composition.listCustomRewards();
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, "missing_scope");
+  } finally {
+    composition.dispose();
+    await closeServer(server);
+  }
+});
+
+test("TwitchComposition.listCustomRewards(): before any broadcaster is known, fails as 'wrong_broadcaster' rather than sending a request with a null broadcaster_id", async () => {
+  const { modules } = await loadModules();
+  const composition = new modules.TwitchComposition({
+    clientId: CLIENT_ID,
+    secretStore: new modules.MemorySecretStore(),
+    broadcasterUserId: null,
+    socketFactory: WebSocket,
+  });
+  try {
+    const result = await composition.listCustomRewards();
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, "wrong_broadcaster");
+  } finally {
+    composition.dispose();
   }
 });
