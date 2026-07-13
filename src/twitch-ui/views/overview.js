@@ -4,6 +4,7 @@ import { computePreflightChecks, renderPreflightChecks } from "../components/pre
 import { renderConnectionCard, updateConnectionCountdown } from "../components/connection-card.js";
 import { renderAuthorizationView, updateAuthorizationCountdown } from "./authorization.js";
 import { renderSubscriptionsView } from "./subscriptions.js";
+import { EventRulesView } from "./event-rules.js";
 
 // Issue #94: the mount point for the whole Twitch overview screen (dialog root -> tabs ->
 // overview/authorization/subscriptions content), mirroring src/ui/integrations/integration-panel.js's
@@ -11,7 +12,16 @@ import { renderSubscriptionsView } from "./subscriptions.js";
 // Owns: the TwitchUiStore + TwitchUiClient pair, tab switching (itself the "failed checkから該当
 // viewへdeep-link" destination), the countdown re-render interval, and translating raw client
 // actions into store-tracked busy/error state (via TwitchUiClient.runAction).
-const TAB_LABELS = { overview: "概要", authorization: "認可", subscriptions: "購読" };
+//
+// Issue #95 adds a 4th tab, "event-rules", hosting `EventRulesView` — reachable from this SAME tab
+// bar (the `#build()` loop below iterates `Object.keys(TAB_LABELS)` generically, so adding the key
+// here is what makes the new view an actual clickable tab, not "built but unmounted"; see this
+// issue's own PR body for the click-path trace). Unlike the other 3 tabs (pure `render(root, state,
+// callbacks, document)` functions driven entirely by the Twitch auth/connection/subscriptions
+// store), `EventRulesView` owns its OWN mutable draft/validation/reward-fetch state across
+// re-renders (mirrors settings-ui.js's `SettingsUI` class, not the other 3 views' stateless render
+// functions) — see event-rules.js's own header comment for why.
+const TAB_LABELS = { overview: "概要", authorization: "認可", subscriptions: "購読", "event-rules": "Event Rule" };
 
 function defaultCopyToClipboard(text) {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
@@ -24,9 +34,25 @@ export class TwitchOverviewApp {
     store = new TwitchUiStore(),
     copyToClipboard = defaultCopyToClipboard,
     onOpenSettings = () => {},
-    setIntervalImpl = setInterval,
-    clearIntervalImpl = clearInterval,
+    // PRE-EXISTING BUG FIX (unrelated to issue #95, discovered while live-verifying this issue's
+    // own new tab per its own "confirm genuinely reachable" instruction): the bare global function
+    // references `setInterval`/`clearInterval` are WebIDL platform methods that throw "Illegal
+    // invocation" in a real browser when invoked as `this.setIntervalImpl(...)` — i.e. with a
+    // receiver other than `window` — a classic "detached native method" gotcha. This silently broke
+    // `open()` (called by the "Twitch連携" button) for EVERY tab, not just this issue's new one; no
+    // existing test caught it because every test that constructs `TwitchOverviewApp` already injects
+    // a fake `setIntervalImpl`/`clearIntervalImpl`. Wrapping in an arrow function calls the global
+    // through an ordinary (non-method) call, which is unaffected by the receiver-branding check.
+    setIntervalImpl = (...args) => setInterval(...args),
+    clearIntervalImpl = (...args) => clearInterval(...args),
     now = Date.now,
+    // Issue #95: the Event Rule editor's save/validate/reload pipeline is threaded in from the
+    // SAME callers boot.js already wires into SettingsUI (`getCurrent`/`onApply`) — see
+    // event-rules.js's own header comment for why this must be the identical pipeline, never a
+    // parallel one.
+    getConfig = () => null,
+    onApplyConfig = () => {},
+    log = () => {},
   } = {}) {
     this.root = root;
     this.document = document;
@@ -40,6 +66,7 @@ export class TwitchOverviewApp {
     this.disposeStoreConnection = null;
     this.unsubscribeStore = null;
     this.timer = null;
+    this.eventRulesView = new EventRulesView({ document, getConfig, onApplyConfig, client: this.client, log });
     if (!root || !document?.createElement) return;
     this.#build();
   }
@@ -115,6 +142,8 @@ export class TwitchOverviewApp {
       renderAuthorizationView(this.contentRoot, state, callbacks, this.document);
     } else if (state.view === "subscriptions") {
       renderSubscriptionsView(this.contentRoot, state, callbacks, this.document);
+    } else if (state.view === "event-rules") {
+      this.eventRulesView.render(this.contentRoot);
     }
   }
 

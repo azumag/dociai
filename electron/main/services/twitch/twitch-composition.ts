@@ -44,8 +44,10 @@ import { TwitchAccountService } from "./auth/twitch-account-service";
 import { TwitchRevokeClient } from "./auth/twitch-revoke-client";
 import { TwitchAuthCoordinator } from "./auth/twitch-auth-coordinator";
 import type { TwitchAuthCoordinatorEvent, TwitchSessionStopReason } from "./auth/twitch-auth-coordinator";
-import { isTwitchFeature } from "./auth/twitch-scope-registry";
+import { isTwitchFeature, FEATURE_SCOPES } from "./auth/twitch-scope-registry";
 import type { TwitchFeature } from "./auth/twitch-scope-registry";
+import { TwitchTokenProviderError } from "./auth/twitch-token-provider";
+import { TwitchCustomRewardsClient } from "./custom-rewards-client";
 import { EventSubSubscriptionClient } from "./eventsub/eventsub-subscription-client";
 import { SubscriptionReconciler } from "./eventsub/subscription-reconciler";
 import type { SubscriptionReconcilerSnapshot } from "./eventsub/subscription-reconciler";
@@ -57,6 +59,7 @@ import type { Clock } from "./eventsub/keepalive-watchdog";
 import type {
   TwitchAuthOverview,
   TwitchConnectionOverview,
+  TwitchCustomRewardsOverview,
   TwitchReconnectDiagnosticPush,
   TwitchSubscriptionsOverview,
 } from "../../../shared/twitch/overview-contract";
@@ -98,6 +101,7 @@ export class TwitchComposition {
   readonly coordinator: TwitchAuthCoordinator;
   readonly reconciler: SubscriptionReconciler;
   readonly reconnectCoordinator: ReconnectCoordinator;
+  readonly #rewardsClient: TwitchCustomRewardsClient;
 
   readonly #clientId: string;
   readonly #onAuthEvent: (overview: TwitchAuthOverview) => void;
@@ -143,6 +147,8 @@ export class TwitchComposition {
       onFeatureDisabled: () => this.#refreshAuth(),
     });
     this.#unsubscribeCoordinator = this.coordinator.subscribe((event) => this.#handleCoordinatorEvent(event));
+
+    this.#rewardsClient = new TwitchCustomRewardsClient({ fetchImpl: deps.fetchImpl, baseUrl: deps.helixBaseUrl });
 
     const subscriptionClient = new EventSubSubscriptionClient({ fetchImpl: deps.fetchImpl, baseUrl: deps.helixBaseUrl });
     this.reconciler = new SubscriptionReconciler(subscriptionClient, this.coordinator, this.#clientId, {
@@ -271,6 +277,38 @@ export class TwitchComposition {
   stop(): TwitchConnectionOverview {
     this.reconnectCoordinator.stop();
     return this.#connectionOverview;
+  }
+
+  // -----------------------------------------------------------------------------------------
+  // Custom Rewards (issue #95: reward selector for the Event Rule editor)
+  // -----------------------------------------------------------------------------------------
+
+  /** GET Custom Rewards for the configured broadcaster — populates
+   * src/twitch-ui/rules/reward-selector.js. Never throws for an ordinary auth/scope/Helix failure
+   * (returns `{ ok: false, errorCode, message }` instead, per this issue's own "reward scope不足・
+   * fetch失敗へactionを表示" requirement — the caller must show a clear error state, never a silently
+   * empty list). `getValidAccessToken(FEATURE_SCOPES.redemptions)` rejects with
+   * `insufficient_scope` BEFORE any network call at all when the current grant lacks
+   * `channel:read:redemptions` (see twitch-token-provider.ts), which is exactly the fast, no-network
+   * "scope不足" path this method surfaces as `errorCode: "missing_scope"`. */
+  async listCustomRewards(): Promise<TwitchCustomRewardsOverview> {
+    if (!this.#clientId) return { ok: false, errorCode: "unauthorized", message: "Twitch client idが設定されていません (TWITCH_CLIENT_ID)", updatedAtMs: this.#now() };
+    if (!this.#broadcasterUserId) return { ok: false, errorCode: "wrong_broadcaster", message: "broadcasterが未確定です。先にTwitchへログインしてください", updatedAtMs: this.#now() };
+
+    let accessToken: string;
+    try {
+      accessToken = await this.coordinator.tokenProvider.getValidAccessToken([...FEATURE_SCOPES.redemptions]);
+    } catch (error) {
+      if (error instanceof TwitchTokenProviderError) {
+        const errorCode = error.reason === "insufficient_scope" ? "missing_scope" : "unauthorized";
+        return { ok: false, errorCode, message: error.message, updatedAtMs: this.#now() };
+      }
+      return { ok: false, errorCode: "unknown", message: error instanceof Error ? error.message : String(error), updatedAtMs: this.#now() };
+    }
+
+    const result = await this.#rewardsClient.list({ accessToken, clientId: this.#clientId, broadcasterUserId: this.#broadcasterUserId });
+    if (!result.ok) return { ok: false, errorCode: result.errorCode, message: result.message, updatedAtMs: this.#now() };
+    return { ok: true, rewards: result.rewards, updatedAtMs: this.#now() };
   }
 
   // -----------------------------------------------------------------------------------------

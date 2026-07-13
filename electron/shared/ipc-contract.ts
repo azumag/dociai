@@ -5,7 +5,7 @@ import type { FeedFetchInput, FeedFetchResponse } from "./services/feed-contract
 import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./services/topic-contract";
 import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
 import type { StreamEventListInput, StreamEventListResult } from "./services/stream-event-ipc-contract";
-import type { TwitchAuthOverview, TwitchConnectionOverview, TwitchSubscriptionsOverview } from "./twitch/overview-contract";
+import type { TwitchAuthOverview, TwitchConnectionOverview, TwitchCustomRewardsOverview, TwitchSubscriptionsOverview } from "./twitch/overview-contract";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PublicError };
 export type WindowRole = "console" | "obs";
@@ -75,6 +75,11 @@ export type DociaiApi = {
     };
     subscriptions: {
       status(): Promise<Result<TwitchSubscriptionsOverview>>;
+    };
+    // Issue #95: Get Custom Rewards, for the Event Rule editor's reward selector
+    // (src/twitch-ui/rules/reward-selector.js).
+    rewards: {
+      list(): Promise<Result<TwitchCustomRewardsOverview>>;
     };
   };
   windows: {
