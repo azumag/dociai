@@ -82,7 +82,23 @@ export class TriggerEngine {
   }
 
   // コメント1件をkeyword/randomトリガーに通し、発火したトリガーIDを返す
+  //
+  // Issue #177 double-fire investigation: a Twitch cheer's own chat message (if the user typed one
+  // alongside their Cheermote) arrives as an ordinary IRC PRIVMSG line — see
+  // src/twitch-chat/twitch-chat-session.js's own "bits" tag forwarding — in ADDITION to the
+  // separate channel.cheer EventSub notification the event-trigger pipeline
+  // (src/app/runtime-factory.js's eventTriggerRunner) already reacts to. Without this guard, a
+  // keyword/random trigger configured here could ALSO fire an AI response for the identical
+  // real-world cheer, double-answering the same action. A `comment.bits` value therefore skips
+  // keyword/random dispatch entirely (the comment is still recorded/displayed/read aloud by
+  // whatever calls handleComment() — this method is the ONLY place AI-response triggering
+  // happens). Investigated and found NARROWER than #54/#177's own framing assumed: a resub/
+  // subscribe/gift-sub's accompanying message is delivered over Twitch IRC as a USERNOTICE, not a
+  // PRIVMSG, and this repo's own IRC parsers (twitch-irc-parser.js/irc-parser.ts) don't parse
+  // USERNOTICE into anything `handleComment()` ever receives at all — so only `cheer` has a real
+  // double-fire path through this method today; no equivalent guard is needed for resub/subscribe.
   handleComment(comment) {
+    if (typeof comment?.bits === "number" && comment.bits > 0) return [];
     const fired = [];
     for (const [id, t] of Object.entries(this.triggers)) {
       if (t.type === "keyword" && (t.keywords ?? []).some((k) => comment.text.includes(k))) {

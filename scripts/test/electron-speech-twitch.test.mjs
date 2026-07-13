@@ -25,6 +25,14 @@ test("Main Twitch service handles PING, PRIVMSG, reconnect, and stop", async () 
   try {
     const events = [];
     class FakeSocket { static instances = []; readyState = 1; listeners = new Map(); sent = []; constructor(url) { this.url = url; FakeSocket.instances.push(this); } on(type, listener) { this.listeners.set(type, listener); } send(value) { this.sent.push(value); } close() { this.readyState = 3; this.listeners.get("close")?.(); } emit(type, value) { this.listeners.get(type)?.(value); } }
-    const service = new modules.TwitchChatService(FakeSocket, (event) => events.push(event)); service.start({ channels: ["#room"] }); const socket = FakeSocket.instances[0]; socket.emit("open"); socket.emit("message", ":server PING :token\r\n@display-name=Alice :alice!u@h PRIVMSG #room :hello\r\n"); assert.ok(socket.sent.includes("PONG :token")); assert.equal(events.find((event) => event.type === "twitch:comment").payload.text, "hello"); service.stop(); assert.equal(service.snapshot().state, "stopped"); assert.equal(socket.url, "wss://irc-ws.chat.twitch.tv:443");
+    const service = new modules.TwitchChatService(FakeSocket, (event) => events.push(event)); service.start({ channels: ["#room"] }); const socket = FakeSocket.instances[0]; socket.emit("open"); socket.emit("message", ":server PING :token\r\n@display-name=Alice :alice!u@h PRIVMSG #room :hello\r\n"); assert.ok(socket.sent.includes("PONG :token")); const helloComment = events.find((event) => event.type === "twitch:comment"); assert.equal(helloComment.payload.text, "hello"); assert.equal(helloComment.payload.bits, null, "issue #177: an ordinary chat message must not carry a bits value");
+    // Issue #177 double-fire investigation: a real cheer's own chat message carries a "bits" IRC
+    // tag — forwarded through unchanged so src/trigger-engine.js's handleComment() can exclude it
+    // from firing a duplicate AI response alongside the separate channel.cheer EventSub event.
+    socket.emit("message", "@display-name=Cheerer;bits=100 :cheerer!u@h PRIVMSG #room :Cheer100 nice stream!\r\n");
+    const cheerComment = events.filter((event) => event.type === "twitch:comment").at(-1);
+    assert.equal(cheerComment.payload.text, "Cheer100 nice stream!");
+    assert.equal(cheerComment.payload.bits, 100);
+    service.stop(); assert.equal(service.snapshot().state, "stopped"); assert.equal(socket.url, "wss://irc-ws.chat.twitch.tv:443");
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

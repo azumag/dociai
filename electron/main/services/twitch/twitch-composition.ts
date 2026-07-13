@@ -54,8 +54,12 @@ import type { SubscriptionReconcilerSnapshot } from "./eventsub/subscription-rec
 import { ReconnectCoordinator, DEFAULT_EVENTSUB_WS_URL } from "./eventsub/reconnect-coordinator";
 import type { ReconnectCoordinatorSnapshot, ReconnectDiagnosticEvent } from "./eventsub/reconnect-coordinator";
 import type { EventSubSocketConstructor } from "./eventsub/eventsub-session";
+import type { EventSubEnvelope } from "./eventsub/eventsub-message-parser";
 import { systemClock } from "./eventsub/keepalive-watchdog";
 import type { Clock } from "./eventsub/keepalive-watchdog";
+import { EventSubToStreamEventBridge } from "./events/eventsub-to-streamevent-bridge";
+import type { EventSubBridgeDiagnostic } from "./events/eventsub-to-streamevent-bridge";
+import type { StreamEvent } from "../../../../src/stream-events/contract.js";
 import type {
   TwitchAuthOverview,
   TwitchConnectionOverview,
@@ -90,6 +94,17 @@ export type TwitchCompositionDeps = {
    * bootstrapped from a fresh login — the caller is expected to persist it (config.twitch.
    * broadcasterUserId) so a future app restart keeps the same broadcaster-mismatch protection. */
   onBroadcasterConfirmed?: (broadcasterUserId: string) => void;
+  /** Issue #177: fired for every EventSub `notification` this composition's own
+   * ReconnectCoordinator delivers, once EventSubToStreamEventBridge has turned it into a real,
+   * #89-validated StreamEvent — the caller is expected to
+   * `streamEventBus.publish(event, "production")` it (see electron/main/index.ts's own wiring),
+   * reusing the SAME bus instance electron/main/index.ts already constructs and exposes over IPC,
+   * never a second one. */
+  onStreamEvent?: (event: StreamEvent) => void;
+  /** Issue #177: fired for every notification the bridge could NOT turn into a StreamEvent (unknown
+   * type/version, a missing critical field, or a malformed envelope) — "diagnosticへ記録し無言drop
+   * しない". Never silently ignored; see eventsub-to-streamevent-bridge.ts's own doc comment. */
+  onEventSubDiagnostic?: (diagnostic: EventSubBridgeDiagnostic) => void;
   log?: (message: string, fields?: Record<string, unknown>) => void;
 };
 
@@ -158,6 +173,19 @@ export class TwitchComposition {
       log,
     });
 
+    // Issue #177: the bridge is constructed with THIS composition's own onStreamEvent/
+    // onEventSubDiagnostic deps (defaulted to no-ops exactly like every other optional dep here) so
+    // a caller that doesn't care about the trigger/action pipeline (e.g. a future unit test that
+    // only exercises auth/connection) never has to supply them.
+    const eventSubBridge = new EventSubToStreamEventBridge({
+      onStreamEvent: (event) => (deps.onStreamEvent ?? (() => {}))(event),
+      onDiagnostic: (diagnostic) => {
+        log("EventSub notification could not be normalized into a StreamEvent", { reason: diagnostic.reason, type: diagnostic.type, version: diagnostic.version, messageId: diagnostic.messageId });
+        (deps.onEventSubDiagnostic ?? (() => {}))(diagnostic);
+      },
+      now: deps.now,
+    });
+
     this.reconnectCoordinator = new ReconnectCoordinator(deps.socketFactory, this.coordinator, {
       webSocketUrl: deps.webSocketUrl ?? DEFAULT_EVENTSUB_WS_URL,
       clock: deps.clock ?? systemClock,
@@ -165,6 +193,7 @@ export class TwitchComposition {
       subscriptionSink: this.reconciler,
       onEvent: (snapshot) => this.#handleConnectionSnapshot(snapshot),
       onDiagnostic: (event) => this.#handleReconnectDiagnostic(event),
+      onNotification: (envelope: EventSubEnvelope) => eventSubBridge.handleNotification(envelope),
       log,
     });
 

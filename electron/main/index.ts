@@ -221,6 +221,13 @@ if (!hasLock) {
       onSubscriptionsEvent: (overview) => controller?.emitToConsole(TWITCH_SUBSCRIPTIONS_EVENT_TYPE, overview),
       onReconnectDiagnostic: (push) => controller?.emitToConsole(TWITCH_RECONNECT_DIAGNOSTIC_EVENT_TYPE, push),
       onBroadcasterConfirmed: persistTwitchBroadcasterUserId,
+      // Issue #177: the EventSub notification -> normalizer -> StreamEvent bridge (twitch-
+      // composition.ts's own EventSubToStreamEventBridge) publishes onto the SAME StreamEventBus
+      // instance constructed above (line ~164) and already exposed to the Renderer over IPC — never
+      // a second bus. A normalize failure is diagnosed (never silently dropped) via the SAME
+      // console.error convention every other service in this file already uses.
+      onStreamEvent: (event) => { streamEventBus.publish(event, "production"); },
+      onEventSubDiagnostic: (diagnostic) => console.error(`[dociai:eventsub-bridge] notification not normalized`, diagnostic),
       log: (message, fields) => console.error(`[dociai:twitch-composition] ${message}`, fields ?? {}),
     });
     await twitchComposition.initialize();

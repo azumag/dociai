@@ -45,6 +45,19 @@ export async function speakersThroughElectron(input) { return globalThis.dociai.
 export async function cancelElectronSpeechRequest(requestId) { return globalThis.dociai.speech.cancel(requestId); }
 export function hasElectronTwitchService() { return typeof globalThis.dociai?.twitch?.start === "function"; }
 
+// Issue #177: the Renderer-side capability check + live-push subscription for the Main-process
+// StreamEventBus (#89) — reused by src/app/runtime-factory.js's `selectPlatformAdapter()` so the
+// eventTriggerRunner component can react to REAL production StreamEvents the exact same way
+// src/twitch-ui/history/event-history.js's own `EventHistoryView.connect()` already does (see that
+// file's header comment for the identical "fetch snapshot once, then live-push" idiom this mirrors
+// for triggering rather than display). `"stream-event"` is the SAME literal
+// electron/shared/services/stream-event-ipc-contract.ts's `STREAM_EVENT_APP_EVENT_TYPE` and
+// src/twitch-ui/twitch-ui-events.js's `STREAM_EVENT_TYPE` already duplicate — this repo's own
+// established "duplicate the string per dociai.events.subscribe(type, ...) call site" convention
+// (see twitch-ui-events.js's own header comment), not a new pattern.
+export function hasElectronStreamEventsService() { return typeof globalThis.dociai?.streamEvents?.list === "function"; }
+export function subscribeStreamEventsThroughElectron(listener) { return globalThis.dociai.events.subscribe("stream-event", listener); }
+
 export class ElectronTwitchSource {
   id = "twitch"; label = "Twitch";
   constructor(config = {}, { onStatus = () => {} } = {}) { this.config = config; this.onStatus = onStatus; this.unsubComment = null; this.unsubStatus = null; this.status = { state: "idle", channels: [] }; }

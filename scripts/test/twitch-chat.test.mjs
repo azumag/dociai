@@ -68,7 +68,7 @@ test("Twitch session owns one socket, tracks membership, and ignores stopped cal
     socket.message(":justinfan12345!j@j JOIN #one\r\n:justinfan12345!j@j JOIN #two\r\n@display-name=Viewer :viewer!v@v PRIVMSG #one :hello\r\n");
     assert.equal(session.snapshot().state, "connected");
     assert.deepEqual(session.snapshot().channels.map((entry) => entry.status), ["joined", "joined"]);
-    assert.deepEqual(comments, [{ author: "Viewer", text: "hello", source: "twitch", channel: "one", emotes: null, sessionId: session.id }]);
+    assert.deepEqual(comments, [{ author: "Viewer", text: "hello", source: "twitch", channel: "one", emotes: null, bits: null, sessionId: session.id }]);
     socket.message("UNKNOWNCOMMAND value\r\n");
     assert.equal(session.snapshot().parserErrors, 1);
     assert.equal(session.stop(), true);
