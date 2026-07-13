@@ -55,7 +55,11 @@ export class TwitchChatService {
     for (const event of parseIrcFrame(data)) {
       if (event.type === "ping") socket.send(`PONG ${event.payload}`);
       if (event.type === "reconnect") { try { socket.close(); } catch {} this.#schedule("server requested reconnect", 0); }
-      if (event.type === "privmsg") this.onEvent({ type: "twitch:comment", payload: { author: event.author, text: event.text, source: "twitch", channel: event.channel, sessionId: this.sessionId, emotes: event.emotes ?? null } });
+      // "bits" (issue #177): forwarded through to the Renderer's "twitch:comment" event unchanged
+      // (src/platform/electron-services.js's ElectronTwitchSource passes the whole payload through)
+      // so src/trigger-engine.js's handleComment() can recognize and exclude a cheer's own chat
+      // message from firing a duplicate AI response — see that file's own header comment.
+      if (event.type === "privmsg") this.onEvent({ type: "twitch:comment", payload: { author: event.author, text: event.text, source: "twitch", channel: event.channel, sessionId: this.sessionId, emotes: event.emotes ?? null, bits: event.bits ?? null } });
     }
   }
 

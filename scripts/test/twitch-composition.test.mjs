@@ -151,11 +151,20 @@ async function startWsServer() {
   return { wss, url: `ws://127.0.0.1:${port}/ws`, async close() { for (const client of wss.clients) client.terminate(); await new Promise((resolve) => wss.close(() => resolve())); } };
 }
 
-function envelope(messageType, payload) {
-  return JSON.stringify({ metadata: { message_id: crypto.randomUUID(), message_type: messageType, message_timestamp: new Date().toISOString() }, payload });
+function envelope(messageType, payload, metadataExtra = {}) {
+  return JSON.stringify({ metadata: { message_id: crypto.randomUUID(), message_type: messageType, message_timestamp: new Date().toISOString(), ...metadataExtra }, payload });
 }
 function welcomePayload(id, keepaliveTimeoutSeconds) {
   return { session: { id, status: "connected", connected_at: new Date().toISOString(), keepalive_timeout_seconds: keepaliveTimeoutSeconds, reconnect_url: null } };
+}
+
+// Issue #177: a real channel.cheer notification payload (Twitch's own documented shape, same
+// fixture data twitch-event-normalizer.test.mjs's tests/fixtures/twitch/eventsub/cheer.json uses).
+function cheerNotificationPayload() {
+  return {
+    subscription: { id: "sub-1", type: "channel.cheer", version: "1", status: "enabled", cost: 0, condition: { broadcaster_user_id: BROADCASTER_ID }, transport: { method: "websocket", session_id: "sess-1" }, created_at: new Date().toISOString() },
+    event: { is_anonymous: false, user_id: "1234", user_login: "cool_user", user_name: "Cool_User", broadcaster_user_id: BROADCASTER_ID, broadcaster_user_login: "cooler_user", broadcaster_user_name: "Cooler_User", message: "pogchamp", bits: 1000 },
+  };
 }
 
 // -------------------------------------------------------------------------------------------
@@ -235,7 +244,8 @@ test("TwitchComposition: signed_out -> Device Code -> ready -> connect -> EventS
   const { server, subscriptions } = createServer();
   const { baseUrl } = await listen(server);
   const wsServer = await startWsServer();
-  wsServer.wss.on("connection", (socket) => socket.send(envelope("session_welcome", welcomePayload("sess-1", 30))));
+  let activeSocket = null;
+  wsServer.wss.on("connection", (socket) => { activeSocket = socket; socket.send(envelope("session_welcome", welcomePayload("sess-1", 30))); });
 
   const stepSleep = makeStepSleep();
   const authEvents = [];
@@ -243,6 +253,8 @@ test("TwitchComposition: signed_out -> Device Code -> ready -> connect -> EventS
   const subscriptionsEvents = [];
   const diagnostics = [];
   const openedUris = [];
+  const streamEvents = [];
+  const eventSubDiagnostics = [];
   let confirmedBroadcaster = null;
 
   const composition = new modules.TwitchComposition({
@@ -262,6 +274,9 @@ test("TwitchComposition: signed_out -> Device Code -> ready -> connect -> EventS
     onSubscriptionsEvent: (overview) => subscriptionsEvents.push(overview),
     onReconnectDiagnostic: (push) => diagnostics.push(push),
     onBroadcasterConfirmed: (id) => { confirmedBroadcaster = id; },
+    // Issue #177: the EventSub -> StreamEvent bridge's own two outputs.
+    onStreamEvent: (event) => streamEvents.push(event),
+    onEventSubDiagnostic: (diagnostic) => eventSubDiagnostics.push(diagnostic),
   });
 
   try {
@@ -309,6 +324,23 @@ test("TwitchComposition: signed_out -> Device Code -> ready -> connect -> EventS
     assert.equal(entries[0].entryStatus, "active");
     assert.equal(subscriptions.size, 1);
 
+    // Issue #177: a real "notification" frame delivered over the live EventSub session must reach
+    // onStreamEvent as a validated StreamEvent — the actual production entry point this issue wires
+    // (ReconnectCoordinator.onNotification -> EventSubToStreamEventBridge -> normalizeTwitchEvent),
+    // never dropped silently.
+    activeSocket.send(envelope("notification", cheerNotificationPayload(), { subscription_type: "channel.cheer", subscription_version: "1" }));
+    await waitUntil(() => streamEvents.length === 1);
+    assert.equal(streamEvents[0].kind, "cheer");
+    assert.equal(streamEvents[0].data.bits, 1000);
+    assert.equal(eventSubDiagnostics.length, 0);
+
+    // An unrecognized type@version must be DIAGNOSED, never silently dropped.
+    activeSocket.send(envelope("notification", { subscription: { type: "channel.raid" }, event: {} }, { subscription_type: "channel.raid", subscription_version: "1" }));
+    await waitUntil(() => eventSubDiagnostics.length === 1);
+    assert.equal(eventSubDiagnostics[0].reason, "normalize-failed");
+    assert.equal(eventSubDiagnostics[0].type, "channel.raid");
+    assert.equal(streamEvents.length, 1, "the unrecognized notification must not have produced a second StreamEvent");
+
     // Generations are monotonic per category and never decrease across the whole run.
     for (const events of [authEvents, connectionEvents, subscriptionsEvents]) {
       for (let i = 1; i < events.length; i += 1) assert.ok(events[i].generation >= events[i - 1].generation, "generation must never decrease");
@@ -317,7 +349,7 @@ test("TwitchComposition: signed_out -> Device Code -> ready -> connect -> EventS
     // SECURITY: no raw device_code/access/refresh token, and no internal WebSocket URL, in any
     // overview ever emitted (mirrors twitch-token-provider.test.mjs's assertNoSecretLeak invariant,
     // extended to this issue's own "raw token/device code/internal URLをDOMへ出さない" requirement).
-    assertNoSecretLeak({ authEvents, connectionEvents, subscriptionsEvents, diagnostics }, [DEVICE_CODE_VALUE, ACCESS_TOKEN_VALUE, REFRESH_TOKEN_VALUE, wsServer.url, "wss://eventsub.wss.twitch.tv"]);
+    assertNoSecretLeak({ authEvents, connectionEvents, subscriptionsEvents, diagnostics, streamEvents, eventSubDiagnostics }, [DEVICE_CODE_VALUE, ACCESS_TOKEN_VALUE, REFRESH_TOKEN_VALUE, wsServer.url, "wss://eventsub.wss.twitch.tv"]);
   } finally {
     composition.dispose();
     await wsServer.close();

@@ -76,7 +76,13 @@ export class TwitchChatSession {
       if (event.type === "join" && event.login === this.nick.toLowerCase()) this.membership.joined(event.channel);
       if (event.type === "part" && event.login === this.nick.toLowerCase()) this.membership.parted(event.channel);
       if (event.type === "notice" && event.channel) { const failure = classifyNotice(event); this.membership.failed(event.channel, failure.message, { permanent: failure.permanent, code: failure.code }); }
-      if (event.type === "privmsg") { this.membership.message(event.channel); this.onComment({ author: event.author, text: event.text, source: "twitch", channel: event.channel, emotes: event.emotes, sessionId: this.id }); }
+      // "bits" tag (issue #177): present on a real cheer's own chat PRIVMSG line — Twitch delivers a
+      // cheer's message text (if any) as an ordinary chat message the user typed using a Cheermote,
+      // WITH this tag, in addition to the separate channel.cheer EventSub notification. Forwarded
+      // through so a comment consumer (src/trigger-engine.js's handleComment()) can recognize and
+      // exclude it from firing a SECOND, duplicate AI response for the same real-world cheer — see
+      // that file's own header comment for the full double-fire investigation.
+      if (event.type === "privmsg") { this.membership.message(event.channel); this.onComment({ author: event.author, text: event.text, source: "twitch", channel: event.channel, emotes: event.emotes, bits: event.tags?.bits ? Number(event.tags.bits) : null, sessionId: this.id }); }
       if (this.membership.allJoined()) this.state.transition("connected", "channel membership resolved");
     }
     this.#status();

@@ -17,6 +17,7 @@ import { ObsBridge } from "../obs/obs-bridge.js";
 import { IntegrationPanel } from "../ui/integrations/integration-panel.js";
 import { DiagnosticExportDialog } from "../ui/integrations/diagnostic-export-dialog.js";
 import { TwitchOverviewApp } from "../twitch-ui/views/overview.js";
+import { deriveSimulationStatus } from "../twitch-ui/history/history-store.js";
 import { AppRuntime } from "./app-runtime.js";
 import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } from "./runtime-factory.js";
 import { createAppActions } from "./app-actions.js";
@@ -181,6 +182,19 @@ function integrationHealthServices() {
   add("screen", "画面キャプチャ", "context", Boolean(config.context?.screenCapture?.enabled));
   add("mic", "マイク監視", "context", Boolean(config.micMonitor?.enabled));
   add("obs", "OBS表示", "output", true, "unknown");
+  // Issue #177: the production EventSub -> Trigger -> ActionRunner pipeline's own health row —
+  // "IntegrationHealthへtrigger実行状態を反映する". `enabled` reflects whether at least one Event
+  // Rule is actually configured (an operator with zero rules has nothing to check here); `status`
+  // reflects whether the Renderer is genuinely subscribed to the Main-process StreamEventBus
+  // (platform.hasStreamEventsService() — false in Browser mode, where this pipeline can never run
+  // at all) and whether the most recent production event errored.
+  {
+    const eventTriggerRunner = appRuntime.getComponent("eventTriggerRunner");
+    const eventTriggerStatus = eventTriggerRunner?.status();
+    const eventTriggerCount = Object.keys(config.eventTriggers ?? {}).length;
+    const status = eventTriggerStatus?.lastError ? "error" : eventTriggerStatus?.subscribed ? "ready" : "unknown";
+    add("event-triggers", "Event Trigger", "stream", eventTriggerCount > 0, status, { critical: false, metrics: eventTriggerStatus ? { triggerCount: eventTriggerStatus.triggerCount, lastEventAt: eventTriggerStatus.lastEventAt } : {} });
+  }
   return services;
 }
 
@@ -575,6 +589,31 @@ appRuntime = new AppRuntime({
     },
     onSourceStatus: (_id, status) => { state.twitchStatus = status; renderTwitchChatStatus(); },
     onSourceError: (error) => logEvent(`コメントsourceを開始できません: ${scrub(error.message)}`, "error"),
+    // Issue #177: production EventSub-triggered actions (src/app/runtime-factory.js's
+    // eventTriggerRunner). `onEventTriggerAction` mirrors `dispatch` (`handleResponseAction`) above
+    // one layer down (ActionRunner's own `action-*` event names, never the `response-*` ones
+    // handleResponseAction already switches on) — only the failure-shaped ones are logged here, so
+    // an operator sees a production event-trigger error in the same system log a comment-trigger
+    // error already reaches, without a second on-screen affordance for this issue's scope.
+    onEventTriggerAction: (action) => {
+      if (action.type === "action-error") logEvent(`event trigger action失敗 (${action.triggerId}): ${scrub(action.error?.message ?? "unknown error")}`, "error");
+      if (action.type === "action-fallback") logEvent(`event trigger action fallback (${action.triggerId}): ${action.reason}`, "warn");
+    },
+    // `deriveSimulationStatus()`/the `EventHistoryStore` are #96's own real, already-tested pieces —
+    // reused here unchanged (never re-derived) so a production event's history entry uses the exact
+    // same "pending -> handled/skipped/failed" status derivation a simulation run already gets. The
+    // entry is recorded here (idempotent by `(context, event.id)` — see EventHistoryStore.
+    // recordProduction()'s own doc comment) rather than relying solely on EventHistoryView's own
+    // lazy, tab-open-triggered subscription, so a production trigger's result is captured even if
+    // the operator never opens the Event History tab.
+    onEventTriggerResult: (published, result) => {
+      const store = twitchOverviewApp?.historyStore;
+      if (!store) return;
+      const entry = store.recordProduction(published);
+      if (!entry) return;
+      store.updateStatus(entry.id, { status: deriveSimulationStatus(result), trace: result, promptPreviews: [] });
+      renderIntegrationHealth();
+    },
   },
 });
 

@@ -12,8 +12,13 @@ export class CommentStore {
     this.listeners = new Set();
   }
 
-  add({ author = "名無し", text, source = "manual", timestamp = new Date(), emotes = null }) {
-    const comment = { id: `c${++seq}`, author, text: String(text), source, timestamp, emotes };
+  add({ author = "名無し", text, source = "manual", timestamp = new Date(), emotes = null, bits = null }) {
+    // `bits` (issue #177): present on a real cheer's own chat PRIVMSG line — src/trigger-engine.js's
+    // handleComment() relies on this surviving normalization here to skip keyword/random dispatch
+    // for a cheer, since the SAME cheer also fires through the EventSub/StreamEvent trigger path;
+    // dropping it here would silently re-enable a double AI response for every cheer with chat text
+    // matching a keyword trigger.
+    const comment = { id: `c${++seq}`, author, text: String(text), source, timestamp, emotes, bits };
     this.comments.push(comment);
     if (this.comments.length > this.limit) {
       this.comments.splice(0, this.comments.length - this.limit);

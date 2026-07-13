@@ -92,6 +92,52 @@ function resolveEffectiveOptions(options = {}) {
 }
 
 /**
+ * Shared core: matchEvent() -> planActions() -> (cooldown gate) -> ActionRunner.execute(), for an
+ * ALREADY-VALIDATED event. Both `simulateStreamEvent()` (below, `context: "simulation"`, safe
+ * mock-by-default) and `runProductionStreamEvent()` (issue #177, `context: "production"`, always
+ * real deps) delegate here so there is exactly ONE implementation of "how a StreamEvent becomes
+ * ActionPlans and gets executed" — never two parallel copies that could silently drift apart.
+ *
+ * The cooldown key is namespaced by `context` (`"simulation:<triggerId>"` /
+ * `"production:<triggerId>"`) so a simulation run and a real production event for the SAME trigger
+ * id can never accidentally share (and consume) each other's cooldown window, even if a caller
+ * mistakenly reused one CooldownTracker instance across both.
+ */
+async function runStreamEventPipeline({ context, effective, validatedEvent, triggers, actionRunner, cooldownTracker, cooldownConfigByTrigger, matchOptions, generation, now, trace }) {
+  const { matches, skipped, truncated } = matchEvent(triggers, validatedEvent, { ...matchOptions, trace });
+
+  const plans = [];
+  const planSkips = [];
+  for (const match of matches) {
+    const trigger = triggers.find((entry) => entry?.id === match.triggerId);
+    const actions = Array.isArray(trigger?.actions) ? trigger.actions : [];
+    const planned = planActions({ event: validatedEvent, triggerId: match.triggerId, actions, priority: match.priority, context, generation, now });
+    plans.push(...planned.plans);
+    for (const skip of planned.skipped) planSkips.push({ triggerId: match.triggerId, ...skip });
+  }
+
+  const results = [];
+  if (actionRunner) {
+    for (const plan of plans) {
+      if (cooldownTracker) {
+        const cooldownConfig = cooldownConfigByTrigger(plan.triggerId);
+        if (cooldownConfig) {
+          const gate = cooldownTracker.schedule(`${context}:${plan.triggerId}`, { ...cooldownConfig, bypassCooldown: effective.bypassCooldown }, now);
+          if (!gate.allowed) {
+            results.push({ planId: plan.id, executed: false, reason: gate.reason });
+            continue;
+          }
+        }
+      }
+      const result = await actionRunner.execute(plan, { mockAi: effective.useMockAi, speak: effective.enableSpeech, notifyObs: effective.enableObs });
+      results.push(result);
+    }
+  }
+
+  return { ok: true, event: validatedEvent, matches, skipped, truncated, plans, planSkips, results, context, options: effective };
+}
+
+/**
  * Runs one synthetic StreamEvent through matchEvent() -> planActions() -> ActionRunner.execute(),
  * the SAME domain code a real production event uses. `triggers` are #91 EventTriggerConfigs, each
  * optionally carrying its own `actions` array (see action-planner.js). `actionRunner` is a REAL
@@ -125,37 +171,52 @@ export async function simulateStreamEvent({
   if (!validation.ok) {
     return { ok: false, issues: validation.issues, event: null, matches: [], skipped: [], truncated: false, plans: [], planSkips: [], results: [], context, options: effective };
   }
-  const validatedEvent = validation.event;
 
-  const { matches, skipped, truncated } = matchEvent(triggers, validatedEvent, { ...matchOptions, trace });
+  return runStreamEventPipeline({ context, effective, validatedEvent: validation.event, triggers, actionRunner, cooldownTracker, cooldownConfigByTrigger, matchOptions, generation, now, trace });
+}
 
-  const plans = [];
-  const planSkips = [];
-  for (const match of matches) {
-    const trigger = triggers.find((entry) => entry?.id === match.triggerId);
-    const actions = Array.isArray(trigger?.actions) ? trigger.actions : [];
-    const planned = planActions({ event: validatedEvent, triggerId: match.triggerId, actions, priority: match.priority, context, generation, now });
-    plans.push(...planned.plans);
-    for (const skip of planned.skipped) planSkips.push({ triggerId: match.triggerId, ...skip });
+/**
+ * Issue #177: the PRODUCTION counterpart to `simulateStreamEvent()` — runs an already-#90-normalized
+ * StreamEvent (received live from the Main-process StreamEventBus, #89) through the EXACT SAME
+ * matchEvent() -> planActions() -> cooldown -> ActionRunner.execute() pipeline, but tagged
+ * `context: "production"` throughout (plans, dispatched action events, the OBS
+ * `stream-event-action` broadcast, the returned envelope) instead of `simulateStreamEvent()`'s
+ * always-"simulation" tag — so a real cheer/subscribe/redemption never gets mislabeled as a
+ * simulation run in the Event History view (#96) or the OBS overlay.
+ *
+ * Unlike `simulateStreamEvent()`, there is no "safe by default" option resolution here: a
+ * production event ALWAYS runs with `PRODUCTION_EQUIVALENT_OPTIONS` (real AI connector, real
+ * SpeechQueue, real OBS broadcast, real — non-bypassed — cooldown). There is no fixture/override
+ * support either (a production event is always a real, already-validated `event`, never an
+ * operator-authored fixture) and no `productionEquivalent` opt-in flag (production IS the opt-in).
+ * Still re-validates via `validateStreamEvent()` — defense in depth, and the same "no bypassing
+ * validation" guarantee `simulateStreamEvent()` gives, even though the StreamEventBus already
+ * validated this event once at publish time.
+ *
+ * Returns the SAME `{ ok, event, matches, skipped, truncated, plans, planSkips, results, context,
+ * options }` envelope shape `simulateStreamEvent()` returns (`context: "production"`), so
+ * src/twitch-ui/history/history-store.js's `deriveSimulationStatus()`/`updateStatus()` and
+ * trigger-trace-drawer.js's rendering work identically for a production result with zero special-
+ * casing.
+ */
+export async function runProductionStreamEvent({
+  event,
+  triggers = [],
+  actionRunner,
+  cooldownTracker = null,
+  cooldownConfigByTrigger = () => null,
+  matchOptions = {},
+  generation = 0,
+  now = Date.now(),
+  trace = null,
+} = {}) {
+  const context = PRODUCTION_CONTEXT;
+  const effective = { ...PRODUCTION_EQUIVALENT_OPTIONS };
+
+  const validation = validateStreamEvent(event);
+  if (!validation.ok) {
+    return { ok: false, issues: validation.issues, event: null, matches: [], skipped: [], truncated: false, plans: [], planSkips: [], results: [], context, options: effective };
   }
 
-  const results = [];
-  if (actionRunner) {
-    for (const plan of plans) {
-      if (cooldownTracker) {
-        const cooldownConfig = cooldownConfigByTrigger(plan.triggerId);
-        if (cooldownConfig) {
-          const gate = cooldownTracker.schedule(`sim:${plan.triggerId}`, { ...cooldownConfig, bypassCooldown: effective.bypassCooldown }, now);
-          if (!gate.allowed) {
-            results.push({ planId: plan.id, executed: false, reason: gate.reason });
-            continue;
-          }
-        }
-      }
-      const result = await actionRunner.execute(plan, { mockAi: effective.useMockAi, speak: effective.enableSpeech, notifyObs: effective.enableObs });
-      results.push(result);
-    }
-  }
-
-  return { ok: true, event: validatedEvent, matches, skipped, truncated, plans, planSkips, results, context, options: effective };
+  return runStreamEventPipeline({ context, effective, validatedEvent: validation.event, triggers, actionRunner, cooldownTracker, cooldownConfigByTrigger, matchOptions, generation, now, trace });
 }

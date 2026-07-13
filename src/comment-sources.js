@@ -41,7 +41,9 @@ export function parseTwitchIrcLine(line) {
   if (!event) return null;
   if (event.type === "ping") return { type: "ping", payload: event.payload };
   if (event.type !== "privmsg") return null;
-  return { type: "message", author: event.author, text: event.text, channel: event.channel, ...(event.emotes ? { emotes: event.emotes } : {}) };
+  // "bits" tag (issue #177): see twitch-chat-session.js's identical forwarding for why.
+  const bits = event.tags?.bits ? Number(event.tags.bits) : null;
+  return { type: "message", author: event.author, text: event.text, channel: event.channel, ...(event.emotes ? { emotes: event.emotes } : {}), ...(bits ? { bits } : {}) };
 }
 
 // Twitchの emotes タグ ("id:start-end,start-end/id2:start-end") が指す文字範囲を

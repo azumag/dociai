@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RuntimeFactory, personaColorFor, selectPlatformAdapter, createDociaiRuntimeFactory } from "../../src/app/runtime-factory.js";
+import { AppRuntime } from "../../src/app/app-runtime.js";
 import { CommentStore } from "../../src/comment-store.js";
 import { ManualCommentSource } from "../../src/comment-sources.js";
 import { BrowserRuntimeController } from "../../src/runtime/runtime-controller.js";
 import { processConfig } from "../../src/config/config-pipeline.js";
+import { CURRENT_SCHEMA_VERSION } from "../../src/stream-events/contract.js";
 
 test("RuntimeFactory.createCandidate rejects a non-integer generation and duplicate component names", async () => {
   const factory = new RuntimeFactory(({ define }) => { define("x", () => ({})); define("x", () => ({})); });
@@ -100,7 +102,7 @@ test("buildDociaiRuntime wires a candidate bundle in dependency order without st
 
   assert.deepEqual(bundle.names(), [
     "connectors", "personaRouter", "speechQueue", "contextBuilder",
-    "responseCoordinator", "automationCoordinator", "newsReader", "topicReader",
+    "responseCoordinator", "eventTriggerRunner", "automationCoordinator", "newsReader", "topicReader",
     "triggerEngine", "sourceCoordinator",
   ]);
   assert.equal(calls.onSecrets.length, 1);
@@ -146,3 +148,196 @@ test("starting a candidate bundle activates the trigger engine and comment sourc
     if (originalWindow === undefined) delete globalThis.window; else globalThis.window = originalWindow;
   }
 });
+
+test("regression: addComment() preserves a raw comment's `bits` field through CommentStore.add() so the double-fire guard actually receives it", async () => {
+  // Reproduces a real bug caught in review: CommentStore.add() destructured/rebuilt the comment
+  // object WITHOUT a `bits` field, so by the time addComment() (src/app/runtime-factory.js) handed
+  // the STORED comment to triggerEngine.handleComment(), the bits value a real cheer's chat PRIVMSG
+  // carries had already been silently dropped — making trigger-engine.js's own `comment.bits > 0`
+  // double-fire guard dead code in production, even though trigger-engine.test.mjs's own unit tests
+  // (which call handleComment() directly with a hand-built object) stayed green throughout, since
+  // they never exercised CommentStore.add()'s normalization step at all.
+  const config = minimalConfig();
+  const { deps } = fakeDeps();
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+
+  const triggerEngine = bundle.get("triggerEngine");
+  const originalHandleComment = triggerEngine.handleComment.bind(triggerEngine);
+  const observed = [];
+  triggerEngine.handleComment = (comment) => {
+    const result = originalHandleComment(comment);
+    observed.push({ comment, result });
+    return result;
+  };
+
+  const addComment = bundle.get("addComment");
+  const stored = addComment({ author: "Viewer", text: "hi there, cheers!", source: "twitch", bits: 100 });
+
+  assert.equal(stored.bits, 100, "CommentStore.add() must preserve the raw comment's bits field on the returned/stored comment");
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].comment.bits, 100, "triggerEngine.handleComment must actually receive the bits value addComment() was given, not a normalized comment with it stripped");
+  assert.deepEqual(observed[0].result, [], "with bits intact, the 'hi' keyword trigger must NOT fire for this cheer text even though it contains the keyword — this is the actual double-fire guard working end-to-end");
+});
+
+// -------------------------------------------------------------------------------------------
+// Issue #177: eventTriggerRunner — the production EventSub-notification -> StreamEvent ->
+// Trigger -> ActionRunner wiring.
+// -------------------------------------------------------------------------------------------
+
+let cheerSeq = 0;
+function cheerPublished(overrides = {}) {
+  cheerSeq += 1;
+  return {
+    context: "production",
+    publishedAtMs: Date.now(),
+    event: {
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      id: `evt-cheer-${cheerSeq}`,
+      kind: "cheer",
+      timestamp: new Date().toISOString(),
+      actor: { id: "user-1", displayName: "Viewer", isAnonymous: false },
+      channel: { id: "channel-1", displayName: "Channel" },
+      sourceMetadata: { connectionId: "conn-1" },
+      data: { bits: 100, message: "cheer!" },
+      ...overrides,
+    },
+  };
+}
+
+/** A fake `platform.subscribeStreamEvents` that records every listener registered and every
+ * unsubscribe call — lets a test both drive a fake production push AND assert the subscription is
+ * torn down on dispose(). */
+function fakeStreamEventsPlatform() {
+  const listeners = [];
+  const unsubscribed = [];
+  return {
+    listeners,
+    unsubscribed,
+    publish(published) { for (const listener of listeners) listener(published); },
+    adapter: {
+      ...selectPlatformAdapter({}),
+      hasStreamEventsService: () => true,
+      subscribeStreamEvents: (listener) => { listeners.push(listener); return () => unsubscribed.push(listener); },
+    },
+  };
+}
+
+/** starting/stopping a full candidate bundle also starts/stops triggerEngine, which always binds a
+ * "keydown" window listener regardless of configured hotkeys — same shim the "starting a candidate
+ * bundle..." test above uses. Runs `fn()` with the shim installed, always restoring afterward. */
+async function withWindowShim(fn) {
+  const originalWindow = globalThis.window;
+  globalThis.window = { addEventListener() {}, removeEventListener() {} };
+  try {
+    await fn();
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window; else globalThis.window = originalWindow;
+  }
+}
+
+test("eventTriggerRunner: does not subscribe when the platform has no StreamEvents bridge (Browser mode), and appears as a real component regardless", async () => withWindowShim(async () => {
+  const config = minimalConfig();
+  const { deps } = fakeDeps();
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+  const runner = bundle.get("eventTriggerRunner");
+  assert.ok(runner);
+  assert.equal(typeof runner.actionRunner.execute, "function");
+  for (const component of bundle.components) if (component.start) await component.start();
+  assert.equal(runner.status().subscribed, false);
+  for (const component of [...bundle.components].reverse()) { if (component.stop) await component.stop(); if (component.dispose) await component.dispose(); }
+}));
+
+test("eventTriggerRunner: a matched production StreamEvent runs the REAL matcher/planner/cooldown/ActionRunner chain — the real SpeechQueue/OBS broadcast are invoked, and the result is reported via deps.onEventTriggerResult", async () => withWindowShim(async () => {
+  const config = minimalConfig({
+    eventTriggers: {
+      "cheer-rule": { id: "cheer-rule", enabled: true, eventTypes: ["cheer"], priority: 0, stopPropagation: false, condition: { all: [] }, actions: [{ id: "a1", kind: "template-speech", template: "ありがとうございます!" }] },
+    },
+  });
+  const fakePlatform = fakeStreamEventsPlatform();
+  const obsCalls = [];
+  const resultCalls = [];
+  const { deps } = fakeDeps({
+    platform: fakePlatform.adapter,
+    broadcast: (type, payload) => obsCalls.push({ type, payload }),
+    onEventTriggerResult: (published, result) => resultCalls.push({ published, result }),
+  });
+  // isCurrent(1) must actually be true for generation 1 — outside of AppRuntime (which calls this
+  // itself inside #applyConfig before creating a candidate), a direct createCandidate() call must
+  // bump the SAME runtimeController's generation counter itself, or eventTriggerRunner's own
+  // isCurrent() guard silently (and correctly) discards every event as belonging to a stale
+  // generation 0.
+  deps.runtimeController.generations.next("test");
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+  for (const component of bundle.components) if (component.start) await component.start();
+
+  const runner = bundle.get("eventTriggerRunner");
+  assert.equal(runner.status().subscribed, true);
+  assert.equal(fakePlatform.listeners.length, 1);
+
+  const published = cheerPublished();
+  fakePlatform.publish(published);
+  // handle() is fire-and-forget from the subscription callback's perspective — wait for the async
+  // pipeline (matchEvent -> planActions -> ActionRunner.execute) to actually report its result.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(resultCalls.length, 1);
+  assert.equal(resultCalls[0].result.ok, true);
+  assert.equal(resultCalls[0].result.context, "production");
+  assert.equal(resultCalls[0].result.matches.length, 1);
+  assert.equal(resultCalls[0].result.results.length, 1);
+  assert.equal(resultCalls[0].result.results[0].status, "executed");
+  assert.equal(obsCalls.length, 1, "the REAL OBS broadcast (deps.broadcast) must be called for a real production execution");
+  assert.equal(obsCalls[0].payload.context, "production");
+
+  for (const component of [...bundle.components].reverse()) { if (component.stop) await component.stop(); if (component.dispose) await component.dispose(); }
+  assert.equal(fakePlatform.unsubscribed.length, 1, "dispose() must unsubscribe from the StreamEvents push");
+}));
+
+test("eventTriggerRunner: config reload discards the OLD generation's subscription — a StreamEvent published on the stale (unsubscribed) listener never reaches the new generation's ActionRunner, and the old ActionRunner itself rejects a stale-generation plan", async () => withWindowShim(async () => {
+  const config1 = minimalConfig({
+    eventTriggers: {
+      "cheer-rule": { id: "cheer-rule", enabled: true, eventTypes: ["cheer"], priority: 0, stopPropagation: false, condition: { all: [] }, actions: [{ id: "a1", kind: "template-speech", template: "hi" }] },
+    },
+  });
+  const fakePlatform = fakeStreamEventsPlatform();
+  const resultCalls = [];
+  const runtimeController = new BrowserRuntimeController();
+  const { deps } = fakeDeps({ runtimeController, platform: fakePlatform.adapter, onEventTriggerResult: (published, result) => resultCalls.push(result) });
+
+  const appRuntime = new AppRuntime({ runtimeController, factory: createDociaiRuntimeFactory(), deps });
+  const first = await appRuntime.start(config1);
+  assert.equal(first.ok, true);
+  const oldRunner = appRuntime.getComponent("eventTriggerRunner");
+  assert.equal(fakePlatform.listeners.length, 1);
+  const staleListener = fakePlatform.listeners[0];
+
+  // Reload: a second config apply supersedes generation 1 with generation 2, tearing the old
+  // eventTriggerRunner's subscription down BEFORE the new one starts (AppRuntime#applyConfig's own
+  // "old teardown, then new start" ordering).
+  const second = await appRuntime.applyConfig(config1, { reason: "reload" });
+  assert.equal(second.ok, true);
+  assert.equal(fakePlatform.unsubscribed.length, 1, "the OLD generation's subscription must be torn down on reload");
+  assert.equal(fakePlatform.listeners.length, 2, "the NEW generation registers its own fresh subscription");
+  const newRunner = appRuntime.getComponent("eventTriggerRunner");
+  assert.notEqual(newRunner, oldRunner, "reload must construct a fresh eventTriggerRunner, never reuse the old one");
+
+  // Even if something still held a reference to the STALE (already-unsubscribed) listener and
+  // called it directly (simulating an event already in flight on the event loop at the exact
+  // moment reload landed), the runner's own isCurrent() guard must stop it from executing anything
+  // under the old generation.
+  staleListener(cheerPublished());
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(resultCalls.length, 0, "a stale-generation event must never reach deps.onEventTriggerResult");
+
+  // Directly confirm the OLD ActionRunner's own generation re-check (action-runner.js's real,
+  // already-tested mechanism) rejects a plan stamped with the now-superseded generation 1.
+  const staleGenerationResult = await oldRunner.actionRunner.execute(
+    { id: "p1", eventId: "e1", triggerId: "cheer-rule", actionIndex: 0, kind: "template-speech", action: { id: "a1", kind: "template-speech", template: "hi" }, event: cheerPublished().event, priority: 0, context: "production", generation: 1, createdAt: Date.now() },
+  );
+  assert.equal(staleGenerationResult.status, "skipped");
+  assert.equal(staleGenerationResult.reason, "stale-generation");
+
+  await appRuntime.dispose("test teardown");
+}));
