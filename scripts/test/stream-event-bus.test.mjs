@@ -170,6 +170,27 @@ test("StreamEventBus snapshot list() returns bounded, most-recent-last history",
   assert.deepEqual(snapshot.map((entry) => entry.event.id), ["evt-2", "evt-3", "evt-4"]);
 }));
 
+test("StreamEventBus clearHistory() empties the replay buffer without touching live listeners/dedupe", () => withModules(async ({ StreamEventBus }) => {
+  const bus = new StreamEventBus();
+  const received = [];
+  bus.subscribe((published) => received.push(published));
+  bus.publish(cheerEvent({ id: "evt-before-clear" }));
+  assert.equal(bus.list().length, 1);
+
+  bus.clearHistory();
+  assert.equal(bus.list().length, 0, "clearHistory() must empty the snapshot/list() replay buffer");
+  assert.equal(bus.listenerCount, 1, "clearHistory() must never remove subscribers (unlike dispose())");
+
+  // A duplicate of the same id, published again right after clearHistory(), is STILL deduped —
+  // proves clearHistory() only touched #history, never #dedupe.
+  const duplicate = bus.publish(cheerEvent({ id: "evt-before-clear" }));
+  assert.equal(duplicate.duplicate, true);
+
+  bus.publish(cheerEvent({ id: "evt-after-clear" }));
+  assert.equal(received.length, 2, "listeners must keep receiving new events after clearHistory()");
+  assert.deepEqual(bus.list().map((entry) => entry.event.id), ["evt-after-clear"]);
+}));
+
 test("StreamEventBus tags simulation-context publishes distinctly from production, outside the StreamEvent payload", () => withModules(async ({ StreamEventBus }) => {
   const bus = new StreamEventBus();
   const received = [];

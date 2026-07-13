@@ -118,6 +118,7 @@ export type DociaiApi = {
   };
   streamEvents: {
     list(input?: StreamEventListInput): Promise<Result<StreamEventListResult>>;
+    clear(): Promise<Result<{ cleared: boolean }>>;
   };
   events: {
     subscribe(type: string, listener: (event: unknown) => void): () => void;
