@@ -11,12 +11,13 @@ const outDir = path.join(repoRoot, "dist/electron");
 await fs.rm(outDir, { recursive: true, force: true });
 await fs.mkdir(outDir, { recursive: true });
 
-// node-llama-cpp (#45) is not wired into main/index.ts's import graph yet (that's a later issue),
-// but it must stay external the moment it is: node-llama-cpp ships prebuilt native binaries and
-// worker scripts it locates via paths relative to its own package directory, so esbuild inlining
-// its JS would break that resolution (see node-llama-cpp's own Electron-bundling guidance, and
-// electron/main/services/local-llm/native-loader.ts's header comment). Listing it here now is a
-// no-op until then and avoids a silent footgun for whoever wires it in.
+// node-llama-cpp (#45) is wired into the Local LLM service's import graph
+// (electron/main/services/local-llm/native-loader.ts's single dynamic `import("node-llama-cpp")`)
+// and must stay external: it ships prebuilt native binaries and worker scripts it locates via
+// paths relative to its own package directory, so esbuild inlining its JS would break that
+// resolution (see node-llama-cpp's own Electron-bundling guidance). Note this doesn't currently
+// make it *work* in a packaged build either way — see native-loader.ts's header comment and #50 —
+// only that esbuild must never silently inline it once it's imported at all.
 const bundleOptions = { bundle: true, platform: "node", format: "cjs", target: "node22", external: ["electron", "node-llama-cpp"], sourcemap: process.env.NODE_ENV === "development", metafile: true };
 const mainResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/main/index.ts")], outfile: path.join(outDir, "main.cjs") });
 const preloadResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/preload/index.ts")], outfile: path.join(outDir, "preload.cjs") });
