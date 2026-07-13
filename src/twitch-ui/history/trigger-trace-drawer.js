@@ -87,13 +87,19 @@ function renderNormalizedEvent(document, event, scrub) {
   return box;
 }
 
-function renderConditionDetails(document, details) {
+// A condition's `actual`/`expected` values come straight from live StreamEvent field values (e.g.
+// `data.message`/`data.userInput`), so they carry the SAME secret-leak risk as the untrusted text
+// rendered elsewhere in this drawer — a viewer-typed cheer/redemption message could contain a
+// pasted API key, and this row must scrub it exactly like every other rendered surface does.
+function renderConditionDetails(document, details, scrub) {
   const list = document.createElement("ul");
   list.className = "trace-condition-details";
   for (const detail of details ?? []) {
     const item = document.createElement("li");
     item.className = detail.passed ? "is-pass" : "is-fail";
-    item.textContent = `${detail.field ?? "?"} ${detail.operator ?? "?"} ${JSON.stringify(detail.expected)} — 実際値: ${JSON.stringify(detail.actual)} (${detail.passed ? "一致" : detail.reason ?? "不一致"})`;
+    const expected = scrub(JSON.stringify(detail.expected));
+    const actual = scrub(JSON.stringify(detail.actual));
+    item.textContent = `${detail.field ?? "?"} ${detail.operator ?? "?"} ${expected} — 実際値: ${actual} (${detail.passed ? "一致" : detail.reason ?? "不一致"})`;
     list.append(item);
   }
   return list;
@@ -101,7 +107,7 @@ function renderConditionDetails(document, details) {
 
 /** "matcher" — every trigger this event was evaluated against, matched AND skipped, with the full
  * per-leaf condition trace (#91's real MatchResult shape) — WHY a rule matched or didn't. */
-function renderMatcherSection(document, trace) {
+function renderMatcherSection(document, trace, scrub) {
   const box = section(document, "Matcher (rule評価結果)");
   const matches = trace?.matches ?? [];
   const skipped = trace?.skipped ?? [];
@@ -117,7 +123,7 @@ function renderMatcherSection(document, trace) {
     row.className = "trace-match-row is-matched";
     const title = document.createElement("p");
     title.textContent = `✓ マッチ: ${match.triggerId} (priority ${match.priority}${match.stopPropagation ? ", stopPropagation" : ""})`;
-    row.append(title, renderConditionDetails(document, match.details));
+    row.append(title, renderConditionDetails(document, match.details, scrub));
     box.append(row);
   }
   for (const skip of skipped) {
@@ -125,7 +131,7 @@ function renderMatcherSection(document, trace) {
     row.className = "trace-match-row is-skipped";
     const title = document.createElement("p");
     title.textContent = `✗ スキップ: ${skip.triggerId} — 理由: ${skip.reason ?? "不明"}`;
-    row.append(title, renderConditionDetails(document, skip.details));
+    row.append(title, renderConditionDetails(document, skip.details, scrub));
     box.append(row);
   }
   return box;
@@ -335,7 +341,7 @@ export function renderTriggerTraceDrawer(root, entry, ctx = {}, document = root?
     return;
   }
 
-  root.append(renderMatcherSection(document, entry.trace));
+  root.append(renderMatcherSection(document, entry.trace, scrub));
   root.append(renderBudgetSection(document, entry.trace));
   root.append(renderPlanSection(document, entry.trace));
   root.append(renderExecutionSection(document, entry.trace, scrub));

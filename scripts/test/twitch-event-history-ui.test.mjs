@@ -398,11 +398,23 @@ test("SECURITY: a configured connector apiKey never appears in the rendered hist
     eventTriggers: {},
   });
   const store = new EventHistoryStore();
-  const trigger = { id: "rule-1", enabled: true, eventTypes: ["cheer"], priority: 0, condition: { all: [] }, actions: [{ id: "a1", kind: "ai-response", personaId: "persona-1" }] };
+  // The condition itself matches against `data.message` (not an empty `all: []`) so the matcher's
+  // per-leaf trace records the raw secret-laden message as `detail.actual` — this is the exact
+  // rendering path (trigger-trace-drawer.js's renderConditionDetails) that a prior review found
+  // leaking the raw value unscrubbed; a trigger with no field conditions would never exercise it.
+  const trigger = {
+    id: "rule-1",
+    enabled: true,
+    eventTypes: ["cheer"],
+    priority: 0,
+    condition: { all: [{ field: "data.message", operator: "contains", value: "token" }] },
+    actions: [{ id: "a1", kind: "ai-response", personaId: "persona-1" }],
+  };
   const event = cheerEvent({ id: "evt-secret", data: { bits: 100, message: `look at this token: ${secret}` } });
   const result = await simulateStreamEvent({ event, triggers: [trigger] });
   const entry = store.recordSimulation({ event, result });
   assert.ok(result.matches.length > 0, "sanity: the trigger must actually match so a prompt preview plan exists");
+  assert.ok(result.matches[0].details?.length > 0, "sanity: the match must carry per-leaf condition details, or this test would not exercise renderConditionDetails at all");
 
   const view = makeView({ document, store, getConfig });
   const root = document.createElement("div");
@@ -412,7 +424,8 @@ test("SECURITY: a configured connector apiKey never appears in the rendered hist
 
   root.querySelector(`[data-history-row-open="${entry.id}"]`).click();
   const drawerText = root.textContent;
-  assert.ok(!drawerText.includes(secret), "the raw secret must not leak into the trace drawer (normalized event / prompt preview)");
+  assert.ok(!drawerText.includes(secret), "the raw secret must not leak into the trace drawer (normalized event / matcher condition details / prompt preview)");
   assert.match(drawerText, /USER \(task/, "sanity: the prompt preview section actually rendered");
+  assert.match(drawerText, /実際値/, "sanity: the matcher's per-leaf condition-details ('実際値') section actually rendered, so it was genuinely exercised");
   assert.ok(drawerText.includes("sk-l") && drawerText.includes("…"), "the scrubbed/masked form of the secret should still be visible (proves scrubbing, not silent field removal)");
 });
