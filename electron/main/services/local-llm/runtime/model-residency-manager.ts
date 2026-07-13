@@ -251,6 +251,19 @@ export class ModelResidencyManager {
       summary = await this.#localLlmService.load({ modelId, contextSize: plan.contextSize, force: opts.force }, context);
     } catch (error) {
       const normalized = normalizeLocalLlmError(error, "BACKEND_INIT_FAILED");
+      // #45's real LocalLlmService.load() rejects with BUSY as a pure pre-flight check (already
+      // loading/unloading, or generating without force) BEFORE it ever touches the currently
+      // resident model — nothing was unloaded, so the previous #resident entry is still accurate
+      // and must be left alone. Every OTHER failure code, by contrast, can only occur AFTER #45 has
+      // already unloaded whatever was previously resident (issue #45's load sequence step 6 runs
+      // before the model/context/session creation steps that can actually fail) — for those, the
+      // underlying service holds NO model at all regardless of what #resident pointed to before
+      // this call, so clearing it here is what makes a subsequent ensureLoaded() for that same
+      // stale model+plan correctly trigger a real reload instead of short-circuiting to a summary
+      // that no longer reflects reality. (A pre-flight NATIVE_UNAVAILABLE from a raced dispose() is
+      // the one theoretical exception this errs on the side of clearing anyway — the service is
+      // shutting down at that point, so an extra harmless reload attempt is the safe direction.)
+      if (normalized.code !== "BUSY") this.#resident = null;
       const recorded = this.#failureHistory.record(modelId, key, normalized.code, normalized.message);
       if (recorded) this.#lastFailure = recorded;
       logLocalLlmError(normalized, { modelId, phase: "residency-load" });

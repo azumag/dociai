@@ -477,6 +477,38 @@ test("ModelResidencyManager.ensureLoaded: a plan change for the SAME model requi
   await manager.dispose();
 });
 
+test("ModelResidencyManager.ensureLoaded: a failed switch away from a resident model must not leave a stale #resident pointer — the original model must genuinely reload, not short-circuit to a cached summary", async () => {
+  // Regression test for a bug caught in review: #45's real LocalLlmService.load() unloads
+  // whatever is currently resident BEFORE attempting to load the new model, so a load() failure
+  // means NOTHING is actually resident afterward — not the model that was resident before the
+  // attempt. If the manager's #resident pointer isn't cleared on a load failure, a later
+  // ensureLoaded() for that same stale model+plan wrongly short-circuits to a cached summary
+  // instead of triggering a real reload, even though the underlying service holds no model at all.
+  const fake = createFakeLocalLlmService({
+    resolveLoad: async (input) => (input.modelId === "model-b" ? { ok: false, code: "BACKEND_INIT_FAILED", message: "boom" } : { ok: true, summary: defaultSummary(input) }),
+  });
+  const manager = new ModelResidencyManager({ localLlmService: fake, clock: createManualClock(), idleTimeoutMs: 100_000 });
+
+  await manager.ensureLoaded("model-a", basePlan());
+  assert.equal(fake.calls.load.length, 1);
+  assert.equal(manager.getResidentModel()?.modelId, "model-a");
+
+  await assert.rejects(manager.ensureLoaded("model-b", basePlan()), (error) => error.code === "BACKEND_INIT_FAILED");
+  // The underlying service's own state confirms nothing is actually resident after the failure —
+  // this is what makes the manager's stale #resident pointer (before the fix) wrong.
+  assert.equal(fake.getState().status, "error");
+
+  const summary = await manager.ensureLoaded("model-a", basePlan());
+  assert.equal(
+    fake.calls.load.length,
+    3,
+    "ensureLoaded for the previously-resident model+plan must trigger a REAL reload (model-a, model-b, model-a again) — a stale #resident pointer would wrongly stop at 2 and return a cached summary instead",
+  );
+  assert.equal(summary.modelId, "model-a");
+  assert.equal(manager.getResidentModel()?.modelId, "model-a");
+  await manager.dispose();
+});
+
 test("ModelResidencyManager: idle countdown fires unload after the timeout, a manual cancel postpones it, and a later ensureLoaded reloads normally", async () => {
   const fake = createFakeLocalLlmService();
   const clock = createManualClock();
