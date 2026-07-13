@@ -149,6 +149,36 @@ test("starting a candidate bundle activates the trigger engine and comment sourc
   }
 });
 
+test("regression: addComment() preserves a raw comment's `bits` field through CommentStore.add() so the double-fire guard actually receives it", async () => {
+  // Reproduces a real bug caught in review: CommentStore.add() destructured/rebuilt the comment
+  // object WITHOUT a `bits` field, so by the time addComment() (src/app/runtime-factory.js) handed
+  // the STORED comment to triggerEngine.handleComment(), the bits value a real cheer's chat PRIVMSG
+  // carries had already been silently dropped — making trigger-engine.js's own `comment.bits > 0`
+  // double-fire guard dead code in production, even though trigger-engine.test.mjs's own unit tests
+  // (which call handleComment() directly with a hand-built object) stayed green throughout, since
+  // they never exercised CommentStore.add()'s normalization step at all.
+  const config = minimalConfig();
+  const { deps } = fakeDeps();
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+
+  const triggerEngine = bundle.get("triggerEngine");
+  const originalHandleComment = triggerEngine.handleComment.bind(triggerEngine);
+  const observed = [];
+  triggerEngine.handleComment = (comment) => {
+    const result = originalHandleComment(comment);
+    observed.push({ comment, result });
+    return result;
+  };
+
+  const addComment = bundle.get("addComment");
+  const stored = addComment({ author: "Viewer", text: "hi there, cheers!", source: "twitch", bits: 100 });
+
+  assert.equal(stored.bits, 100, "CommentStore.add() must preserve the raw comment's bits field on the returned/stored comment");
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].comment.bits, 100, "triggerEngine.handleComment must actually receive the bits value addComment() was given, not a normalized comment with it stripped");
+  assert.deepEqual(observed[0].result, [], "with bits intact, the 'hi' keyword trigger must NOT fire for this cheer text even though it contains the keyword — this is the actual double-fire guard working end-to-end");
+});
+
 // -------------------------------------------------------------------------------------------
 // Issue #177: eventTriggerRunner — the production EventSub-notification -> StreamEvent ->
 // Trigger -> ActionRunner wiring.

@@ -170,6 +170,12 @@ function buildEventTriggerRunner({ config, deps, generation, isCurrent, personaR
     // unsubscribes this component's own listener before a new generation's ever starts (see
     // AppRuntime#applyConfig's teardown-before-start ordering), so this mainly guards an event
     // already in flight on the event loop at the exact moment a reload lands.
+    // Only ever act on production-context events, even though the current Main-process bridge
+    // (eventsub-to-streamevent-bridge.ts) is the bus's only publisher today and always tags its
+    // publishes "production" — this defends against a future simulation-origin publish reaching
+    // the SAME Main-process bus (#96's simulation UI stays fully client-side/Renderer-only today,
+    // but nothing enforces that staying true) ever triggering a REAL AI/speech/OBS action.
+    if (published?.context && published.context !== "production") return;
     try {
       const result = await runProductionStreamEvent({
         event: published.event,
