@@ -5,6 +5,7 @@
 import { registryIds } from "./config/config-registry.js";
 import { processConfigText } from "./config/config-adapters.js";
 import { processConfig } from "./config/config-pipeline.js";
+import { DEFAULT_COMMON_RULES } from "./config/config-defaults.js";
 const KNOWN_PROVIDERS = registryIds("providers");
 const KNOWN_TRIGGER_TYPES = registryIds("triggerTypes");
 const KNOWN_NEWS_SOURCE_TYPES = registryIds("newsSourceTypes");
@@ -333,6 +334,7 @@ export function applyDefaults(cfg) {
       commentHistoryLimit: 80,
       includeRecentComments: 20,
       maxPromptChars: 4000,
+      commonRules: DEFAULT_COMMON_RULES,
       ...(cfg.context ?? {}),
       screenCapture: {
         enabled: false,

@@ -11,6 +11,7 @@
 // ときだけ再描画する (入力フォーカスは失われるが、入力値は draft に反映済みなので保持される)。
 
 import { validateConfig } from "./config-loader.js";
+import { DEFAULT_COMMON_RULES } from "./config/config-defaults.js";
 import { registryOptions } from "./config/config-registry.js";
 import { CONFIG_UI_METADATA } from "./config/config-ui-metadata.js";
 import { SettingsController } from "./settings/settings-controller.js";
@@ -900,6 +901,15 @@ export class SettingsUI {
     scGrid.append(this.#pathField("maxPromptChars", "context.maxPromptChars", { type: "number", value: ctx.maxPromptChars ?? 4000 }));
     scBody.append(scGrid);
     this._body.append(scCard);
+
+    // commonRules — 全ペルソナのsystemPromptの後ろに共通で付加される指示文 (issue: ハードコード
+    // されていたものをconfig化)。空にすると何も付加されない (persona.systemPromptのみになる)。
+    const crTitle = document.createElement("div");
+    crTitle.className = "card-title";
+    crTitle.textContent = "共通ルール (全ペルソナのプロンプトに自動で付加)";
+    const { card: crCard, body: crBody } = this.#card([crTitle]);
+    crBody.append(this.#pathField("commonRules", "context.commonRules", { value: ctx.commonRules ?? DEFAULT_COMMON_RULES, textarea: true, rows: 5 }));
+    this._body.append(crCard);
 
     // router
     const rTitle = document.createElement("div");

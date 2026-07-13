@@ -61,6 +61,7 @@ export class ActionRunner {
     maxUntrustedChars,
     maxPromptChars,
     maxTemplateChars,
+    commonRules,
     dedupeTtlMs = DEFAULT_DEDUPE_TTL_MS,
     dedupeMaxEntries = DEFAULT_DEDUPE_MAX_ENTRIES,
   } = {}) {
@@ -83,6 +84,7 @@ export class ActionRunner {
     this.maxUntrustedChars = maxUntrustedChars;
     this.maxPromptChars = maxPromptChars;
     this.maxTemplateChars = maxTemplateChars;
+    this.commonRules = commonRules;
     this.dedupe = new ResponseBudgetTracker({ ttlMs: dedupeTtlMs, maxEntries: dedupeMaxEntries, clock });
   }
 
@@ -165,7 +167,7 @@ export class ActionRunner {
       generation,
       timeoutMs: action.timeoutMs ?? this.aiTimeoutMs,
       maxOutputChars: action.maxChars ?? this.maxOutputChars,
-      contextOptions: { maxUntrustedChars: this.maxUntrustedChars, maxPromptChars: this.maxPromptChars },
+      contextOptions: { maxUntrustedChars: this.maxUntrustedChars, maxPromptChars: this.maxPromptChars, commonRules: this.commonRules },
     });
 
     this.dispatch({ type: "action-debug", plan, persona, debugText: outcome.debugText, context, triggerId: plan.triggerId });
