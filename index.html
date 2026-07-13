@@ -9,30 +9,38 @@
 </head>
 <body>
   <header class="console-header">
-    <div class="brand">
-      <span class="brand-mark">DOCIAI</span>
-      <span class="brand-sub">コメント読み上げコンソール</span>
+    <!-- メーターブリッジ: ブランド銘板 + ON AIRプレート + ペルソナタリー -->
+    <div class="console-bridge">
+      <div class="brand">
+        <span class="brand-mark">DOCIAI</span>
+        <span class="brand-sub">配信AI操作卓</span>
+      </div>
+      <!-- シグネチャ: ON AIRプレート。装飾 (aria-hidden) — 状態のアクセシブルな実体は隣のタリーランプ群 -->
+      <div class="onair-plate" aria-hidden="true">ON AIR</div>
+      <div class="tally" id="tally" aria-label="ペルソナ状態ランプ"></div>
     </div>
-    <div class="tally" id="tally" aria-label="ペルソナ状態ランプ"></div>
-    <div class="integration-health-quick" aria-live="polite">
-      <span id="integration-health-header-summary">連携ヘルス: 未確認</span>
-      <button id="btn-integrations-open" type="button">連携詳細</button>
-      <button id="btn-twitch-overview-open" type="button">Twitch連携</button>
-    </div>
-    <div class="config-controls">
-      <span class="chip" id="config-status">設定: 未読込</span>
-      <button id="btn-load-server" type="button">サーバーから読込</button>
-      <button id="btn-load-file" type="button">ファイルを選択</button>
-      <button id="btn-settings" type="button">設定を編集</button>
-      <input type="file" id="file-input" accept=".json,application/json" hidden>
-      <a class="obs-link" href="./obs.html" target="_blank" rel="noopener">OBS表示</a>
+    <!-- ツールバー: ヘルス読み出しと設定キー -->
+    <div class="console-toolbar">
+      <div class="integration-health-quick" aria-live="polite">
+        <span id="integration-health-header-summary">連携ヘルス: 未確認</span>
+        <button id="btn-integrations-open" type="button">連携詳細</button>
+        <button id="btn-twitch-overview-open" type="button">Twitch連携</button>
+      </div>
+      <div class="config-controls">
+        <span class="chip" id="config-status">設定: 未読込</span>
+        <button id="btn-load-server" type="button">サーバーから読込</button>
+        <button id="btn-load-file" type="button">ファイルを選択</button>
+        <button id="btn-settings" type="button">設定を編集</button>
+        <input type="file" id="file-input" accept=".json,application/json" hidden>
+        <a class="obs-link" href="./obs.html" target="_blank" rel="noopener">OBS表示</a>
+      </div>
     </div>
   </header>
 
   <main class="console">
     <div class="col col-left">
       <section class="panel panel-reader-controls">
-        <h2>読み上げコントロール <span id="speech-state" class="chip"></span></h2>
+        <h2>読み上げコントロール <span class="mod-en" aria-hidden="true">Transport</span> <span id="speech-state" class="chip"></span></h2>
         <div id="comment-reader-status" class="reader-status" aria-live="polite"></div>
         <div class="btn-row speech-actions">
           <button id="btn-speech-stop" type="button" aria-label="読み上げを一時停止" accesskey="p">一時停止</button>
@@ -47,7 +55,7 @@
         <div id="speech-diagnostics" class="muted speech-diagnostics" aria-live="polite"></div>
       </section>
       <section class="panel">
-        <h2>マイク監視</h2>
+        <h2>マイク監視 <span class="mod-en" aria-hidden="true">Mic</span></h2>
         <div class="btn-row">
           <button id="btn-mic-start" type="button">監視開始</button>
           <button id="btn-mic-stop" type="button">監視停止</button>
@@ -59,9 +67,10 @@
 
     <div class="col col-center">
       <section class="panel panel-comments-primary">
-        <div class="panel-kicker">LIVE COMMENTS</div>
-        <h1>コメント読み上げ</h1>
-        <p class="panel-lead">届いたコメントを中心に、読み上げとAI応答の流れを確認できます。</p>
+        <div class="module-head">
+          <h1>コメント読み上げ</h1>
+          <span class="mod-en" aria-hidden="true">PGM — Live Feed</span>
+        </div>
         <div class="twitch-status-row" id="twitch-chat-panel" hidden>
           <div id="twitch-chat-status" class="muted" aria-live="polite"></div>
           <button id="btn-twitch-reconnect" type="button">Twitch再接続</button>
@@ -76,7 +85,7 @@
         <ol id="comment-log" class="log comment-log" aria-live="polite"></ol>
       </section>
       <section class="panel panel-replies">
-        <h2>コメントへのAI応答</h2>
+        <h2>コメントへのAI応答 <span class="mod-en" aria-hidden="true">AI Reply</span></h2>
         <ol id="reply-log" class="log reply-log" aria-live="polite"></ol>
       </section>
       <details class="panel panel-diagnostics">
@@ -98,7 +107,7 @@
     <div class="col col-right">
       <section class="panel panel-integration-health" aria-labelledby="integration-health-heading">
         <div class="panel-title-row">
-          <h2 id="integration-health-heading">連携ヘルス</h2>
+          <h2 id="integration-health-heading">連携ヘルス <span class="mod-en" aria-hidden="true">Health</span></h2>
           <button id="btn-integrations-open-panel" type="button">詳細</button>
         </div>
         <div id="integration-health-summary" class="integration-summary" aria-live="polite"></div>
@@ -106,15 +115,15 @@
         <div id="integration-health-notice" class="integration-notice" role="status" aria-live="polite" hidden></div>
       </section>
       <section class="panel">
-        <h2>ペルソナ</h2>
+        <h2>ペルソナ <span class="mod-en" aria-hidden="true">Persona</span></h2>
         <ul id="persona-list" class="rack-list"></ul>
       </section>
       <section class="panel">
-        <h2>トリガー</h2>
+        <h2>トリガー <span class="mod-en" aria-hidden="true">Trigger</span></h2>
         <ul id="trigger-list" class="rack-list"></ul>
       </section>
       <section class="panel">
-        <h2>画面キャプチャ</h2>
+        <h2>画面キャプチャ <span class="mod-en" aria-hidden="true">Capture</span></h2>
         <div class="btn-row">
           <button id="btn-screen-start" type="button">共有開始</button>
           <button id="btn-screen-stop" type="button">共有停止</button>
@@ -130,7 +139,7 @@
         <div id="screen-status" class="muted"></div>
       </section>
       <section class="panel">
-        <h2>ニュース</h2>
+        <h2>ニュース <span class="mod-en" aria-hidden="true">News</span></h2>
         <div class="btn-row">
           <button id="btn-news-read" type="button">今すぐ読む</button>
         </div>
@@ -138,7 +147,7 @@
         <div id="news-failures" class="reader-failures" aria-live="polite"></div>
       </section>
       <section class="panel">
-        <h2>話題</h2>
+        <h2>話題 <span class="mod-en" aria-hidden="true">Topic</span></h2>
         <div class="btn-row">
           <button id="btn-topic-read" type="button">今すぐ拾う</button>
         </div>
@@ -146,7 +155,7 @@
         <div id="topic-failures" class="reader-failures" aria-live="polite"></div>
       </section>
       <section class="panel">
-        <h2>コネクタ</h2>
+        <h2>コネクタ <span class="mod-en" aria-hidden="true">Connector</span></h2>
         <ul id="connector-list" class="rack-list"></ul>
       </section>
     </div>

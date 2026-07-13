@@ -33,12 +33,15 @@ export function renderSummary(root, services, document = root?.ownerDocument ?? 
   const summary = summarizeHealth(services);
   root.replaceChildren();
   const items = [
-    ["ready", `正常 ${summary.ready}`], ["warn", `警告 ${summary.warn}`], ["error", `エラー ${summary.error}`],
-    ["checking", `確認中 ${summary.checking}`], ["unknown", `不明 ${summary.unknown}`],
+    ["ready", summary.ready, `正常 ${summary.ready}`], ["warn", summary.warn, `警告 ${summary.warn}`], ["error", summary.error, `エラー ${summary.error}`],
+    ["checking", summary.checking, `確認中 ${summary.checking}`], ["unknown", summary.unknown, `不明 ${summary.unknown}`],
   ];
-  for (const [status, label] of items) {
+  for (const [status, count, label] of items) {
     const item = document.createElement("span");
-    item.className = `integration-summary-item is-${status}`;
+    // count===0のバッジは信号色(警告=琥珀・エラー=赤等)を消灯させる — 色は実際に何かある
+    // ときだけ意味を持たせる、という本体デザインの信号灯規律をヘルスサマリーにも適用する。
+    // 0件の項目が常時琥珀/赤で点灯していると、その規律がここだけ薄れて見えるため。
+    item.className = `integration-summary-item is-${status}${count === 0 ? " is-zero" : ""}`;
     item.dataset.status = status;
     item.setAttribute("aria-label", label);
     item.textContent = label;

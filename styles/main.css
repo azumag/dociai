@@ -1,16 +1,37 @@
-/* dociai 操作卓 — 放送コンソール調
-   タリーランプ: 待機=緑 / 思考中=琥珀 / 発話中=赤 / 無効=消灯 */
+/* ============================================================================================
+   dociai 操作卓 — 「実機の放送卓」
+   コンセプト: ソフトウェアのダッシュボードではなく、放送機材 (ミキシングデスク/タリー/ラック) の
+   質感で作る。表面は温かみのあるグラファイト鋼、文字はシルクスクリーンの銘板 (和文=本文ゴシック、
+   欧文銘板=DIN)、色は信号灯の意味論だけに使う:
+     待機=緑 (--ok) / 思考中・キュー・選択中=琥珀 (--cue) / 発話中・エラー=赤 (--onair) /
+     フォーカス・情報=シアン (--focus)
+   シグネチャ: ヘッダーの ON AIR プレート (ペルソナが実際に発話すると点灯する)。
+   ============================================================================================ */
 
 :root {
-  --bg: #14171d;
-  --panel: #1c2129;
-  --panel-edge: #2a313c;
-  --ink: #e8e6e1;
-  --ink-dim: #9aa3b2;
-  --ok: #3ddc97;
-  --cue: #ffb454;
-  --onair: #ff4545;
-  --focus: #7aa7ff;
+  /* 面 — 粉体塗装の鋼 (青みを排した warm graphite) */
+  --bg: #131211;          /* デスク面 */
+  --panel: #1c1a17;       /* モジュール面 */
+  --raise: #262320;       /* 押しボタン/ヘッド面 (盛り上がり) */
+  --well: #0d0c0b;        /* 掘り込み (入力・ログ・メーター) */
+  --edge: #38332c;        /* ベゼル/ヘアライン */
+  --edge-soft: #29251f;   /* モジュール内の弱い罫線 */
+  /* 銘板の塗料 */
+  --ink: #ece7db;
+  --ink-dim: #a49c8f;
+  --ink-faint: #6f6a5f;
+  /* 信号灯 */
+  --ok: #3ecf8e;
+  --cue: #ffb000;
+  --onair: #ff4132;
+  --focus: #4db8ff;
+  /* 信号灯の暗色ベゼル (点灯色の枠) */
+  --ok-edge: #2c5a44;
+  --cue-edge: #5c4a1e;
+  --onair-edge: #61251e;
+  /* 書体 */
+  --label: "DIN Alternate", "Bahnschrift", "Franklin Gothic Medium", "Arial Narrow", sans-serif;
+  --body: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -20,30 +41,46 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", sans-serif;
+  font-family: var(--body);
   font-size: 13px;
   line-height: 1.6;
 }
+
+::selection { background: rgba(255, 176, 0, 0.28); }
+
+/* 機材らしい細身のスクロールバー (Chromium/Electron) */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: #35302a;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover { background-color: #46403a; }
+::-webkit-scrollbar-track { background: transparent; }
 
 button, input, select {
   font: inherit;
   color: inherit;
 }
 
+/* 押しキー: 面が一段盛り上がり、上端にわずかな光 (機械加工されたキーの面取り) */
 button {
-  background: #242b36;
-  border: 1px solid var(--panel-edge);
-  border-radius: 6px;
+  background: var(--raise);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
   padding: 4px 10px;
   cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
-button:hover { background: #2c3542; }
+button:hover { background: #2e2b27; border-color: #46403a; }
+button:active { box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4); }
 button:disabled { opacity: 0.45; cursor: default; }
 
-input[type="text"], input:not([type]), input[type="search"] {
-  background: #10131a;
-  border: 1px solid var(--panel-edge);
-  border-radius: 6px;
+input[type="text"], input:not([type]), input[type="search"], input[type="password"] {
+  background: var(--well);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
   padding: 5px 8px;
   width: 100%;
 }
@@ -55,28 +92,129 @@ input[type="text"], input:not([type]), input[type="search"] {
 
 a { color: var(--focus); }
 
-/* ---- ヘッダー ---- */
+.muted { color: var(--ink-dim); font-size: 12px; }
+.btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+
+/* ---- ヘッダー: 上段=メーターブリッジ (銘板/ON AIR/タリー)、下段=ツールバー ---- */
 .console-header {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 16px;
-  background: #0f1218;
-  border-bottom: 1px solid var(--panel-edge);
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 16px 7px;
+  background: #0f0e0c;
+  border-bottom: 1px solid var(--edge);
   position: sticky;
   top: 0;
   z-index: 10;
+}
+.console-bridge {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   flex-wrap: wrap;
 }
-
-.brand { display: flex; align-items: baseline; gap: 8px; }
-.brand-mark {
-  font-family: var(--mono);
-  font-weight: 700;
-  letter-spacing: 0.35em;
-  font-size: 15px;
+.console-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  border-top: 1px solid #1c1915;
+  padding-top: 6px;
 }
-.brand-sub { color: var(--ink-dim); font-size: 12px; }
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  flex: none;
+}
+.brand-mark {
+  font-family: var(--label);
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  font-size: 16px;
+  color: var(--ink);
+}
+.brand-sub {
+  color: var(--ink-faint);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+/* シグネチャ: ON AIR プレート。どれかのペルソナが発話中のときだけ点灯する。
+   (プレート自体は装飾 aria-hidden — 状態のアクセシブルな実体は隣のタリーランプ群) */
+.onair-plate {
+  flex: none;
+  font-family: var(--label);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.24em;
+  padding: 8px 12px 7px 16px;
+  border: 1px solid #3f2521;
+  border-radius: 2px;
+  color: #77302a;
+  background: #1d1211;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 0 12px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+.console-header:has(.tally-lamp.is-speaking) .onair-plate {
+  color: #fff6f0;
+  background: #cf261c;
+  border-color: #ff7a66;
+  box-shadow: 0 0 22px rgba(255, 65, 50, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  text-shadow: 0 0 8px rgba(255, 245, 240, 0.6);
+}
+
+/* ペルソナごとのタリープレート (カメラタリーの意匠: 角形ランプ + 銘板) */
+.tally {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.tally-lamp {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  padding: 5px 10px 5px 7px;
+  background: var(--panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.tally-lamp .dot {
+  width: 10px; height: 10px; border-radius: 1px;
+  background: #322e28;
+  box-shadow: inset 0 0 3px rgba(0, 0, 0, 0.6);
+  flex: none;
+}
+.tally-lamp.is-ready .dot { background: var(--ok); box-shadow: 0 0 4px rgba(62, 207, 142, 0.5); }
+.tally-lamp.is-thinking .dot { background: var(--cue); box-shadow: 0 0 4px rgba(255, 176, 0, 0.5); }
+.tally-lamp.is-speaking {
+  color: var(--ink);
+  border-color: #7e2c22;
+  background: #251312;
+}
+.tally-lamp.is-speaking .dot {
+  background: var(--onair);
+  box-shadow: 0 0 10px var(--onair);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+.tally-lamp.is-off { opacity: 0.45; }
+
+@keyframes pulse {
+  50% { box-shadow: 0 0 2px var(--onair); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tally-lamp.is-speaking .dot { animation: none; }
+}
 
 .integration-health-quick {
   display: flex;
@@ -86,76 +224,47 @@ a { color: var(--focus); }
   font: 11px var(--mono);
 }
 
-/* シグネチャ: ON AIRタリー列。実際の発話状態がそのまま灯る */
-.tally {
-  display: flex;
-  gap: 10px;
-  flex: 1;
-  min-width: 200px;
-  flex-wrap: wrap;
-}
-.tally-lamp {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-dim);
-  border: 1px solid var(--panel-edge);
-  border-radius: 999px;
-  padding: 2px 10px 2px 6px;
-  background: #151a22;
-}
-.tally-lamp .dot {
-  width: 9px; height: 9px; border-radius: 50%;
-  background: #3a4250;
-}
-.tally-lamp.is-ready .dot { background: var(--ok); }
-.tally-lamp.is-thinking .dot { background: var(--cue); }
-.tally-lamp.is-speaking { color: var(--ink); border-color: #5c2727; background: #241315; }
-.tally-lamp.is-speaking .dot {
-  background: var(--onair);
-  box-shadow: 0 0 8px var(--onair);
-  animation: pulse 1.1s ease-in-out infinite;
-}
-.tally-lamp.is-off { opacity: 0.5; }
-
-@keyframes pulse {
-  50% { box-shadow: 0 0 2px var(--onair); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .tally-lamp.is-speaking .dot { animation: none; }
-}
-
 .config-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .obs-link { font-size: 12px; }
 
+/* 銘板チップ (角型・シルクスクリーン) */
 .chip {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--ink-dim);
-  border: 1px solid var(--panel-edge);
-  border-radius: 999px;
-  padding: 2px 10px;
-  background: #151a22;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  padding: 2px 8px;
+  background: var(--panel);
+  white-space: nowrap;
 }
-.chip.is-ok { color: var(--ok); border-color: #234a3a; }
-.chip.is-warn { color: var(--cue); border-color: #4a3a23; }
+.chip.is-ok { color: var(--ok); border-color: var(--ok-edge); }
+.chip.is-warn { color: var(--cue); border-color: var(--cue-edge); }
 
-/* ---- レイアウト ---- */
+/* ---- レイアウト: 3本のラック ---- */
 .console {
   display: grid;
-  grid-template-columns: 280px minmax(480px, 1fr) 320px;
-  gap: 12px;
-  padding: 12px;
+  grid-template-columns: 300px minmax(480px, 1fr) 320px;
+  gap: 14px;
+  padding: 14px;
   align-items: start;
   max-width: 1680px;
   margin: 0 auto;
 }
-.col { display: grid; gap: 10px; align-content: start; }
+/* ラック: モジュールは面一で連結し、1本の筐体として縁取る */
+.col {
+  display: grid;
+  gap: 0;
+  align-content: start;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 1px 0 rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
 .col-left {
   position: sticky;
-  top: 74px;
+  top: 104px; /* 2段ヘッダーの高さぶん */
 }
 
 @media (max-width: 1180px) {
@@ -168,113 +277,145 @@ a { color: var(--focus); }
 }
 
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--panel-edge);
-  border-radius: 8px;
-  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--edge);
+  border-radius: 0;
+  padding: 12px 14px;
 }
-.panel > h2 {
-  margin: 0 0 8px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  color: var(--ink-dim);
-  text-transform: uppercase;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+.panel:first-child { border-top: none; }
 
-.panel-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.panel-title-row h2 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.18em; color: var(--ink-dim); text-transform: uppercase; }
+/* モジュール銘板: 和文タイトル + 小さな欧文銘板 (.mod-en) の二言語シルクスクリーン */
+.panel > h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  border-bottom: 1px solid var(--edge-soft);
+  padding-bottom: 7px;
+  white-space: nowrap;
+}
+.panel > h2 .mod-en { overflow: hidden; text-overflow: ellipsis; }
+.mod-en {
+  font-family: var(--label);
+  font-weight: 700;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.panel > h2 .chip { margin-left: auto; font-weight: 400; }
+
+.panel-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--edge-soft); padding-bottom: 7px; margin-bottom: 10px; }
+.panel-title-row h2 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--ink); border: none; padding: 0; display: flex; align-items: baseline; gap: 8px; }
+.panel-title-row button { font-size: 11px; padding: 2px 8px; }
+
+/* ---- 連携ヘルス ---- */
 .integration-summary { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
 .integration-summary-item, .integration-status {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--panel-edge);
-  border-radius: 999px;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
   padding: 2px 7px;
   font: 10px var(--mono);
   white-space: nowrap;
+  background: var(--well);
 }
-.integration-summary-item.is-ready, .integration-status[data-status="ready"] { border-color: #234a3a; color: var(--ok); }
-.integration-summary-item.is-warn, .integration-status[data-status="degraded"], .integration-status[data-status="reconnecting"] { border-color: #4a3a23; color: var(--cue); }
-.integration-summary-item.is-error, .integration-status[data-status="error"], .integration-status[data-status="auth_required"], .integration-status[data-status="configuration_required"] { border-color: #5c2727; color: var(--onair); }
+.integration-summary-item.is-ready, .integration-status[data-status="ready"] { border-color: var(--ok-edge); color: var(--ok); }
+.integration-summary-item.is-warn, .integration-status[data-status="degraded"], .integration-status[data-status="reconnecting"] { border-color: var(--cue-edge); color: var(--cue); }
+.integration-summary-item.is-error, .integration-status[data-status="error"], .integration-status[data-status="auth_required"], .integration-status[data-status="configuration_required"] { border-color: var(--onair-edge); color: var(--onair); }
 .integration-summary-item.is-checking, .integration-status[data-status="checking"] { color: var(--focus); }
+/* 0件のときは信号色を消灯させる — 色は「実際に何かある」ときだけ意味を持たせる規律。
+   後続ルールとして、上のis-ready/is-warn/is-error/is-checkingの色指定を上書きする。 */
+.integration-summary-item.is-zero { border-color: var(--edge); color: var(--ink-dim); }
 .integration-mini-list, .integration-list { display: grid; gap: 6px; }
 .integration-mini-list .integration-card-actions button:first-child { display: none; }
-.integration-card { border: 1px solid var(--panel-edge); border-radius: 7px; padding: 7px 8px; background: #171c24; }
+.integration-card {
+  border: 1px solid var(--edge-soft);
+  border-radius: 2px;
+  padding: 7px 9px;
+  background: var(--well);
+}
 .integration-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .integration-card-detail { color: var(--ink-dim); font-size: 11px; overflow-wrap: anywhere; }
 .integration-card-actions { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
 .integration-card-actions button { padding: 2px 7px; font-size: 11px; }
+/* カード毎に繰り返される推奨アクションはベタ塗り緑だと騒がしい — 枠線の静かな緑キーに落とす */
+.integration-card-actions .btn-primary {
+  background: transparent;
+  color: var(--ok);
+  border-color: var(--ok-edge);
+  font-weight: 600;
+}
+.integration-card-actions .btn-primary:hover { background: rgba(62, 207, 142, 0.08); border-color: var(--ok); }
 .integration-retry { color: var(--cue); font: 10px var(--mono); }
-.integration-notice { border-left: 3px solid var(--onair); padding: 5px 7px; margin-top: 7px; font-size: 11px; }
+.integration-notice { border-left: 3px solid var(--onair); padding: 5px 7px; margin-top: 7px; font-size: 11px; background: rgba(255, 65, 50, 0.06); }
+
 .integration-dialog:not([open]), .diagnostic-export-dialog:not([open]) { display: none; }
 .integration-dialog[open], .diagnostic-export-dialog[open] {
   width: min(980px, 94vw);
   max-height: 88vh;
-  border: 1px solid var(--panel-edge);
-  border-radius: 12px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
   background: var(--bg);
   color: var(--ink);
   padding: 18px;
-  box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
   overflow: auto;
 }
-.integration-dialog::backdrop, .diagnostic-export-dialog::backdrop { background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); }
-.integration-dialog > h2, .diagnostic-export-dialog > h2 { margin: 0 0 12px; font-size: 16px; }
+.integration-dialog::backdrop, .diagnostic-export-dialog::backdrop { background: rgba(10, 8, 6, 0.62); }
+.integration-dialog > h2, .diagnostic-export-dialog > h2 { margin: 0 0 12px; font-size: 15px; letter-spacing: 0.06em; }
 .integration-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.integration-filters select { background: #10131a; border: 1px solid var(--panel-edge); border-radius: 6px; padding: 5px 8px; }
+.integration-filters select { background: var(--well); border: 1px solid var(--edge); border-radius: 2px; padding: 5px 8px; }
 .integration-filters label { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-dim); font-size: 12px; }
 .screen-source-controls { display: flex; gap: 6px; margin-bottom: 8px; }
-.screen-source-controls select { min-width: 0; flex: 1; background: #10131a; border: 1px solid var(--panel-edge); border-radius: 6px; padding: 5px 8px; color: var(--ink); }
+.screen-source-controls select { min-width: 0; flex: 1; background: var(--well); border: 1px solid var(--edge); border-radius: 2px; padding: 5px 8px; color: var(--ink); }
 .integration-panel-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, .8fr); gap: 12px; }
-.integration-details { border: 1px solid var(--panel-edge); border-radius: 8px; padding: 10px; background: var(--panel); min-width: 0; }
+.integration-details { border: 1px solid var(--edge); border-radius: 2px; padding: 10px; background: var(--panel); min-width: 0; }
 .integration-details h3 { margin: 0 0 4px; }
 .integration-detail-status { color: var(--ink-dim); margin: 0 0 8px; }
 .integration-detail-metrics { display: grid; gap: 3px; margin: 10px 0; }
-.integration-detail-row { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid #252c36; font-size: 11px; }
+.integration-detail-row { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--edge-soft); font-size: 11px; }
 .integration-detail-row dt { color: var(--ink-dim); }
 .integration-detail-row dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .integration-timeline { padding-left: 18px; margin: 10px 0 0; color: var(--ink-dim); font: 10px var(--mono); }
-.diagnostic-export-preview { max-height: 56vh; overflow: auto; padding: 10px; border: 1px solid var(--panel-edge); border-radius: 7px; background: #10131a; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px var(--mono); }
+.diagnostic-export-preview { max-height: 56vh; overflow: auto; padding: 10px; border: 1px solid var(--edge); border-radius: 2px; background: var(--well); white-space: pre-wrap; overflow-wrap: anywhere; font: 11px var(--mono); }
 
-.panel-kicker {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.2em;
-  color: var(--onair);
-  margin-bottom: 2px;
-}
-
+/* ---- PGM: コメントモニター (中央の主モジュール) ---- */
 .panel-comments-primary {
   min-height: 56vh;
-  padding: 16px 18px;
-  border-color: #394352;
-  background:
-    linear-gradient(180deg, rgba(122, 167, 255, 0.05), transparent 110px),
-    var(--panel);
+  padding: 14px 16px 16px;
 }
-.panel-comments-primary h1 {
+.module-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-bottom: 1px solid var(--edge-soft);
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+.module-head h1 {
   margin: 0;
-  font-size: clamp(20px, 2vw, 28px);
-  line-height: 1.25;
-  letter-spacing: -0.02em;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
 }
-.panel-lead {
-  color: var(--ink-dim);
-  margin: 4px 0 14px;
-  font-size: 12px;
-}
+.module-head .mod-en { font-size: 10px; }
 
 .reader-status {
-  border: 1px solid var(--panel-edge);
-  border-left: 3px solid var(--ink-dim);
-  border-radius: 7px;
-  padding: 8px 10px;
+  border: 1px solid var(--edge-soft);
+  border-left: 3px solid var(--ink-faint);
+  border-radius: 2px;
+  padding: 7px 10px;
   margin-bottom: 10px;
-  background: #151a22;
+  background: var(--well);
   color: var(--ink-dim);
   font-family: var(--mono);
   font-size: 11px;
@@ -290,50 +431,299 @@ a { color: var(--focus); }
   justify-content: space-between;
   gap: 12px;
   margin: 8px 0 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--edge-soft);
+  border-radius: 2px;
+  background: var(--well);
 }
 
-/* ---- Event History / Simulation (issue #96) ---- */
+/* コメント入力 */
+#comment-form { display: grid; gap: 6px; margin-bottom: 10px; }
+.comment-row { display: flex; gap: 6px; }
+.comment-row input { flex: 1; }
+
+/* ---- ログ (モニターの中の走査行: 箱を並べず、罫線で行を刻む) ---- */
+.log {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--well);
+  border: 1px solid var(--edge-soft);
+  border-radius: 2px;
+}
+.log:empty { border: none; background: transparent; }
+.comment-log { max-height: 52vh; margin-top: 0; }
+.event-log { max-height: 26vh; font-size: 11px; color: var(--ink-dim); }
+.reply-log { max-height: 46vh; font-family: inherit; }
+
+.event-log li { padding: 3px 9px; border-bottom: 1px solid #1a1815; }
+.event-log li:last-child { border-bottom: none; }
+
+.comment-log li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0;
+  padding: 8px 11px;
+  border-bottom: 1px solid #1e1b17;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.comment-log li:last-child { border-bottom: none; }
+/* 最新行 = 次にキューされる行: 琥珀のキュー刻み */
+.comment-log li:first-child {
+  box-shadow: inset 2px 0 0 var(--cue);
+  background: rgba(255, 176, 0, 0.04);
+}
+
+.log .time { color: var(--ink-dim); margin-right: 8px; font-family: var(--mono); font-size: 11px; } /* --ink-faintは3.2:1でAA未達のため、機能的に読む必要があるタイムスタンプには使わない */
+.log .author { color: var(--focus); margin-right: 8px; }
+.event-log .is-error { color: var(--onair); }
+.event-log .is-warn { color: var(--cue); }
+
+/* AI応答: ペルソナ色のレールを持つ走査行 */
+.reply-item {
+  border-bottom: 1px solid #1e1b17;
+  border-left: 3px solid var(--persona-color, var(--ok));
+  padding: 7px 10px;
+}
+.reply-item:last-child { border-bottom: none; }
+.reply-item .reply-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.reply-item .persona-name { color: var(--persona-color, var(--ok)); font-weight: 700; font-family: var(--body); }
+.reply-item .reply-text { margin-top: 2px; }
+.reply-item.is-error { border-left-color: var(--onair); }
+.reply-item.is-error .reply-text { color: var(--onair); font-family: var(--mono); font-size: 12px; }
+
+.debug-pre {
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--well);
+  border: 1px solid var(--edge-soft);
+  border-radius: 2px;
+  padding: 8px;
+  max-height: 30vh;
+  overflow-y: auto;
+  margin: 8px 0 0;
+}
+
+.panel-diagnostics { padding: 0; overflow: hidden; }
+.panel-diagnostics > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  color: var(--ink-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  list-style-position: inside;
+}
+.panel-diagnostics > summary:hover { color: var(--ink); }
+.panel-diagnostics[open] > summary { border-bottom: 1px solid var(--edge-soft); }
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 12px 14px;
+}
+.diagnostic-grid h2 {
+  margin: 0 0 8px;
+  color: var(--ink-dim);
+  font-family: var(--label);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* ---- TRANSPORT (読み上げコントロール) ---- */
+.speech-actions button { font-weight: 600; padding: 6px 12px; }
+.speech-actions button:first-child { border-color: var(--cue-edge); color: var(--cue); }
+.speech-actions button:nth-child(2) { border-color: var(--ok-edge); color: var(--ok); }
+.speech-actions button:last-child { color: var(--ink-dim); }
+.speech-list { max-height: 42vh; overflow-y: auto; }
+.speech-current, .speech-diagnostics { padding: 6px 0; }
+.speech-current { font-size: 12px; }
+.panel-reader-controls h3 {
+  margin: 12px 0 5px;
+  font-family: var(--label);
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
+.reader-failures { display: grid; gap: 5px; margin-top: 8px; }
+.reader-failure { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-dim); }
+.reader-failure span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.reader-failure button { padding: 3px 6px; font-size: 11px; }
+
+/* ---- マイク監視: セグメントLEDメーター ---- */
+.mic-meter {
+  position: relative;
+  height: 8px;
+  background: var(--well);
+  border: 1px solid var(--edge);
+  border-radius: 1px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.mic-meter-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--ok) 0 62%, var(--cue) 62% 85%, var(--onair) 85%);
+  /* トラック全幅を基準にした固定スケール(fill幅ではなく絶対位置で色が決まる) — 初期値は
+     暫定のフォールバックで、実際の値は boot.js の renderMicPanel() がトラックの実測幅
+     (clientWidth)に毎回同期させる。ここを固定pxのままにすると画面幅が変わる環境で
+     ゾーン境界がずれるバグがあった。 */
+  background-size: 264px 100%;
+  transition: width 80ms linear;
+}
+.mic-meter-fill.is-speaking { filter: brightness(1.25); }
+.mic-meter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 5px, var(--well) 5px 7px);
+  pointer-events: none;
+}
+
+/* ---- ラック内リスト (ペルソナ/トリガー/コネクタ/キュー) ---- */
+.rack-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--well);
+  border: 1px solid var(--edge-soft);
+  border-radius: 2px;
+}
+.rack-list:empty { border: none; background: transparent; }
+.rack-list li {
+  border-bottom: 1px solid #1e1b17;
+  padding: 7px 9px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rack-list li:last-child { border-bottom: none; }
+.rack-list .grow { flex: 1; min-width: 0; }
+.rack-list .name { font-weight: 700; font-size: 12px; }
+.rack-list .detail {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+/* ペルソナのチャンネルキャップ (角形、ペルソナ色は JS が inline で塗る) */
+.persona-dot {
+  width: 10px; height: 10px; border-radius: 1px;
+  background: #322e28;
+  flex: none;
+  box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.5);
+}
+.persona-dot.is-ready { outline: 1px solid rgba(62, 207, 142, 0.5); outline-offset: 1px; }
+.persona-dot.is-thinking { outline: 1px solid rgba(255, 176, 0, 0.6); outline-offset: 1px; }
+.persona-dot.is-speaking { outline: 1px solid var(--onair); outline-offset: 1px; box-shadow: 0 0 6px var(--onair); }
+
+.badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  padding: 1px 6px;
+  color: var(--ink-dim);
+  flex: none;
+  background: var(--panel);
+}
+.badge.state-waiting { color: var(--ink-dim); }
+.badge.state-speaking { color: var(--onair); border-color: var(--onair-edge); }
+.badge.state-done { color: var(--ok); }
+.badge.state-skipped { color: var(--ink-dim); }
+.badge.state-failed { color: var(--onair); }
+
+/* ロッカースイッチ (角形) */
+.switch { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch .track {
+  width: 28px; height: 15px; border-radius: 2px;
+  background: #322e28; position: relative; transition: background 0.15s;
+  border: 1px solid var(--edge);
+}
+.switch .track::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 9px; height: 9px; border-radius: 1px;
+  background: var(--ink); transition: left 0.15s;
+}
+.switch input:checked + .track { background: #1d5c40; border-color: var(--ok-edge); }
+.switch input:checked + .track::after { left: 15px; background: var(--ok); }
+.switch input:focus-visible + .track { outline: 2px solid var(--focus); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) {
+  .switch .track, .switch .track::after { transition: none; }
+}
+
+/* ---- Event History / Simulation ---- */
 .btn-danger {
   background: transparent;
   border: 1px solid var(--onair);
   color: var(--onair);
   padding: 7px 16px;
-  border-radius: 7px;
+  border-radius: 2px;
   font-weight: 600;
 }
-.btn-danger:hover { background: rgba(255,69,69,0.1); }
+.btn-danger:hover { background: rgba(255, 65, 50, 0.1); }
 
 .history-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.history-toolbar select, .history-toolbar input { background: #10131a; border: 1px solid var(--panel-edge); border-radius: 6px; padding: 5px 8px; color: var(--ink); }
+.history-toolbar select, .history-toolbar input { background: var(--well); border: 1px solid var(--edge); border-radius: 2px; padding: 5px 8px; color: var(--ink); }
+/* フィルタは1行のツールバーに並べる — ダイアログ全体の input/select width:100% をここで打ち消す
+   (select は内容幅、テキスト検索だけ残り幅を使う)。.twitch-overview-dialog 側のルールが
+   ファイル後方かつ同等以上の特異性なので、コンテナ付きで上書きする。 */
+.twitch-overview-dialog .history-toolbar select { width: auto; flex: none; }
+.twitch-overview-dialog .history-toolbar input:not([type="checkbox"]) { width: auto; flex: 1 1 160px; min-width: 120px; }
 
-.history-row-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 52vh; overflow-y: auto; }
+.history-row-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; max-height: 52vh; overflow-y: auto; background: var(--well); border: 1px solid var(--edge-soft); border-radius: 2px; }
 .history-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 6px 10px 6px 8px;
-  border: 1px solid var(--panel-edge);
-  border-left: 3px solid var(--panel-edge);
-  border-radius: 7px;
-  background: #171c24;
+  padding: 7px 10px 7px 8px;
+  border-bottom: 1px solid #1e1b17;
+  border-left: 3px solid transparent;
   font-size: 12px;
 }
-/* "productionとsimulationを誤認しない" — the row's OWN left border carries this signal too, not
-   just the small badge inside it: production (real, consequential, on-air) gets the tally-lamp's
-   own on-air red; simulation (safe, synthetic) stays at the calm, unmarked default. */
+.history-row:last-child { border-bottom: none; }
+/* production は on-air の赤レール、simulation は無印のまま — 誤認しない */
 .history-row.is-production { border-left-color: var(--onair); }
-.history-row-badge, .history-row-result { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--panel-edge); color: var(--ink-dim); }
-.history-row-badge.is-production { border-color: var(--onair); color: var(--onair); }
-.history-row-badge.is-simulation { border-color: var(--focus); color: var(--focus); }
-.history-row-result.is-handled { border-color: var(--ok); color: var(--ok); }
-.history-row-result.is-failed { border-color: var(--onair); color: var(--onair); }
-.history-row-result.is-skipped, .history-row-result.is-pending { border-color: var(--cue); color: var(--cue); }
-.history-row-time { color: var(--ink-dim); font-family: var(--mono); font-size: 11px; }
-.history-row-type { font-weight: 500; }
+.history-row-badge, .history-row-result { font-size: 10px; font-family: var(--mono); padding: 1px 7px; border-radius: 2px; border: 1px solid var(--edge); color: var(--ink-dim); background: var(--panel); }
+.history-row-badge.is-production { border-color: var(--onair-edge); color: var(--onair); }
+.history-row-badge.is-simulation { border-color: #24455c; color: var(--focus); }
+.history-row-result.is-handled { border-color: var(--ok-edge); color: var(--ok); }
+.history-row-result.is-failed { border-color: var(--onair-edge); color: var(--onair); }
+.history-row-result.is-skipped, .history-row-result.is-pending { border-color: var(--cue-edge); color: var(--cue); }
+.history-row-time { color: var(--ink-dim); font-family: var(--mono); font-size: 11px; } /* --ink-faintは3.2:1でAA未達 */
+.history-row-type { font-weight: 600; }
 .history-row-value { font-family: var(--mono); color: var(--ink-dim); font-size: 11px; }
 .history-row-actor { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .history-row-message { flex-basis: 100%; font-size: 11px; color: var(--ink-dim); }
@@ -342,10 +732,10 @@ a { color: var(--focus); }
 
 .history-clear-confirm, .simulation-production-confirm {
   border: 1px solid var(--onair);
-  border-radius: 8px;
+  border-radius: 2px;
   padding: 10px;
   margin: 8px 0;
-  background: rgba(255,69,69,0.06);
+  background: rgba(255, 65, 50, 0.06);
 }
 .simulation-production-warning { color: var(--onair); font-weight: 600; }
 
@@ -355,39 +745,44 @@ a { color: var(--focus); }
   font-size: 12px;
   font-weight: 600;
   padding: 3px 10px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 999px;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
   margin: 0 0 10px;
+  background: var(--panel);
 }
-.trace-drawer-status.is-handled { color: var(--ok); border-color: #234a3a; }
-.trace-drawer-status.is-failed { color: var(--onair); border-color: #5c2727; }
-.trace-drawer-status.is-skipped, .trace-drawer-status.is-pending { color: var(--cue); border-color: #4a3a23; }
+.trace-drawer-status.is-handled { color: var(--ok); border-color: var(--ok-edge); }
+.trace-drawer-status.is-failed { color: var(--onair); border-color: var(--onair-edge); }
+.trace-drawer-status.is-skipped, .trace-drawer-status.is-pending { color: var(--cue); border-color: var(--cue-edge); }
 .trace-drawer-summary { margin: 0 0 6px; color: var(--ink-dim); font-size: 12px; }
-.trace-drawer-section { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--panel-edge); border-radius: 7px; }
-.trace-drawer-section h4 { margin: 0 0 6px; font-size: 12px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: .06em; }
+.trace-drawer-section { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--edge-soft); border-radius: 2px; background: var(--panel); }
+.trace-drawer-section h4 {
+  margin: 0 0 6px;
+  font-family: var(--label);
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
 .trace-drawer-fields { display: grid; gap: 3px; margin: 0; }
 .trace-drawer-fields dt { color: var(--ink-dim); font-size: 11px; }
 .trace-drawer-fields dd { margin: 0 0 4px; overflow-wrap: anywhere; }
 .trace-condition-details { margin: 4px 0; padding-left: 18px; font-size: 11px; }
 .trace-condition-details .is-pass { color: var(--ok); }
 .trace-condition-details .is-fail { color: var(--ink-dim); }
-/* Matcher — one row per trigger this event was evaluated against, matched or skipped. Mirrors
-   .twitch-preflight-item's status-colored-left-border-row pattern exactly. */
 .trace-match-row {
   padding: 7px 9px;
-  border: 1px solid var(--panel-edge);
-  border-left: 3px solid var(--panel-edge);
-  border-radius: 6px;
+  border: 1px solid var(--edge-soft);
+  border-left: 3px solid var(--edge);
+  border-radius: 2px;
   margin-bottom: 6px;
-  background: #171c24;
+  background: var(--well);
 }
 .trace-match-row:last-child { margin-bottom: 0; }
 .trace-match-row p { margin: 0 0 4px; font-size: 12px; }
 .trace-match-row.is-matched { border-left-color: var(--ok); }
 .trace-match-row.is-skipped { opacity: 0.85; }
 .trace-match-row.is-skipped p { color: var(--ink-dim); }
-/* Execution — the real ActionRunner result per plan, when one ran (see action-runner.js's own
-   "executed"/"fallback"/"skipped" status vocabulary). */
 .trace-execution-row { font-size: 12px; margin: 2px 0; }
 .trace-execution-row.is-executed { color: var(--ok); }
 .trace-execution-row.is-fallback { color: var(--onair); }
@@ -395,8 +790,8 @@ a { color: var(--focus); }
 .trace-prompt-plan { margin-bottom: 10px; }
 .trace-prompt-plan:last-child { margin-bottom: 0; }
 .trace-prompt-plan-heading { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--ink); }
-.trace-prompt-message { background: #10131a; border: 1px solid var(--panel-edge); border-left: 3px solid var(--panel-edge); border-radius: 6px; padding: 8px 10px; margin: 4px 0; }
-.trace-prompt-role { margin: 0 0 4px; font: 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+.trace-prompt-message { background: var(--well); border: 1px solid var(--edge-soft); border-left: 3px solid var(--edge); border-radius: 2px; padding: 8px 10px; margin: 4px 0; }
+.trace-prompt-role { margin: 0 0 4px; font-family: var(--label); font-weight: 700; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-dim); }
 .trace-prompt-body { margin: 0; font-size: 11px; white-space: pre-wrap; word-break: break-word; color: var(--ink); }
 .trace-prompt-message.is-system { border-left-color: var(--focus); }
 .trace-prompt-message.is-system .trace-prompt-role { color: var(--focus); }
@@ -404,10 +799,9 @@ a { color: var(--focus); }
 .trace-prompt-message.is-user .trace-prompt-role { color: var(--cue); }
 
 .simulation-form-fields { display: grid; gap: 6px; margin: 8px 0; }
-/* "安全な既定値" readout — same dashed, informational-note treatment as .twitch-affiliate-note. */
 .simulation-safe-options {
-  border: 1px dashed var(--panel-edge);
-  border-radius: 6px;
+  border: 1px dashed var(--edge);
+  border-radius: 2px;
   padding: 8px 10px;
   margin: 4px 0;
   font-size: 11px;
@@ -426,217 +820,10 @@ a { color: var(--focus); }
   .history-toolbar select, .history-toolbar input { flex: 1 1 140px; }
   .trace-drawer-fields { grid-template-columns: 1fr; }
 }
-.speech-actions button:first-child { border-color: #5c3f27; color: var(--cue); }
-.speech-actions button:nth-child(2) { border-color: #234a3a; color: var(--ok); }
-.speech-list { max-height: 42vh; overflow-y: auto; }
-.speech-current, .speech-diagnostics { padding: 6px 0; }
-.panel-reader-controls h3 { margin: 10px 0 4px; font-size: 12px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: .08em; }
 
-.muted { color: var(--ink-dim); font-size: 12px; }
-
-.btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-
-.reader-failures { display: grid; gap: 5px; margin-top: 8px; }
-.reader-failure { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-dim); }
-.reader-failure span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.reader-failure button { padding: 3px 6px; font-size: 11px; }
-
-/* ---- マイク監視 (issue #32) ---- */
-.mic-meter {
-  height: 6px;
-  background: #10131a;
-  border: 1px solid var(--panel-edge);
-  border-radius: 3px;
-  overflow: hidden;
-  margin-bottom: 6px;
-}
-.mic-meter-fill {
-  height: 100%;
-  width: 0%;
-  background: var(--ok);
-  transition: width 80ms linear;
-}
-.mic-meter-fill.is-speaking { background: var(--onair); }
-
-/* ---- ログ ---- */
-.log {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-  font-family: var(--mono);
-  font-size: 12px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.comment-log { max-height: 52vh; }
-.event-log { max-height: 26vh; font-size: 11px; color: var(--ink-dim); }
-.reply-log { max-height: 46vh; font-family: inherit; }
-
-.comment-log li {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: start;
-  gap: 0;
-  padding: 9px 11px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 7px;
-  background: #171c24;
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-.comment-log li:first-child {
-  border-color: #3b4d68;
-  background: #19212c;
-}
-
-.log .time { color: #5c6675; margin-right: 6px; }
-.log .author { color: var(--focus); margin-right: 6px; }
-.event-log .is-error { color: var(--onair); }
-.event-log .is-warn { color: var(--cue); }
-
-.reply-item {
-  border: 1px solid var(--panel-edge);
-  border-left: 3px solid var(--persona-color, var(--ok));
-  border-radius: 6px;
-  padding: 6px 10px;
-  background: #171c24;
-}
-.reply-item .reply-head {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-dim);
-}
-.reply-item .persona-name { color: var(--persona-color, var(--ok)); font-weight: 600; }
-.reply-item .reply-text { margin-top: 2px; }
-.reply-item.is-error { border-left-color: var(--onair); }
-.reply-item.is-error .reply-text { color: var(--onair); font-family: var(--mono); font-size: 12px; }
-
-.debug-pre {
-  font-family: var(--mono);
-  font-size: 11px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: #10131a;
-  border: 1px solid var(--panel-edge);
-  border-radius: 6px;
-  padding: 8px;
-  max-height: 30vh;
-  overflow-y: auto;
-  margin: 8px 0 0;
-}
-
-.panel-diagnostics { padding: 0; overflow: hidden; }
-.panel-diagnostics > summary {
-  cursor: pointer;
-  padding: 10px 12px;
-  color: var(--ink-dim);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  list-style-position: inside;
-}
-.panel-diagnostics[open] > summary { border-bottom: 1px solid var(--panel-edge); }
-.diagnostic-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  padding: 12px;
-}
-.diagnostic-grid h2 {
-  margin: 0 0 8px;
-  color: var(--ink-dim);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-/* ---- ラック (右カラムのリスト) ---- */
-.rack-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.rack-list li {
-  border: 1px solid var(--panel-edge);
-  border-radius: 6px;
-  padding: 6px 8px;
-  background: #171c24;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.rack-list .grow { flex: 1; min-width: 0; }
-.rack-list .name { font-weight: 600; }
-.rack-list .detail {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-dim);
-  overflow-wrap: anywhere;
-}
-
-.persona-dot {
-  width: 9px; height: 9px; border-radius: 50%;
-  background: #3a4250;
-  flex: none;
-}
-.persona-dot.is-ready { background: var(--ok); }
-.persona-dot.is-thinking { background: var(--cue); }
-.persona-dot.is-speaking { background: var(--onair); box-shadow: 0 0 6px var(--onair); }
-
-.badge {
-  font-family: var(--mono);
-  font-size: 10px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 4px;
-  padding: 1px 6px;
-  color: var(--ink-dim);
-  flex: none;
-}
-.badge.state-waiting { color: var(--ink-dim); }
-.badge.state-speaking { color: var(--onair); border-color: #5c2727; }
-.badge.state-done { color: var(--ok); }
-.badge.state-skipped { color: var(--ink-dim); }
-.badge.state-failed { color: var(--onair); }
-
-/* トグルスイッチ */
-.switch { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; flex: none; }
-.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.switch .track {
-  width: 30px; height: 16px; border-radius: 999px;
-  background: #3a4250; position: relative; transition: background 0.15s;
-}
-.switch .track::after {
-  content: ""; position: absolute; top: 2px; left: 2px;
-  width: 12px; height: 12px; border-radius: 50%;
-  background: var(--ink); transition: left 0.15s;
-}
-.switch input:checked + .track { background: var(--ok); }
-.switch input:checked + .track::after { left: 16px; }
-.switch input:focus-visible + .track { outline: 2px solid var(--focus); outline-offset: 1px; }
-@media (prefers-reduced-motion: reduce) {
-  .switch .track, .switch .track::after { transition: none; }
-}
-
-/* コメント入力 */
-#comment-form { display: grid; gap: 6px; }
-.comment-row { display: flex; gap: 6px; }
-.comment-row input { flex: 1; }
-
-/* ---- OBS表示モード ---- */
+/* ---- OBS表示モード (透過オーバーレイ: 最小限のクロームで映像に負けない可読性) ---- */
 body.obs {
-  background: #0c0e12;
+  background: #0d0c0b;
   overflow: hidden;
 }
 body.obs.transparent { background: transparent; }
@@ -651,52 +838,59 @@ body.obs.transparent { background: transparent; }
   max-width: 720px;
 }
 
+/* 既存バグ修正: 著者の display 指定は UA の [hidden]{display:none} に勝ってしまうため、
+   hidden 中も空のプレートが表示され続けていた (.settings-modal と同じ罠)。再宣言で消す。 */
+.obs-speaking[hidden] { display: none; }
 .obs-speaking {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   align-self: flex-start;
-  font-family: var(--mono);
   font-size: 13px;
-  color: var(--ink);
-  background: rgba(20, 8, 8, 0.82);
-  border: 1px solid #5c2727;
-  border-radius: 999px;
-  padding: 4px 14px 4px 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fff3ec;
+  background: rgba(24, 10, 8, 0.82);
+  border: 1px solid rgba(255, 90, 70, 0.6);
+  border-radius: 2px;
+  padding: 4px 12px 4px 9px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 .obs-speaking .obs-lamp {
-  width: 10px; height: 10px; border-radius: 50%;
+  width: 10px; height: 10px; border-radius: 1px;
   background: var(--onair);
-  box-shadow: 0 0 8px var(--onair);
+  box-shadow: 0 0 10px var(--onair);
   animation: pulse 1.1s ease-in-out infinite;
+  flex: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .obs-speaking .obs-lamp { animation: none; }
 }
 
 .obs-reply {
-  background: rgba(18, 22, 30, 0.88);
-  border: 1px solid var(--panel-edge);
+  background: rgba(16, 14, 12, 0.85);
   border-left: 4px solid var(--persona-color, var(--ok));
-  border-radius: 10px;
+  border-radius: 2px;
   padding: 12px 16px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 .obs-reply .obs-persona {
-  font-family: var(--mono);
   font-size: 13px;
   font-weight: 700;
+  letter-spacing: 0.04em;
   color: var(--persona-color, var(--ok));
   margin-bottom: 4px;
 }
-.obs-reply .obs-text { font-size: 20px; line-height: 1.5; }
+.obs-reply .obs-text { font-size: 20px; line-height: 1.55; color: #f4efe6; }
 
 .obs-comment {
   font-size: 14px;
-  color: var(--ink-dim);
-  background: rgba(18, 22, 30, 0.75);
-  border-radius: 8px;
+  color: #cdc6ba;
+  background: rgba(16, 14, 12, 0.78);
+  border-radius: 2px;
   padding: 6px 12px;
   align-self: flex-start;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 .obs-comment .author { color: var(--focus); margin-right: 8px; }
 
@@ -705,12 +899,12 @@ body.obs.transparent { background: transparent; }
   font-size: 12px;
   color: var(--ink-dim);
 }
-.obs-connection { align-self: flex-start; font: 11px var(--mono); color: var(--ink-dim); background: rgba(18, 22, 30, .7); border-radius: 4px; padding: 3px 7px; }
+.obs-connection { align-self: flex-start; font: 11px var(--mono); color: var(--ink-dim); background: rgba(16, 14, 12, 0.72); border-radius: 2px; padding: 3px 7px; }
 .obs-connection[data-state="connected"] { color: var(--ok); }
-.obs-connection[data-state="stale"], .obs-connection[data-state="disconnected"] { color: var(--warn); }
-.obs-connection[data-state="error"], .obs-connection[data-state="incompatible"] { color: var(--danger); }
+.obs-connection[data-state="stale"], .obs-connection[data-state="disconnected"] { color: var(--cue); }
+.obs-connection[data-state="error"], .obs-connection[data-state="incompatible"] { color: var(--onair); }
 
-/* ---- 設定エディタ (issue #15) ---- */
+/* ---- 設定エディタ ---- */
 /* 閉じている dialog はブラウザ標準で display:none だが、下の .settings-modal で
    display:flex を無条件に指定するとそれを上書きして「閉じても本体が消えない」不具合に
    なる。open 属性が付いているとき (showModal 中) だけ表示する。 */
@@ -720,47 +914,48 @@ body.obs.transparent { background: transparent; }
   /* height (not max-height): dialog は margin:auto で中央寄せされるため、タブごとに
      コンテンツの高さが違うと可変高さでは開くたびに位置が上下にジャンプする。 */
   height: min(860px, 90vh);
-  border: none;
-  border-radius: 12px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
   background: var(--bg);
   color: var(--ink);
   padding: 0;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--panel-edge);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
   overflow: hidden;
 }
-.settings-modal::backdrop { background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); }
+.settings-modal::backdrop { background: rgba(10, 8, 6, 0.62); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .settings-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--panel-edge);
-  background: #0f1218;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--edge);
+  background: #0f0e0c;
   flex: none;
 }
 .settings-title { display: flex; align-items: center; gap: 10px; }
-.settings-title-icon { font-size: 18px; color: var(--ink-dim); }
+.settings-title-icon { font-size: 16px; color: var(--ink-faint); }
 .settings-title h2 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   color: var(--ink);
 }
 .settings-close {
   background: transparent;
   border: none;
+  box-shadow: none;
   font-size: 22px;
   line-height: 1;
   padding: 4px 10px;
   color: var(--ink-dim);
-  border-radius: 6px;
+  border-radius: 2px;
 }
-.settings-close:hover { background: var(--panel-edge); color: var(--ink); }
+.settings-close:hover { background: var(--raise); color: var(--ink); }
 
 .settings-shell {
   display: flex;
@@ -768,15 +963,16 @@ body.obs.transparent { background: transparent; }
   min-height: 0;
 }
 
+/* サイドバー = チャンネルリスト。選択中はキュー(琥珀)のレールが立つ */
 .settings-sidebar {
   flex: none;
   width: 200px;
-  border-right: 1px solid var(--panel-edge);
-  background: #0f1218;
-  padding: 10px 8px;
+  border-right: 1px solid var(--edge);
+  background: #14120f;
+  padding: 8px 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   overflow-y: auto;
 }
 .settings-sidebar button {
@@ -786,29 +982,31 @@ body.obs.transparent { background: transparent; }
   gap: 1px;
   background: transparent;
   border: none;
-  border-radius: 8px;
-  padding: 9px 12px;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 9px 14px;
   text-align: left;
   cursor: pointer;
   transition: background 0.12s;
 }
-.settings-sidebar button:hover { background: rgba(255,255,255,0.04); }
+.settings-sidebar button:hover { background: rgba(255, 255, 255, 0.04); }
 .settings-sidebar button .tab-label {
   font-size: 13px;
-  font-weight: 500;
-  color: var(--ink);
+  font-weight: 600;
+  color: var(--ink-dim);
 }
 .settings-sidebar button .tab-desc {
-  font-size: 10px;
-  color: var(--ink-dim);
+  font-size: 9px;
+  color: var(--ink-faint);
   font-family: var(--mono);
+  letter-spacing: 0.04em;
 }
 .settings-sidebar button.is-active {
   background: var(--panel);
-  box-shadow: inset 2px 0 0 var(--focus);
+  box-shadow: inset 3px 0 0 var(--cue);
 }
-.settings-sidebar button.is-active .tab-label { color: var(--focus); }
-.settings-sidebar button[aria-selected="true"]::after { content: "現在"; font-size: 10px; color: var(--ink-dim); }
+.settings-sidebar button.is-active .tab-label { color: var(--ink); }
+.settings-sidebar button[aria-selected="true"]::after { content: "現在"; font-size: 9px; color: var(--cue); font-family: var(--mono); }
 
 .settings-main {
   flex: 1;
@@ -819,7 +1017,7 @@ body.obs.transparent { background: transparent; }
 }
 
 .settings-body {
-  padding: 20px 24px;
+  padding: 18px 22px;
   overflow-y: auto;
   flex: 1;
   display: flex;
@@ -832,8 +1030,8 @@ body.obs.transparent { background: transparent; }
   align-items: center;
   gap: 12px;
   padding: 12px 20px;
-  border-top: 1px solid var(--panel-edge);
-  background: #0f1218;
+  border-top: 1px solid var(--edge);
+  background: #0f0e0c;
   flex: none;
 }
 .settings-status { color: var(--ink-dim); font-size: 12px; min-width: 0; }
@@ -854,41 +1052,41 @@ body.obs.transparent { background: transparent; }
   color: var(--onair);
   line-height: 1.4;
 }
-/* severity: "error" (default above, onair/red) vs "warning" (cue/amber) — this modifier was missing
-   even though settings-ui.js has stamped `is-${issue.severity}` on this element from the start, so
-   every warning-severity issue rendered red/onair as if it were blocking. Fixing it here benefits
-   both the existing Settings editor and event-rules.js's own `.rule-issues-panel` reuse of this
-   same class, never a parallel color scheme. */
+/* severity: "error" (既定・赤) / "warning" (琥珀) — event-rules.js の .rule-issues-panel も
+   この同じクラスを再利用する。 */
 .settings-error.is-warning { color: var(--cue); }
 
 /* ---- ボタン ---- */
 .btn-primary {
   background: var(--ok);
-  color: #0f1218;
+  color: #0d0c0b;
   border: 1px solid var(--ok);
-  font-weight: 600;
+  font-weight: 700;
   padding: 7px 16px;
-  border-radius: 7px;
+  border-radius: 2px;
+  letter-spacing: 0.02em;
 }
-.btn-primary:hover { background: #34c788; }
+.btn-primary:hover { background: #35bd80; border-color: #35bd80; }
 .btn-ghost {
   background: transparent;
-  border: 1px solid var(--panel-edge);
+  border: 1px solid var(--edge);
   color: var(--ink-dim);
   padding: 7px 14px;
-  border-radius: 7px;
+  border-radius: 2px;
+  box-shadow: none;
 }
-.btn-ghost:hover { background: var(--panel); color: var(--ink); border-color: #3a4250; }
+.btn-ghost:hover { background: var(--panel); color: var(--ink); border-color: #46403a; }
 .btn-add {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   background: transparent;
-  border: 1px dashed #3a4250;
+  border: 1px dashed #46403a;
   color: var(--ink-dim);
   padding: 4px 12px;
-  border-radius: 6px;
+  border-radius: 2px;
   font-size: 12px;
+  box-shadow: none;
 }
 .btn-add span { font-size: 16px; line-height: 1; color: var(--ok); }
 .btn-add:hover { border-color: var(--ok); color: var(--ink); border-style: solid; }
@@ -897,16 +1095,17 @@ body.obs.transparent { background: transparent; }
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: 1px solid #3a4250;
+  border: 1px solid #46403a;
   color: var(--ink-dim);
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: 2px;
   flex: none;
   font-size: 16px;
   line-height: 1;
+  box-shadow: none;
 }
-.btn-remove:hover { border-color: var(--onair); color: var(--onair); background: rgba(255,69,69,0.08); }
+.btn-remove:hover { border-color: var(--onair); color: var(--onair); background: rgba(255, 65, 50, 0.08); }
 .btn-remove span { pointer-events: none; }
 
 /* ---- リストヘッダ ---- */
@@ -918,22 +1117,24 @@ body.obs.transparent { background: transparent; }
 }
 .list-header h3 {
   margin: 0;
+  font-family: var(--label);
+  font-weight: 700;
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-dim);
   flex: 1;
 }
 
-/* ---- カード ---- */
+/* ---- カード = ラックモジュール ---- */
 .card {
-  border: 1px solid var(--panel-edge);
-  border-radius: 10px;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
   background: var(--panel);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   /* overflow:hidden makes a flex item's automatic min-height 0, so without
      flex:none the column layout in .settings-body (overflow-y:auto) will
      shrink cards below their content height instead of scrolling. */
@@ -943,9 +1144,9 @@ body.obs.transparent { background: transparent; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--panel-edge);
-  background: #181d25;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--edge-soft);
+  background: #211e1a;
   flex-wrap: wrap;
 }
 .card-head .field { flex: 1; min-width: 100px; }
@@ -953,8 +1154,8 @@ body.obs.transparent { background: transparent; }
 .card-head .btn-remove { flex: none; }
 .card-title {
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   color: var(--ink);
   flex: 1;
 }
@@ -973,7 +1174,7 @@ body.obs.transparent { background: transparent; }
 
 /* ---- コンパクトカード (connectors / triggers) ---- */
 .card.compact {
-  border-radius: 10px;
+  border-radius: 3px;
   background: var(--panel);
 }
 .card.compact .card-head:empty { display: none; }
@@ -992,7 +1193,7 @@ body.obs.transparent { background: transparent; }
 }
 .compact-row .field-label {
   font-size: 9px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
 }
 .compact-row .btn-remove {
   flex: none;
@@ -1009,9 +1210,11 @@ body.obs.transparent { background: transparent; }
 
 .card h3, .card h4 {
   margin: 0;
-  font-size: 11px;
+  font-family: var(--label);
+  font-weight: 700;
+  font-size: 10px;
   color: var(--ink-dim);
-  letter-spacing: 0.12em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
@@ -1025,13 +1228,14 @@ body.obs.transparent { background: transparent; }
   content: "";
   flex: 1;
   height: 1px;
-  background: var(--panel-edge);
+  background: var(--edge-soft);
 }
 .sub-section-label {
-  font-family: var(--mono);
+  font-family: var(--label);
+  font-weight: 700;
   font-size: 10px;
-  color: var(--ink-dim);
-  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   flex: none;
 }
@@ -1040,24 +1244,20 @@ body.obs.transparent { background: transparent; }
   font-size: 11px;
   line-height: 1.6;
   padding: 10px 14px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 8px;
-  background: #181d25;
+  border: 1px solid var(--edge-soft);
+  border-radius: 2px;
+  background: #191713;
 }
 
-/* ---- フィールド ---- */
+/* ---- フィールド: DIN の刻印ラベル + 掘り込みの入力面 ---- */
 .field {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 .field-inline {
-  /* `display: flex` used to come along "for free" only when combined with `.field` (which sets
-     it) — every existing call site paired them (`class="field field-inline"`, see settings-ui.js's
-     own `#fieldShell`). The new Event Rule/Simulation forms use `.field-inline` STANDALONE (a
-     `<label>`'s own default `display: inline` otherwise), which silently collapsed every inline
-     field onto one run-on line instead of stacking — declaring it directly here makes the class
-     correct on its own, for every caller, past and future. */
+  /* .field と併用されない STANDALONE 利用 (Event Rule/Simulation) があるため、
+     display をこのクラス自身で宣言する。 */
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1072,38 +1272,41 @@ body.obs.transparent { background: transparent; }
 .btn-test-voice {
   flex: none;
   background: transparent;
-  border: 1px solid var(--panel-edge);
+  border: 1px solid var(--edge);
   color: var(--ink-dim);
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: 2px;
   font: inherit;
   font-size: 12px;
   white-space: nowrap;
   cursor: pointer;
+  box-shadow: none;
 }
 .btn-test-voice:hover { border-color: var(--ok); color: var(--ink); }
 .btn-test-voice:disabled { opacity: 0.4; cursor: not-allowed; }
 .field-label {
-  font-family: var(--mono);
+  font-family: var(--label);
+  font-weight: 700;
   font-size: 10px;
   color: var(--ink-dim);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.field-inline .field-label { text-transform: none; font-size: 12px; font-family: inherit; }
+.field-inline .field-label { text-transform: none; font-size: 12px; font-family: inherit; font-weight: 400; letter-spacing: 0; }
 
 .settings-body input[type="text"],
 .settings-body input:not([type]),
 .settings-body input[type="number"],
 .settings-body input[type="search"],
+.settings-body input[type="password"],
 .settings-body textarea,
 .settings-body select {
-  background: #10131a;
-  border: 1px solid var(--panel-edge);
-  border-radius: 6px;
+  background: var(--well);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
   padding: 7px 10px;
   width: 100%;
   font: inherit;
@@ -1133,7 +1336,7 @@ body.obs.transparent { background: transparent; }
   cursor: pointer;
 }
 
-/* ---- チェックボックスグループ (triggers) ---- */
+/* ---- チェックボックスグループ (triggers): 選択中 = キュー(琥珀)点灯 ---- */
 .checkbox-group {
   display: flex;
   flex-wrap: wrap;
@@ -1142,22 +1345,22 @@ body.obs.transparent { background: transparent; }
 .chip-check {
   font-family: var(--mono);
   font-size: 11px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 999px;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
   padding: 4px 10px 4px 8px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
   cursor: pointer;
   transition: all 0.12s;
-  background: #10131a;
+  background: var(--well);
 }
-.chip-check:hover { border-color: #3a4250; }
-.chip-check input { margin: 0; width: 14px; height: 14px; accent-color: var(--focus); }
+.chip-check:hover { border-color: #46403a; }
+.chip-check input { margin: 0; width: 14px; height: 14px; accent-color: var(--cue); }
 .chip-check:has(input:checked) {
-  border-color: var(--focus);
-  color: var(--focus);
-  background: rgba(122,167,255,0.08);
+  border-color: var(--cue-edge);
+  color: var(--cue);
+  background: rgba(255, 176, 0, 0.07);
 }
 
 /* ---- レスポンシブ ---- */
@@ -1170,10 +1373,11 @@ body.obs.transparent { background: transparent; }
     flex-direction: row;
     overflow-x: auto;
     border-right: none;
-    border-bottom: 1px solid var(--panel-edge);
-    padding: 8px;
+    border-bottom: 1px solid var(--edge);
+    padding: 0;
   }
-  .settings-sidebar button { flex: none; }
+  .settings-sidebar button { flex: none; padding: 10px 12px; }
+  .settings-sidebar button.is-active { box-shadow: inset 0 -3px 0 var(--cue); }
   .settings-sidebar button .tab-desc { display: none; }
   .settings-body { padding: 14px; }
   .settings-footer { flex-wrap: wrap; padding: 10px 14px; }
@@ -1185,7 +1389,7 @@ body.obs.transparent { background: transparent; }
 @media (max-width: 599px) {
   .settings-modal[open] { position: fixed; inset: 0; box-sizing: border-box; width: 100vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; margin: 0; border-radius: 0; }
   .settings-header { padding: 12px 14px; }
-  .settings-sidebar { padding: 6px; gap: 4px; }
+  .settings-sidebar { padding: 0; gap: 0; }
   .settings-sidebar button { min-height: 44px; padding: 8px 10px; }
   .settings-body { padding: 12px; }
   .settings-footer { align-items: stretch; }
@@ -1203,9 +1407,9 @@ body.obs.transparent { background: transparent; }
 }
 
 @media (max-width: 720px) {
-  .integration-health-quick { width: 100%; order: 3; }
   .integration-panel-columns { grid-template-columns: 1fr; }
   .integration-dialog[open], .diagnostic-export-dialog[open] { width: 100vw; max-width: 100vw; max-height: 100dvh; margin: 0; border-radius: 0; }
+  .console-header { position: static; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1216,67 +1420,85 @@ body.obs.transparent { background: transparent; }
   .settings-modal, .settings-sidebar, .settings-footer, .card { border: 1px solid CanvasText; }
   .settings-sidebar button[aria-selected="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
   .settings-error { color: CanvasText; text-decoration: underline; }
+  .console-header, .col, .panel, .onair-plate, .tally-lamp, .rack-list, .log { border: 1px solid CanvasText; }
+  .comment-log li, .rack-list li, .reply-item, .history-row { border-bottom: 1px solid CanvasText; }
 }
 
 /* =============================================================================================
-   Twitch連携ダイアログ (issue #94-96 UI screens への放送コンソール調の適用)
-   既存の .settings-modal[open] / .card / .btn-* / .field* / .chip-check 語彙をそのまま踏襲する —
-   新しい見た目を作るのではなく、この画面群だけ未適用だった既存デザインシステムを当てはめる。
-   タリーランプの語彙 (var(--ok)=緑=正常, var(--cue)=琥珀=保留中, var(--onair)=赤=エラー/on-air)
-   を、この画面の「状態」表現(preflight OK/要確認/NG、subscription active/error 等)にも一貫して使う。
+   Twitch連携ダイアログ — 本体と同じ機材語彙 (掘り込みの well、角型銘板バッジ、状態レール、
+   琥珀=選択中のモードキー)。信号灯の意味論も本体と共通:
+   var(--ok)=正常 / var(--cue)=保留・警告 / var(--onair)=エラー・on-air / var(--focus)=情報。
    ============================================================================================= */
 
 .twitch-overview-dialog:not([open]) { display: none; }
 .twitch-overview-dialog[open] {
   width: min(1040px, 94vw);
   height: min(760px, 88vh);
-  border: none;
-  border-radius: 12px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
   background: var(--bg);
   color: var(--ink);
   padding: 0;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--panel-edge);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
   overflow: hidden;
 }
-.twitch-overview-dialog::backdrop { background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); }
+.twitch-overview-dialog::backdrop { background: rgba(10, 8, 6, 0.62); }
 
+/* モードキー列: 選択中のタブは上端が琥珀に点灯する */
 .twitch-tabs {
   display: flex;
-  gap: 2px;
-  padding: 10px 20px 0;
-  border-bottom: 1px solid var(--panel-edge);
-  background: #0f1218;
+  gap: 0;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--edge);
+  background: #0f0e0c;
   flex: none;
   flex-wrap: wrap;
 }
 .twitch-tabs button {
   background: transparent;
   border: none;
-  border-radius: 7px 7px 0 0;
-  padding: 9px 14px;
-  font: 11px var(--mono);
-  letter-spacing: 0.1em;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 11px 14px 10px;
+  font-family: var(--label);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-dim);
-  position: relative;
-  top: 1px;
 }
-.twitch-tabs button:hover { color: var(--ink); background: rgba(255,255,255,0.04); }
+.twitch-tabs button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.04); }
 .twitch-tabs button.is-active {
-  color: var(--focus);
+  color: var(--ink);
   background: var(--bg);
-  box-shadow: inset 0 -2px 0 var(--focus);
+  box-shadow: inset 0 2px 0 var(--cue);
 }
+/* .settings-close の見た目をそのまま流用しつつ、タブ行の右端へ押し出す */
+/* .twitch-tabs button のletter-spacing/font-size/paddingが.settings-closeより詳細度で
+   勝ってしまい、×が本来の22pxではなく11pxで潰れて描画されるバグがあった(レビューで発見)。
+   .twitch-tabs buttonと同じ詳細度で明示的に上書きし、.settings-closeの見た目を実際に復元する。 */
+.twitch-tabs button.twitch-tabs-close {
+  margin-left: auto;
+  align-self: center;
+  font-family: inherit;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: normal;
+  text-transform: none;
+  padding: 4px 10px;
+  border-radius: 2px;
+}
+.twitch-tabs button.twitch-tabs-close:hover { background: var(--raise); }
 
 .twitch-error {
   margin: 10px 20px 0;
   padding: 8px 12px;
-  border: 1px solid #5c2727;
+  border: 1px solid var(--onair-edge);
   border-left: 3px solid var(--onair);
-  border-radius: 6px;
-  background: #241315;
+  border-radius: 2px;
+  background: #241110;
   color: var(--onair);
   font-size: 12px;
   flex: none;
@@ -1294,28 +1516,30 @@ body.obs.transparent { background: transparent; }
 .twitch-tab-content h2 {
   margin: 0;
   font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 .twitch-tab-content h3 {
   margin: 4px 0 0;
+  font-family: var(--label);
+  font-weight: 700;
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-dim);
 }
 
-/* 入力コントロール — .settings-body と同じトーンをこのダイアログにも適用 */
+/* 入力コントロール — .settings-body と同じ掘り込み */
 .twitch-overview-dialog input[type="text"],
 .twitch-overview-dialog input:not([type]),
 .twitch-overview-dialog input[type="number"],
 .twitch-overview-dialog input[type="search"],
+.twitch-overview-dialog input[type="password"],
 .twitch-overview-dialog textarea,
 .twitch-overview-dialog select {
-  background: #10131a;
-  border: 1px solid var(--panel-edge);
-  border-radius: 6px;
+  background: var(--well);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
   padding: 7px 10px;
   width: 100%;
   font: inherit;
@@ -1337,10 +1561,10 @@ body.obs.transparent { background: transparent; }
   gap: 10px;
   flex-wrap: wrap;
   padding: 8px 10px;
-  border: 1px solid var(--panel-edge);
-  border-left: 3px solid var(--panel-edge);
-  border-radius: 6px;
-  background: #171c24;
+  border: 1px solid var(--edge-soft);
+  border-left: 3px solid var(--edge);
+  border-radius: 2px;
+  background: var(--well);
 }
 .twitch-preflight-item.is-pass { border-left-color: var(--ok); }
 .twitch-preflight-item.is-warn { border-left-color: var(--cue); }
@@ -1349,14 +1573,14 @@ body.obs.transparent { background: transparent; }
   font: 10px var(--mono);
   letter-spacing: 0.08em;
   padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--panel-edge);
+  border-radius: 2px;
+  border: 1px solid var(--edge);
   white-space: nowrap;
-  background: #151a22;
+  background: var(--panel);
 }
-.twitch-preflight-item.is-pass .twitch-preflight-badge { color: var(--ok); border-color: #234a3a; }
-.twitch-preflight-item.is-warn .twitch-preflight-badge { color: var(--cue); border-color: #4a3a23; }
-.twitch-preflight-item.is-fail .twitch-preflight-badge { color: var(--onair); border-color: #5c2727; }
+.twitch-preflight-item.is-pass .twitch-preflight-badge { color: var(--ok); border-color: var(--ok-edge); }
+.twitch-preflight-item.is-warn .twitch-preflight-badge { color: var(--cue); border-color: var(--cue-edge); }
+.twitch-preflight-item.is-fail .twitch-preflight-badge { color: var(--onair); border-color: var(--onair-edge); }
 .twitch-preflight-label { font-weight: 600; min-width: 120px; }
 .twitch-preflight-detail { color: var(--ink-dim); font-size: 12px; flex: 1 1 160px; min-width: 160px; }
 .twitch-preflight-item button {
@@ -1364,14 +1588,15 @@ body.obs.transparent { background: transparent; }
   font-size: 11px;
   padding: 3px 10px;
   background: transparent;
-  border: 1px solid var(--panel-edge);
+  border: 1px solid var(--edge);
   color: var(--ink-dim);
-  border-radius: 6px;
+  border-radius: 2px;
+  box-shadow: none;
 }
 .twitch-preflight-item button:hover { border-color: var(--focus); color: var(--ink); }
 
 /* ---- 概要タブ: 接続カード ---- */
-.twitch-connection-status { font-size: 14px; font-weight: 600; margin: 0; }
+.twitch-connection-status { font-size: 14px; font-weight: 700; margin: 0; }
 .twitch-connection-meta { font: 11px var(--mono); margin: 2px 0 0; }
 .twitch-connection-countdown { font: 11px var(--mono); color: var(--cue); margin: 4px 0 0; }
 .twitch-reconnect-notices {
@@ -1387,52 +1612,55 @@ body.obs.transparent { background: transparent; }
   justify-content: space-between;
   gap: 8px;
   padding: 5px 9px;
-  border: 1px solid #4a3a23;
-  border-radius: 6px;
+  border: 1px solid var(--cue-edge);
+  border-radius: 2px;
   font-size: 11px;
   color: var(--cue);
-  background: #211a10;
+  background: #201808;
 }
 .twitch-reconnect-notices li button {
   flex: none;
   padding: 1px 8px;
   font-size: 10px;
   background: transparent;
-  border: 1px solid var(--panel-edge);
+  border: 1px solid var(--edge);
   color: var(--ink-dim);
-  border-radius: 5px;
+  border-radius: 2px;
+  box-shadow: none;
 }
 
 /* ---- 認可タブ ---- */
-.twitch-auth-status { font-size: 14px; font-weight: 600; margin: 4px 0 0; }
+.twitch-auth-status { font-size: 14px; font-weight: 700; margin: 4px 0 0; }
 .twitch-affiliate-note {
   padding: 8px 10px;
-  border: 1px dashed var(--panel-edge);
-  border-radius: 6px;
+  border: 1px dashed var(--edge);
+  border-radius: 2px;
   font-size: 11px;
   line-height: 1.5;
 }
+/* デバイスコード: 銘板の刻印 (この画面で唯一大きく光る数字) */
 .twitch-device-code {
   margin-top: 4px;
   padding: 16px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 8px;
-  background: #171c24;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  background: var(--panel);
   display: grid;
   gap: 10px;
   max-width: 380px;
 }
 .twitch-device-code-row { display: flex; align-items: center; gap: 8px; }
 .twitch-device-code-value {
-  font: 24px var(--mono);
-  font-weight: 700;
+  font: 700 24px var(--mono);
   letter-spacing: 0.14em;
   padding: 6px 12px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 6px;
-  background: #0c0e12;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  background: var(--well);
+  color: var(--cue);
   flex: 1;
   text-align: center;
+  text-shadow: 0 0 12px rgba(255, 176, 0, 0.35);
 }
 .twitch-device-code-countdown { font: 11px var(--mono); color: var(--cue); margin: 0; }
 .twitch-scope-summary { font-size: 12px; margin-top: 4px; display: grid; gap: 6px; }
@@ -1441,14 +1669,14 @@ body.obs.transparent { background: transparent; }
 .twitch-confirm-dialog {
   margin-top: 4px;
   padding: 12px 14px;
-  border: 1px solid #5c2727;
-  border-radius: 8px;
-  background: #241315;
+  border: 1px solid var(--onair-edge);
+  border-radius: 2px;
+  background: #241110;
   display: grid;
   gap: 10px;
   max-width: 440px;
 }
-.twitch-confirm-dialog button:first-of-type { background: var(--onair); color: #0f1218; border-color: var(--onair); font-weight: 600; }
+.twitch-confirm-dialog button:first-of-type { background: var(--onair); color: #0d0c0b; border-color: var(--onair); font-weight: 700; }
 
 /* ---- 購読タブ ---- */
 .twitch-subscriptions-meta { font: 11px var(--mono); }
@@ -1459,16 +1687,18 @@ body.obs.transparent { background: transparent; }
 }
 .twitch-subscription-table th {
   text-align: left;
-  font: 10px var(--mono);
-  letter-spacing: 0.08em;
+  font-family: var(--label);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ink-dim);
+  color: var(--ink-dim); /* --ink-faintは3.2:1でAA未達。テーブル見出しは機能的に読む必要がある */
   padding: 6px 8px;
-  border-bottom: 1px solid var(--panel-edge);
+  border-bottom: 1px solid var(--edge);
 }
 .twitch-subscription-table td {
   padding: 7px 8px;
-  border-bottom: 1px solid #20252d;
+  border-bottom: 1px solid var(--edge-soft);
   vertical-align: top;
 }
 .twitch-subscription-row.is-active td:nth-child(3) { color: var(--ok); }
@@ -1483,16 +1713,14 @@ body.obs.transparent { background: transparent; }
   font-size: 11px;
   padding: 3px 9px;
   background: transparent;
-  border: 1px solid var(--panel-edge);
+  border: 1px solid var(--edge);
   color: var(--ink-dim);
+  box-shadow: none;
 }
 .twitch-subscription-table button:hover { border-color: var(--focus); color: var(--ink); }
 
 /* ---------------------------------------------------------------------------------------------
-   Event Rule / Event History / Simulation タブ (issue #95-96 の残りタブへの放送コンソール調の適用)
-   このダイアログ自身の既存語彙 (.card/.card-head/.card-body、.twitch-preflight-item の状態色付き
-   左ボーダー+バッジ、.field-inline の横並びフィールド) をそのまま踏襲する。新しい色は使わず、
-   var(--ok)/var(--cue)/var(--onair)/var(--focus)/var(--ink)/var(--ink-dim) の範囲に留める。
+   Event Rule / Event History / Simulation タブ
    --------------------------------------------------------------------------------------------- */
 
 /* 横並び (「ラベル: 値」を1行に並べる) の中の input/select は内容幅に —
@@ -1512,12 +1740,8 @@ body.obs.transparent { background: transparent; }
 .twitch-overview-dialog .field-inline input[type="number"] { width: 90px; }
 .rule-condition-value-range input { width: 80px; flex: none; }
 
-/* `.btn-remove` elsewhere in this app is always an ICON-only 28x28 square (settings-ui.js's own
-   `#removeBtn` renders a bare "×" with the real label only in `title`/`aria-label`, see
-   `.btn-remove` above) — the buttons in THIS tab reuse the same class but carry real text
-   ("条件を削除"/"グループを削除"/"actionを削除"/"削除"), which the fixed 28x28 box squeezes into
-   one-character-per-line. Restore normal text-button sizing wherever `.btn-remove` is used with a
-   text label instead of an icon, without touching the icon-button convention anywhere else. */
+/* `.btn-remove` は本来 28x28 のアイコン専用ボタンだが、このタブ群では実テキスト付きで
+   再利用されるため、テキストラベルの場所だけ通常のテキストボタン寸法に戻す。 */
 .rule-condition-leaf .btn-remove,
 .rule-condition-group-header .btn-remove,
 .rule-action-head .btn-remove,
@@ -1541,19 +1765,22 @@ body.obs.transparent { background: transparent; }
 .rule-list-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .rule-list-table th {
   text-align: left;
-  font: 10px var(--mono);
-  letter-spacing: 0.08em;
+  font-family: var(--label);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ink-dim);
+  color: var(--ink-dim); /* --ink-faintは3.2:1でAA未達。テーブル見出しは機能的に読む必要がある */
   padding: 6px 8px;
-  border-bottom: 1px solid var(--panel-edge);
+  border-bottom: 1px solid var(--edge);
 }
-.rule-list-table td { padding: 7px 8px; border-bottom: 1px solid #20252d; vertical-align: top; }
-.rule-list-table tr.is-selected td { background: rgba(122, 167, 255, 0.06); }
+.rule-list-table td { padding: 7px 8px; border-bottom: 1px solid var(--edge-soft); vertical-align: top; }
+.rule-list-table tr.is-selected td { background: rgba(255, 176, 0, 0.05); }
 .rule-list-condition { color: var(--ink-dim); font-family: var(--mono); font-size: 11px; max-width: 260px; overflow-wrap: anywhere; }
 .rule-list-name-link {
   background: transparent;
   border: none;
+  box-shadow: none;
   padding: 0;
   color: var(--focus);
   font-weight: 600;
@@ -1566,14 +1793,15 @@ body.obs.transparent { background: transparent; }
   font: 10px var(--mono);
   letter-spacing: 0.06em;
   padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--panel-edge);
+  border-radius: 2px;
+  border: 1px solid var(--edge);
   margin-right: 4px;
   white-space: nowrap;
+  background: var(--panel);
 }
-.rule-list-badge.is-ok { color: var(--ok); border-color: #234a3a; }
-.rule-list-badge.is-warning { color: var(--cue); border-color: #4a3a23; }
-.rule-list-badge.is-error { color: var(--onair); border-color: #5c2727; }
+.rule-list-badge.is-ok { color: var(--ok); border-color: var(--ok-edge); }
+.rule-list-badge.is-warning { color: var(--cue); border-color: var(--cue-edge); }
+.rule-list-badge.is-error { color: var(--onair); border-color: var(--onair-edge); }
 .rule-list-ops { display: flex; gap: 4px; flex-wrap: wrap; }
 .rule-list-ops button { padding: 3px 8px; font-size: 11px; }
 
@@ -1584,13 +1812,12 @@ body.obs.transparent { background: transparent; }
    ぶら下がる「配下」であることを、条件ツリーと同じ左レール意匠で示す。
    NOTE: 著者スタイルシートのルールは常にUAの `[hidden]{display:none}` に勝つため、`display:flex`
    を当てるならこの `[hidden]` の再宣言が無いとチェックを外してもフィールドが消えなくなる。 */
-.rule-editor-subfields { display: flex; flex-direction: column; gap: 8px; padding-left: 12px; border-left: 2px solid var(--panel-edge); }
+.rule-editor-subfields { display: flex; flex-direction: column; gap: 8px; padding-left: 12px; border-left: 2px solid var(--edge); }
 .rule-editor-subfields[hidden] { display: none; }
 
 /* ---- Event Rule: 条件ツリー (all/anyのネストしたグループ) ----
-   親から子への左レールは「シグナル経路」のメタファーそのまま — .rule-condition-children が
-   ネストするたびにこのレール+インデントも自然に積み重なる。 */
-.rule-condition-group { border: 1px solid var(--panel-edge); border-radius: 8px; padding: 10px; background: #171c24; }
+   親から子への左レールは「シグナル経路」のメタファーそのまま。 */
+.rule-condition-group { border: 1px solid var(--edge-soft); border-radius: 2px; padding: 10px; background: var(--panel); }
 .rule-condition-group-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rule-condition-group-header .btn-remove { margin-left: auto; }
 .rule-condition-children {
@@ -1599,7 +1826,7 @@ body.obs.transparent { background: transparent; }
   gap: 8px;
   margin: 10px 0 10px 6px;
   padding-left: 14px;
-  border-left: 2px solid var(--panel-edge);
+  border-left: 2px solid var(--edge);
 }
 .rule-condition-children:empty { display: none; margin: 0; border: none; }
 .rule-condition-leaf {
@@ -1608,9 +1835,9 @@ body.obs.transparent { background: transparent; }
   gap: 8px;
   flex-wrap: wrap;
   padding: 6px 8px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 6px;
-  background: #10131a;
+  border: 1px solid var(--edge-soft);
+  border-radius: 2px;
+  background: var(--well);
 }
 .rule-condition-leaf .btn-remove { margin-left: auto; }
 .rule-condition-value-range { display: flex; align-items: center; gap: 6px; }
@@ -1618,7 +1845,7 @@ body.obs.transparent { background: transparent; }
 .rule-condition-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .rule-condition-invalid { border-left: 3px solid var(--onair); padding: 6px 8px; }
 
-/* ---- Event Rule: reward selector (issue #95) — エラー/警告は他画面と同じonair/cue語彙 ---- */
+/* ---- Event Rule: reward selector — エラー/警告は他画面と同じ onair/cue 語彙 ---- */
 .reward-selector-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .reward-selector-error {
   display: flex;
@@ -1626,24 +1853,23 @@ body.obs.transparent { background: transparent; }
   gap: 6px;
   flex: 1 1 260px;
   padding: 8px 10px;
-  border: 1px solid #5c2727;
+  border: 1px solid var(--onair-edge);
   border-left: 3px solid var(--onair);
-  border-radius: 6px;
-  background: #241315;
+  border-radius: 2px;
+  background: #241110;
 }
 .reward-selector-error-message { color: var(--onair); font-size: 12px; }
 .reward-selector-warning-badge {
   font: 10px var(--mono);
   color: var(--cue);
-  border: 1px solid #4a3a23;
-  border-radius: 999px;
+  border: 1px solid var(--cue-edge);
+  border-radius: 2px;
   padding: 2px 8px;
   white-space: nowrap;
 }
 .reward-selector-refresh { flex: none; }
 
-/* ---- Event Rule: action editor — .rule-action-card は card/card-head/card-body を流用 (JS側で
-   付与) しているため、ここではその形に無い分だけを補う。 ---- */
+/* ---- Event Rule: action editor — .rule-action-card は card/card-head/card-body を流用 ---- */
 .rule-action-list { display: flex; flex-direction: column; gap: 10px; }
 .rule-action-head select { flex: 1 1 auto; min-width: 140px; }
 .rule-action-head .btn-remove { margin-left: auto; }
@@ -1652,7 +1878,7 @@ body.obs.transparent { background: transparent; }
 .rule-action-template-hint { margin-top: 2px; }
 
 /* ---- Event Rule: 「テスト実行」結果 (fixtureに対するmatcher/planのpreview) ---- */
-.rule-test-result { margin-top: 8px; padding: 10px; border: 1px solid var(--panel-edge); border-radius: 6px; background: #171c24; }
+.rule-test-result { margin-top: 8px; padding: 10px; border: 1px solid var(--edge-soft); border-radius: 2px; background: var(--panel); }
 .rule-test-status { font-weight: 600; margin: 0 0 4px; }
 .rule-test-status.is-match { color: var(--ok); }
 .rule-test-status.is-no-match { color: var(--ink-dim); }

@@ -111,6 +111,19 @@ function assertNoForbiddenContent(node, forbidden) {
   for (const value of forbidden) assert.ok(!text.includes(value), `rendered DOM leaked forbidden content: ${value}`);
 }
 
+/** FakeElement has no innerHTML support (only textContent), and the real close button sets its
+ * glyph via innerHTML ("&times;") rather than textContent — so it can't be located via
+ * findButtonByText(). Walks the tree for the first button whose className contains `partial`. */
+function findByClassName(node, partial) {
+  const stack = [...node.children];
+  while (stack.length) {
+    const current = stack.shift();
+    if (typeof current.className === "string" && current.className.includes(partial)) return current;
+    stack.push(...current.children);
+  }
+  return null;
+}
+
 // -------------------------------------------------------------------------------------------
 // twitch-ui-reducer.js / twitch-ui-store.js
 // -------------------------------------------------------------------------------------------
@@ -290,6 +303,36 @@ test("TwitchOverviewApp: the Event Rule tab is a real, clickable tab that mounts
   assert.ok(eventRuleTabButton, "the tab bar must include an \"Event Rule\" button");
   eventRuleTabButton.click();
   assert.ok(app.contentRoot.findButtonByText("＋ 新規Ruleを追加"), "clicking the tab must mount EventRulesView's real rule-list render output, not a placeholder");
+  app.dispose();
+});
+
+test("TwitchOverviewApp: a visible close button exists, is reachable regardless of which tab is active, and actually closes the dialog", () => {
+  // Regression test for a real bug the app owner hit directly: this dialog originally had no
+  // visible way to close it (only the native Esc key, via the <dialog> cancel event, worked) —
+  // caught during a design review and fixed by adding a "&times;" button mirroring
+  // settings-ui.js's .settings-close pattern (see overview.js's #build()).
+  const document = createFakeDocument();
+  const root = document.createElement("dialog");
+  root.open = true; // simulate an already-open dialog, the state the button must be able to close
+  const app = new TwitchOverviewApp(root, {
+    document,
+    client: new TwitchUiClient({}),
+    getConfig: () => ({ eventTriggers: {}, personas: [] }),
+    onApplyConfig: async () => {},
+  });
+
+  const closeButton = findByClassName(root, "twitch-tabs-close");
+  assert.ok(closeButton, "a close button must exist in the tab bar");
+  assert.equal(closeButton.getAttribute("aria-label"), "Twitch連携を閉じる");
+  assert.match(closeButton.className, /\bsettings-close\b/, "must reuse the established .settings-close styling, not a bespoke close-button pattern");
+
+  // Switch to a non-default tab first — the close button must stay reachable regardless of which
+  // tab's content is currently rendered, since it lives in the tab bar itself, not per-tab content.
+  root.findButtonByText("Event Rule").click();
+  assert.equal(root.open, true, "sanity: still open before clicking close");
+
+  closeButton.click();
+  assert.equal(root.open, false, "clicking the close button must actually close the dialog");
   app.dispose();
 });
 
