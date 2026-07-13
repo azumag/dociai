@@ -292,9 +292,10 @@ any future change ever reordered a content-mutating step to run after signing, t
 3. Any already-shipped, already-installed artifact signed with the compromised certificate stays
    installed (OS revocation checking is opportunistic, not a forced uninstall) — treat this the
    same as any other credential-compromise incident: rotate, communicate, and if the update channel
-   is live, ship a new signed release promptly. (macOS auto-updates via `electron-updater` once
-   signing secrets exist — see `docs/release.md`'s "Auto-update (macOS)" section; Windows has no
-   auto-update channel yet, so "ship a new release" there still means a fresh manual download.)
+   is live, ship a new signed release promptly. (Both platforms auto-update via `electron-updater`
+   once their respective signing secrets exist — see `docs/release.md`'s "Auto-update (macOS +
+   Windows)" section, including the Windows-specific `win.signtoolOptions.publisherName` requirement
+   for signature verification to actually be active.)
 
 **Rollback (a new certificate breaks something, e.g. wrong Team ID / bad Windows Authenticode
 timestamp server outage):**

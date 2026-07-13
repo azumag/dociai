@@ -82,6 +82,23 @@ jobs:
             exit 1
           fi
 
+      # In electron-builder 26, when a real certificate is present and `verifyUpdateCodeSignature`
+      # isn't explicitly set to `false` (default `true`), the publisherName electron-updater's
+      # NsisUpdater checks in app-update.yml gets auto-computed from the certificate's own CN — this
+      # step is a belt-and-suspenders check, not the primary defense, against the specific case
+      # where verifyUpdateCodeSignature is ever disabled, which would otherwise silently turn off
+      # Windows update-signature verification with no visible symptom anywhere (see
+      # update-service.ts's own note on how a missing/misconfigured update-metadata file degrades to
+      # a quiet "not-available" rather than any visible error). electron-builder.yml's own comment
+      # near its `nsis:` block explains why this reads `win.signtoolOptions.publisherName`, not
+      # `win.publisherName` (that key doesn't exist in this electron-builder version's schema).
+      - name: Require win.signtoolOptions.publisherName alongside a Windows signing certificate
+        run: |
+          if [ -n "${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}" ] && ! grep -qE '^\s*publisherName\s*:' electron-builder.yml; then
+            echo "::error::WINDOWS_CERTIFICATE_PFX_BASE64 is set but electron-builder.yml has no win.signtoolOptions.publisherName. See electron-builder.yml's nsis: block comment and docs/signing.md before releasing."
+            exit 1
+          fi
+
   package:
     name: package
     needs: validate-tag
@@ -163,12 +180,28 @@ jobs:
             fi
 
             ASSETS=(release-artifacts/publish-manifest.json release-artifacts/SHA256SUMS)
-            # *-mac.yml/*.blockmap: electron-updater's update metadata (electron-builder.yml's
-            # `publish` config, generated during package.yml's build with `--publish never` so
-            # electron-builder itself never talks to GitHub — this step is the only thing that
-            # actually uploads them). `*-mac.yml`, not a bare `*.yml` — see package.yml's own
-            # upload-artifact step for why (avoids picking up a stray `builder-debug.yml`).
-            while IFS= read -r -d '' asset; do ASSETS+=("$asset"); done < <(find release-artifacts -maxdepth 2 -type f \( -name "*.zip" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" -o -name "*-mac.yml" -o -name "*.blockmap" \) -print0)
+            # *.yml (excluding builder-debug.yml)/*.blockmap: electron-updater's update metadata
+            # (electron-builder.yml's `publish` config, generated during package.yml's build with
+            # `--publish never` so electron-builder itself never talks to GitHub — this step is the
+            # only thing that actually uploads them). See package.yml's own upload-artifact steps
+            # for why the exclusion is by name (builder-debug.yml) rather than a hardcoded
+            # channel/platform pattern.
+            while IFS= read -r -d '' asset; do ASSETS+=("$asset"); done < <(find release-artifacts -maxdepth 2 -type f \( \( -name "*.zip" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" -o -name "*.blockmap" \) -o \( -name "*.yml" -a ! -name "builder-debug.yml" \) \) -print0)
+
+            # Both update-metadata files are load-bearing and their absence is invisible to a
+            # client: electron-updater's GitHub provider treats a missing/unreadable channel file
+            # the same as "no update available" (see update-service.ts's isNotFoundError), so a
+            # regression in package.yml's upload globs (or this step's own find pattern) would
+            # silently ship a release that auto-update can never see — no error, no user report,
+            # just a channel that quietly stopped working. Fail loudly here instead, before
+            # publishing, while the channel name is still knowable in-repo (electron-builder.yml
+            # sets no explicit `channel:`, so GitHub-provider clients always request "latest").
+            for expected in "latest-mac.yml" "latest.yml"; do
+              if ! printf '%s\n' "${ASSETS[@]}" | grep -q "/${expected}\$"; then
+                echo "::error::${expected} is missing from this release's assets — auto-update would silently stop working for that platform. Check package.yml's upload-artifact globs and this step's find pattern."
+                exit 1
+              fi
+            done
 
             # Created as --draft first: a draft Release is excluded from "latest release" lookups
             # (both the public API and electron-updater's own GitHub provider), so a client

@@ -166,19 +166,31 @@ if (!hasLock) {
     const streamEventBus = new StreamEventBus();
     streamEventBus.subscribe((published) => controller?.emitToConsole(STREAM_EVENT_APP_EVENT_TYPE, published));
     streamEventBus.subscribe((published) => controller?.emitToObs(STREAM_EVENT_APP_EVENT_TYPE, published));
-    // Auto-update is macOS-only for now (see update-service.ts's header comment) and only ever
-    // makes sense for a packaged, real (non-"dev") build — a dev run has no `app-update.yml` and
-    // nothing published for its own "version" to compare against. `electron-updater`'s `autoUpdater`
-    // export is a lazy getter that constructs the real platform-specific updater singleton (which
-    // throws outside a packaged app) the first time the `autoUpdater` binding is actually read —
+    // Auto-update (macOS + Windows — see update-service.ts's header comment) only ever makes sense
+    // for a packaged, real (non-"dev") build — a dev run has no `app-update.yml` and nothing
+    // published for its own "version" to compare against. `electron-updater`'s `autoUpdater` export
+    // is a lazy getter that constructs the real platform-specific updater singleton (which throws
+    // outside a packaged app) the first time the `autoUpdater` binding is actually read —
     // `require("electron-updater")` alone (module evaluation) never touches it. Reached via
     // `require(...)` INSIDE this conditional, rather than a top-level `import { autoUpdater } from
     // "electron-updater"`, purely so the module is never even required/evaluated at all on a
-    // dev/non-mac run (skips pulling in its dependency graph for a build that will never use it) —
-    // not because a static import would itself trigger the getter, which it would not.
-    const updateServiceEnabled = process.platform === "darwin" && app.isPackaged && buildInfo.channel !== "dev";
+    // dev/unsupported-platform run (skips pulling in its dependency graph for a build that will
+    // never use it) — not because a static import would itself trigger the getter, which it would
+    // not.
+    const updateServiceEnabled = (process.platform === "darwin" || process.platform === "win32") && app.isPackaged && buildInfo.channel !== "dev";
+    let realAutoUpdater: AutoUpdaterLike | null = null;
+    if (updateServiceEnabled) {
+      realAutoUpdater = require("electron-updater").autoUpdater as AutoUpdaterLike;
+      // Windows/NsisUpdater-only property, absent from AutoUpdaterLike (nothing else in this file
+      // touches it): defaults to false, which logs a warning on every single download attempt
+      // (electron-updater's own "web installer" is an alternate distribution path this project
+      // doesn't use — the NSIS installer built by electron-builder.yml's `nsis:` block is always a
+      // full offline installer). Setting it here, not in update-service.ts, keeps that file's
+      // AutoUpdaterLike interface platform-generic.
+      if (process.platform === "win32") (realAutoUpdater as unknown as { disableWebInstaller?: boolean }).disableWebInstaller = true;
+    }
     const updateService = new UpdateService(
-      updateServiceEnabled ? (require("electron-updater").autoUpdater as AutoUpdaterLike) : null,
+      realAutoUpdater,
       (state) => controller?.emitToConsole(UPDATE_APP_EVENT_TYPE, state),
       { allowPrerelease: buildInfo.channel === "beta" },
     );

@@ -18,11 +18,11 @@ test("Electron renderer adapters route every external service through Main IPC",
   assert.match(main, /new SpeechBackendService/); assert.match(main, /new TwitchChatService/);
   assert.match(main, /new ShortcutService/);
   assert.match(main, /new CaptureService/); assert.match(main, /installDisplayMediaHandler/);
-  // Auto-update (macOS-only for now — see update-service.ts's header comment): must never be
-  // constructed for a dev/unpackaged run or a non-darwin platform, since electron-updater throws
+  // Auto-update (macOS + Windows — see update-service.ts's header comment): must never be
+  // constructed for a dev/unpackaged run or an unsupported platform, since electron-updater throws
   // reaching for `app-update.yml`/`dev-app-update.yml` outside a real packaged build.
   assert.match(main, /new UpdateService/);
-  assert.match(main, /process\.platform === "darwin" && app\.isPackaged/);
+  assert.match(main, /process\.platform === "darwin" \|\| process\.platform === "win32"/);
 });
 
 test("packaged Electron CSP keeps provider connections out of Renderer", async () => {
