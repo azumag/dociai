@@ -15,7 +15,14 @@ directories:
   buildResources: build
 
 # Main/Preload/Renderer output (dist/electron) is packed into app.asar as-is; no native modules
-# are bundled into it today (esbuild's only external is `electron`, which the runtime provides).
+# are bundled into it today (esbuild's externals are `electron`, which the runtime provides, and
+# `node-llama-cpp` (#45) — kept external so it is never silently inlined by esbuild, but its
+# prebuilt native binaries are NOT copied anywhere by this file yet: scripts/electron/build.mjs
+# does not copy node_modules into dist/electron at all, so today this ships nothing node-llama-cpp
+# related (safe, if inert) either inside or outside the asar. #50 is the tracked follow-up that
+# actually places node-llama-cpp's platform binaries under build/native/node-llama-cpp/<platform>-
+# <arch>/ per build/native/README.md's documented layout and wires the matching extraResources
+# entry + native-loader.ts's packaged-mode resource path — do not assume that work is done here.
 asar: true
 files:
   - "**/*"
