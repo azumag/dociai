@@ -1,0 +1,70 @@
+name: Auto Release
+
+# Continuous-release trigger (project decision, 2026-07-13): every push to `main` bumps
+# package.json's patch version, commits that bump back to main, tags it, and dispatches
+# release.yml (#74) to build/package/(opportunistically sign)/publish it to GitHub Releases. This
+# workflow owns ONLY "decide the next version and kick off a release for it" — it deliberately
+# does not duplicate any of release.yml's own validate/package/publish logic, matching this repo's
+# existing workflow-composition style (release.yml itself reuses package.yml the same way).
+#
+# Loop safety: this workflow's own pushes (the version-bump commit AND the tag) use the default
+# GITHUB_TOKEN, which GitHub Actions never lets re-trigger `on: push` workflow runs, including this
+# same workflow — see
+# https://docs.github.com/actions/using-workflows/triggering-a-workflow#triggering-a-workflow-from-a-workflow.
+# The `if:` guard on the job below is defense-in-depth on top of that platform guarantee, not a
+# substitute for it. The SAME restriction means a plain tag push here would NOT trigger
+# release.yml's own `on: push: tags: v*` listener, so this workflow explicitly dispatches
+# release.yml via `gh workflow run` (workflow_dispatch calls are exempt from the restriction)
+# rather than relying on the tag push alone to fire it.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: write
+
+# Only one version-bump attempt in flight at a time — pushes queue rather than race, so two merges
+# landing close together never compute the same "next version" concurrently and collide on the
+# same tag/commit.
+concurrency:
+  group: dociai-auto-release
+  cancel-in-progress: false
+
+jobs:
+  bump-and-release:
+    name: bump-and-release
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Bump patch version (package.json + package-lock.json)
+        id: bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          NEW_VERSION=$(npm version patch --no-git-tag-version | sed 's/^v//')
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Commit the version bump and tag it
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          git add package.json package-lock.json
+          git commit -m "chore(release): $TAG"
+          git tag "$TAG"
+          git push origin HEAD:main
+          git push origin "$TAG"
+
+      - name: Dispatch release.yml for the new tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: gh workflow run release.yml --ref "$TAG" -f tag="$TAG"
