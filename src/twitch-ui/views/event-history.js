@@ -240,7 +240,11 @@ export class EventHistoryView {
   #renderRow(document, entry, scrub) {
     const display = safeFormat(entry.event);
     const row = document.createElement("li");
-    row.className = `history-row is-${entry.status}`;
+    // `is-${entry.context}` (production/simulation), alongside `is-${entry.status}`, lets the row's
+    // OWN left border (not just the small badge inside it) carry the production/simulation signal —
+    // this issue's own acceptance criterion is "productionとsimulationを誤認しない", so the
+    // distinction should be readable at a glance across the whole row, not just from one small pill.
+    row.className = `history-row is-${entry.status} is-${entry.context}`;
     row.dataset.historyRow = entry.id;
 
     const contextBadge = document.createElement("span");

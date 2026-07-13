@@ -58,11 +58,15 @@ export function renderActionEditor(root, action, ctx, document = root?.ownerDocu
   const { path, personaOptions = [], onStructuralChange, onRemove } = ctx;
   root.replaceChildren();
 
+  // "card"/"card-head"/"card-body" reuse the SAME container vocabulary Settings' connector/persona
+  // cards already use (styles/main.css's `.card`/`.card-head`/`.card-body`) — this box's shape
+  // (a head row + a body of fields) matches that pattern exactly, so it gets the established
+  // bordered-panel chrome and title treatment for free instead of a parallel, one-off CSS block.
   const card = document.createElement("div");
-  card.className = "rule-action-card";
+  card.className = "rule-action-card card";
 
   const head = document.createElement("div");
-  head.className = "rule-action-head";
+  head.className = "rule-action-head card-head";
   const kindSelect = document.createElement("select");
   kindSelect.dataset.configPath = pathJoin(path, "kind");
   for (const kind of ACTION_KINDS) {
@@ -88,7 +92,7 @@ export function renderActionEditor(root, action, ctx, document = root?.ownerDocu
   card.append(head);
 
   const body = document.createElement("div");
-  body.className = "rule-action-body";
+  body.className = "rule-action-body card-body";
 
   if (action.kind === "ai-response") {
     const personaSelect = document.createElement("select");
@@ -168,6 +172,7 @@ export function renderActionEditor(root, action, ctx, document = root?.ownerDocu
 export function renderActionList(root, actions, ctx, document = root?.ownerDocument ?? globalThis.document) {
   if (!root || !document?.createElement) return;
   root.replaceChildren();
+  root.className = "rule-action-list";
   const { path, personaOptions = [], onStructuralChange } = ctx;
 
   if (actions.length === 0) {

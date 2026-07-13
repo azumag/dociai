@@ -315,12 +315,17 @@ a { color: var(--focus); }
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 6px 10px 6px 8px;
   border: 1px solid var(--panel-edge);
+  border-left: 3px solid var(--panel-edge);
   border-radius: 7px;
   background: #171c24;
   font-size: 12px;
 }
+/* "productionとsimulationを誤認しない" — the row's OWN left border carries this signal too, not
+   just the small badge inside it: production (real, consequential, on-air) gets the tally-lamp's
+   own on-air red; simulation (safe, synthetic) stays at the calm, unmarked default. */
+.history-row.is-production { border-left-color: var(--onair); }
 .history-row-badge, .history-row-result { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--panel-edge); color: var(--ink-dim); }
 .history-row-badge.is-production { border-color: var(--onair); color: var(--onair); }
 .history-row-badge.is-simulation { border-color: var(--focus); color: var(--focus); }
@@ -328,6 +333,8 @@ a { color: var(--focus); }
 .history-row-result.is-failed { border-color: var(--onair); color: var(--onair); }
 .history-row-result.is-skipped, .history-row-result.is-pending { border-color: var(--cue); color: var(--cue); }
 .history-row-time { color: var(--ink-dim); font-family: var(--mono); font-size: 11px; }
+.history-row-type { font-weight: 500; }
+.history-row-value { font-family: var(--mono); color: var(--ink-dim); font-size: 11px; }
 .history-row-actor { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .history-row-message { flex-basis: 100%; font-size: 11px; color: var(--ink-dim); }
 .history-row-message p { overflow-wrap: anywhere; margin: 4px 0 0; }
@@ -342,6 +349,20 @@ a { color: var(--focus); }
 }
 .simulation-production-warning { color: var(--onair); font-weight: 600; }
 
+.trace-drawer-head { margin-bottom: 6px; }
+.trace-drawer-status {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 999px;
+  margin: 0 0 10px;
+}
+.trace-drawer-status.is-handled { color: var(--ok); border-color: #234a3a; }
+.trace-drawer-status.is-failed { color: var(--onair); border-color: #5c2727; }
+.trace-drawer-status.is-skipped, .trace-drawer-status.is-pending { color: var(--cue); border-color: #4a3a23; }
+.trace-drawer-summary { margin: 0 0 6px; color: var(--ink-dim); font-size: 12px; }
 .trace-drawer-section { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--panel-edge); border-radius: 7px; }
 .trace-drawer-section h4 { margin: 0 0 6px; font-size: 12px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: .06em; }
 .trace-drawer-fields { display: grid; gap: 3px; margin: 0; }
@@ -350,10 +371,55 @@ a { color: var(--focus); }
 .trace-condition-details { margin: 4px 0; padding-left: 18px; font-size: 11px; }
 .trace-condition-details .is-pass { color: var(--ok); }
 .trace-condition-details .is-fail { color: var(--ink-dim); }
-.trace-prompt-message { white-space: pre-wrap; word-break: break-word; background: #10131a; border: 1px solid var(--panel-edge); border-radius: 6px; padding: 8px; font-size: 11px; margin: 4px 0; }
-.trace-prompt-message.is-user { border-color: #3a4250; }
+/* Matcher — one row per trigger this event was evaluated against, matched or skipped. Mirrors
+   .twitch-preflight-item's status-colored-left-border-row pattern exactly. */
+.trace-match-row {
+  padding: 7px 9px;
+  border: 1px solid var(--panel-edge);
+  border-left: 3px solid var(--panel-edge);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: #171c24;
+}
+.trace-match-row:last-child { margin-bottom: 0; }
+.trace-match-row p { margin: 0 0 4px; font-size: 12px; }
+.trace-match-row.is-matched { border-left-color: var(--ok); }
+.trace-match-row.is-skipped { opacity: 0.85; }
+.trace-match-row.is-skipped p { color: var(--ink-dim); }
+/* Execution — the real ActionRunner result per plan, when one ran (see action-runner.js's own
+   "executed"/"fallback"/"skipped" status vocabulary). */
+.trace-execution-row { font-size: 12px; margin: 2px 0; }
+.trace-execution-row.is-executed { color: var(--ok); }
+.trace-execution-row.is-fallback { color: var(--onair); }
+.trace-execution-row.is-skipped { color: var(--cue); }
+.trace-prompt-plan { margin-bottom: 10px; }
+.trace-prompt-plan:last-child { margin-bottom: 0; }
+.trace-prompt-plan-heading { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--ink); }
+.trace-prompt-message { background: #10131a; border: 1px solid var(--panel-edge); border-left: 3px solid var(--panel-edge); border-radius: 6px; padding: 8px 10px; margin: 4px 0; }
+.trace-prompt-role { margin: 0 0 4px; font: 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+.trace-prompt-body { margin: 0; font-size: 11px; white-space: pre-wrap; word-break: break-word; color: var(--ink); }
+.trace-prompt-message.is-system { border-left-color: var(--focus); }
+.trace-prompt-message.is-system .trace-prompt-role { color: var(--focus); }
+.trace-prompt-message.is-user { border-left-color: var(--cue); }
+.trace-prompt-message.is-user .trace-prompt-role { color: var(--cue); }
 
 .simulation-form-fields { display: grid; gap: 6px; margin: 8px 0; }
+/* "安全な既定値" readout — same dashed, informational-note treatment as .twitch-affiliate-note. */
+.simulation-safe-options {
+  border: 1px dashed var(--panel-edge);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 4px 0;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.simulation-safe-options p { margin: 0 0 4px; font-weight: 600; color: var(--ink); }
+.simulation-safe-options ul { margin: 0; padding-left: 16px; }
+.simulation-safe-options li { margin: 2px 0; font-family: var(--mono); }
+.simulation-result-status { font-weight: 600; margin: 0 0 6px; }
+.simulation-result-status.is-handled { color: var(--ok); }
+.simulation-result-status.is-failed { color: var(--onair); }
+.simulation-result-status.is-skipped, .simulation-result-status.is-pending { color: var(--cue); }
 
 @media (max-width: 720px) {
   .history-row { flex-direction: column; align-items: stretch; }
@@ -788,6 +854,12 @@ body.obs.transparent { background: transparent; }
   color: var(--onair);
   line-height: 1.4;
 }
+/* severity: "error" (default above, onair/red) vs "warning" (cue/amber) — this modifier was missing
+   even though settings-ui.js has stamped `is-${issue.severity}` on this element from the start, so
+   every warning-severity issue rendered red/onair as if it were blocking. Fixing it here benefits
+   both the existing Settings editor and event-rules.js's own `.rule-issues-panel` reuse of this
+   same class, never a parallel color scheme. */
+.settings-error.is-warning { color: var(--cue); }
 
 /* ---- ボタン ---- */
 .btn-primary {
@@ -980,6 +1052,13 @@ body.obs.transparent { background: transparent; }
   gap: 4px;
 }
 .field-inline {
+  /* `display: flex` used to come along "for free" only when combined with `.field` (which sets
+     it) — every existing call site paired them (`class="field field-inline"`, see settings-ui.js's
+     own `#fieldShell`). The new Event Rule/Simulation forms use `.field-inline` STANDALONE (a
+     `<label>`'s own default `display: inline` otherwise), which silently collapsed every inline
+     field onto one run-on line instead of stacking — declaring it directly here makes the class
+     correct on its own, for every caller, past and future. */
+  display: flex;
   flex-direction: row;
   align-items: center;
   gap: 8px;
@@ -1137,4 +1216,466 @@ body.obs.transparent { background: transparent; }
   .settings-modal, .settings-sidebar, .settings-footer, .card { border: 1px solid CanvasText; }
   .settings-sidebar button[aria-selected="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
   .settings-error { color: CanvasText; text-decoration: underline; }
+}
+
+/* =============================================================================================
+   Twitch連携ダイアログ (issue #94-96 UI screens への放送コンソール調の適用)
+   既存の .settings-modal[open] / .card / .btn-* / .field* / .chip-check 語彙をそのまま踏襲する —
+   新しい見た目を作るのではなく、この画面群だけ未適用だった既存デザインシステムを当てはめる。
+   タリーランプの語彙 (var(--ok)=緑=正常, var(--cue)=琥珀=保留中, var(--onair)=赤=エラー/on-air)
+   を、この画面の「状態」表現(preflight OK/要確認/NG、subscription active/error 等)にも一貫して使う。
+   ============================================================================================= */
+
+.twitch-overview-dialog:not([open]) { display: none; }
+.twitch-overview-dialog[open] {
+  width: min(1040px, 94vw);
+  height: min(760px, 88vh);
+  border: none;
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--panel-edge);
+  overflow: hidden;
+}
+.twitch-overview-dialog::backdrop { background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); }
+
+.twitch-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 10px 20px 0;
+  border-bottom: 1px solid var(--panel-edge);
+  background: #0f1218;
+  flex: none;
+  flex-wrap: wrap;
+}
+.twitch-tabs button {
+  background: transparent;
+  border: none;
+  border-radius: 7px 7px 0 0;
+  padding: 9px 14px;
+  font: 11px var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  position: relative;
+  top: 1px;
+}
+.twitch-tabs button:hover { color: var(--ink); background: rgba(255,255,255,0.04); }
+.twitch-tabs button.is-active {
+  color: var(--focus);
+  background: var(--bg);
+  box-shadow: inset 0 -2px 0 var(--focus);
+}
+
+.twitch-error {
+  margin: 10px 20px 0;
+  padding: 8px 12px;
+  border: 1px solid #5c2727;
+  border-left: 3px solid var(--onair);
+  border-radius: 6px;
+  background: #241315;
+  color: var(--onair);
+  font-size: 12px;
+  flex: none;
+}
+
+.twitch-tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.twitch-tab-content h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.twitch-tab-content h3 {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* 入力コントロール — .settings-body と同じトーンをこのダイアログにも適用 */
+.twitch-overview-dialog input[type="text"],
+.twitch-overview-dialog input:not([type]),
+.twitch-overview-dialog input[type="number"],
+.twitch-overview-dialog input[type="search"],
+.twitch-overview-dialog textarea,
+.twitch-overview-dialog select {
+  background: #10131a;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  padding: 7px 10px;
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  transition: border-color 0.12s;
+}
+.twitch-overview-dialog input:focus,
+.twitch-overview-dialog textarea:focus,
+.twitch-overview-dialog select:focus { border-color: var(--focus); }
+.twitch-overview-dialog select { cursor: pointer; }
+.twitch-overview-dialog textarea { resize: vertical; min-height: 60px; }
+.twitch-overview-dialog input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--ok); cursor: pointer; }
+
+/* ---- 概要タブ: preflight チェックリスト ---- */
+.twitch-preflight-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.twitch-preflight-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--panel-edge);
+  border-left: 3px solid var(--panel-edge);
+  border-radius: 6px;
+  background: #171c24;
+}
+.twitch-preflight-item.is-pass { border-left-color: var(--ok); }
+.twitch-preflight-item.is-warn { border-left-color: var(--cue); }
+.twitch-preflight-item.is-fail { border-left-color: var(--onair); }
+.twitch-preflight-badge {
+  font: 10px var(--mono);
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-edge);
+  white-space: nowrap;
+  background: #151a22;
+}
+.twitch-preflight-item.is-pass .twitch-preflight-badge { color: var(--ok); border-color: #234a3a; }
+.twitch-preflight-item.is-warn .twitch-preflight-badge { color: var(--cue); border-color: #4a3a23; }
+.twitch-preflight-item.is-fail .twitch-preflight-badge { color: var(--onair); border-color: #5c2727; }
+.twitch-preflight-label { font-weight: 600; min-width: 120px; }
+.twitch-preflight-detail { color: var(--ink-dim); font-size: 12px; flex: 1 1 160px; min-width: 160px; }
+.twitch-preflight-item button {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--panel-edge);
+  color: var(--ink-dim);
+  border-radius: 6px;
+}
+.twitch-preflight-item button:hover { border-color: var(--focus); color: var(--ink); }
+
+/* ---- 概要タブ: 接続カード ---- */
+.twitch-connection-status { font-size: 14px; font-weight: 600; margin: 0; }
+.twitch-connection-meta { font: 11px var(--mono); margin: 2px 0 0; }
+.twitch-connection-countdown { font: 11px var(--mono); color: var(--cue); margin: 4px 0 0; }
+.twitch-reconnect-notices {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.twitch-reconnect-notices li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 9px;
+  border: 1px solid #4a3a23;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--cue);
+  background: #211a10;
+}
+.twitch-reconnect-notices li button {
+  flex: none;
+  padding: 1px 8px;
+  font-size: 10px;
+  background: transparent;
+  border: 1px solid var(--panel-edge);
+  color: var(--ink-dim);
+  border-radius: 5px;
+}
+
+/* ---- 認可タブ ---- */
+.twitch-auth-status { font-size: 14px; font-weight: 600; margin: 4px 0 0; }
+.twitch-affiliate-note {
+  padding: 8px 10px;
+  border: 1px dashed var(--panel-edge);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.twitch-device-code {
+  margin-top: 4px;
+  padding: 16px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: #171c24;
+  display: grid;
+  gap: 10px;
+  max-width: 380px;
+}
+.twitch-device-code-row { display: flex; align-items: center; gap: 8px; }
+.twitch-device-code-value {
+  font: 24px var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 6px 12px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: #0c0e12;
+  flex: 1;
+  text-align: center;
+}
+.twitch-device-code-countdown { font: 11px var(--mono); color: var(--cue); margin: 0; }
+.twitch-scope-summary { font-size: 12px; margin-top: 4px; display: grid; gap: 6px; }
+.twitch-scope-missing { color: var(--onair); }
+.twitch-account-actions { margin-top: 4px; }
+.twitch-confirm-dialog {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid #5c2727;
+  border-radius: 8px;
+  background: #241315;
+  display: grid;
+  gap: 10px;
+  max-width: 440px;
+}
+.twitch-confirm-dialog button:first-of-type { background: var(--onair); color: #0f1218; border-color: var(--onair); font-weight: 600; }
+
+/* ---- 購読タブ ---- */
+.twitch-subscriptions-meta { font: 11px var(--mono); }
+.twitch-subscription-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.twitch-subscription-table th {
+  text-align: left;
+  font: 10px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--panel-edge);
+}
+.twitch-subscription-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #20252d;
+  vertical-align: top;
+}
+.twitch-subscription-row.is-active td:nth-child(3) { color: var(--ok); }
+.twitch-subscription-row.is-error td:nth-child(3),
+.twitch-subscription-row.is-unauthorized td:nth-child(3),
+.twitch-subscription-row.is-missing_scope td:nth-child(3) { color: var(--onair); }
+.twitch-subscription-row.is-pending td:nth-child(3),
+.twitch-subscription-row.is-creating td:nth-child(3),
+.twitch-subscription-row.is-suppressed td:nth-child(3) { color: var(--cue); }
+.twitch-subscription-row.is-removed { opacity: 0.5; }
+.twitch-subscription-table button {
+  font-size: 11px;
+  padding: 3px 9px;
+  background: transparent;
+  border: 1px solid var(--panel-edge);
+  color: var(--ink-dim);
+}
+.twitch-subscription-table button:hover { border-color: var(--focus); color: var(--ink); }
+
+/* ---------------------------------------------------------------------------------------------
+   Event Rule / Event History / Simulation タブ (issue #95-96 の残りタブへの放送コンソール調の適用)
+   このダイアログ自身の既存語彙 (.card/.card-head/.card-body、.twitch-preflight-item の状態色付き
+   左ボーダー+バッジ、.field-inline の横並びフィールド) をそのまま踏襲する。新しい色は使わず、
+   var(--ok)/var(--cue)/var(--onair)/var(--focus)/var(--ink)/var(--ink-dim) の範囲に留める。
+   --------------------------------------------------------------------------------------------- */
+
+/* 横並び (「ラベル: 値」を1行に並べる) の中の input/select は内容幅に —
+   .twitch-overview-dialog 全体の `width:100%` ルールは縦積みの.field向けで、
+   横並び行の中では暴走して崩れるため、行の中でだけ明示的に打ち消す。 */
+.twitch-overview-dialog .field-inline select,
+.twitch-overview-dialog .field-inline input:not([type="checkbox"]),
+.rule-condition-leaf select,
+.rule-condition-leaf input:not([type="checkbox"]),
+.rule-condition-group-header select,
+.rule-action-head select,
+.reward-selector-row select {
+  width: auto;
+  flex: none;
+  min-width: 70px;
+}
+.twitch-overview-dialog .field-inline input[type="number"] { width: 90px; }
+.rule-condition-value-range input { width: 80px; flex: none; }
+
+/* `.btn-remove` elsewhere in this app is always an ICON-only 28x28 square (settings-ui.js's own
+   `#removeBtn` renders a bare "×" with the real label only in `title`/`aria-label`, see
+   `.btn-remove` above) — the buttons in THIS tab reuse the same class but carry real text
+   ("条件を削除"/"グループを削除"/"actionを削除"/"削除"), which the fixed 28x28 box squeezes into
+   one-character-per-line. Restore normal text-button sizing wherever `.btn-remove` is used with a
+   text label instead of an icon, without touching the icon-button convention anywhere else. */
+.rule-condition-leaf .btn-remove,
+.rule-condition-group-header .btn-remove,
+.rule-action-head .btn-remove,
+.rule-list-ops .btn-remove {
+  width: auto;
+  height: auto;
+  padding: 3px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* ---- Event Rule: ツールバー / 検証issue一覧 ---- */
+.rule-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.rule-save-status { font-family: var(--mono); font-size: 12px; }
+.rule-save-status.is-saving { color: var(--cue); }
+.rule-save-status.is-saved { color: var(--ok); }
+.rule-save-status.is-error { color: var(--onair); }
+.rule-issues-panel { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+
+/* ---- Event Rule: 一覧テーブル — .twitch-subscription-table と同じ表組みパターン ---- */
+.rule-list-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.rule-list-table th {
+  text-align: left;
+  font: 10px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--panel-edge);
+}
+.rule-list-table td { padding: 7px 8px; border-bottom: 1px solid #20252d; vertical-align: top; }
+.rule-list-table tr.is-selected td { background: rgba(122, 167, 255, 0.06); }
+.rule-list-condition { color: var(--ink-dim); font-family: var(--mono); font-size: 11px; max-width: 260px; overflow-wrap: anywhere; }
+.rule-list-name-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--focus);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.rule-list-name-link:hover { text-decoration: underline; }
+.rule-list-badge {
+  display: inline-block;
+  font: 10px var(--mono);
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-edge);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+.rule-list-badge.is-ok { color: var(--ok); border-color: #234a3a; }
+.rule-list-badge.is-warning { color: var(--cue); border-color: #4a3a23; }
+.rule-list-badge.is-error { color: var(--onair); border-color: #5c2727; }
+.rule-list-ops { display: flex; gap: 4px; flex-wrap: wrap; }
+.rule-list-ops button { padding: 3px 8px; font-size: 11px; }
+
+/* ---- Event Rule: 個別ruleエディタ ---- */
+.rule-editor-head { margin-bottom: 4px; }
+.rule-editor-section { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+/* cooldown/rate limit/aggregation の折りたたみ済みサブフィールド — 有効化チェックボックスの下に
+   ぶら下がる「配下」であることを、条件ツリーと同じ左レール意匠で示す。
+   NOTE: 著者スタイルシートのルールは常にUAの `[hidden]{display:none}` に勝つため、`display:flex`
+   を当てるならこの `[hidden]` の再宣言が無いとチェックを外してもフィールドが消えなくなる。 */
+.rule-editor-subfields { display: flex; flex-direction: column; gap: 8px; padding-left: 12px; border-left: 2px solid var(--panel-edge); }
+.rule-editor-subfields[hidden] { display: none; }
+
+/* ---- Event Rule: 条件ツリー (all/anyのネストしたグループ) ----
+   親から子への左レールは「シグナル経路」のメタファーそのまま — .rule-condition-children が
+   ネストするたびにこのレール+インデントも自然に積み重なる。 */
+.rule-condition-group { border: 1px solid var(--panel-edge); border-radius: 8px; padding: 10px; background: #171c24; }
+.rule-condition-group-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rule-condition-group-header .btn-remove { margin-left: auto; }
+.rule-condition-children {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 10px 6px;
+  padding-left: 14px;
+  border-left: 2px solid var(--panel-edge);
+}
+.rule-condition-children:empty { display: none; margin: 0; border: none; }
+.rule-condition-leaf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: #10131a;
+}
+.rule-condition-leaf .btn-remove { margin-left: auto; }
+.rule-condition-value-range { display: flex; align-items: center; gap: 6px; }
+.rule-condition-value-reward { flex: 1 1 220px; min-width: 200px; }
+.rule-condition-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.rule-condition-invalid { border-left: 3px solid var(--onair); padding: 6px 8px; }
+
+/* ---- Event Rule: reward selector (issue #95) — エラー/警告は他画面と同じonair/cue語彙 ---- */
+.reward-selector-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.reward-selector-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 260px;
+  padding: 8px 10px;
+  border: 1px solid #5c2727;
+  border-left: 3px solid var(--onair);
+  border-radius: 6px;
+  background: #241315;
+}
+.reward-selector-error-message { color: var(--onair); font-size: 12px; }
+.reward-selector-warning-badge {
+  font: 10px var(--mono);
+  color: var(--cue);
+  border: 1px solid #4a3a23;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.reward-selector-refresh { flex: none; }
+
+/* ---- Event Rule: action editor — .rule-action-card は card/card-head/card-body を流用 (JS側で
+   付与) しているため、ここではその形に無い分だけを補う。 ---- */
+.rule-action-list { display: flex; flex-direction: column; gap: 10px; }
+.rule-action-head select { flex: 1 1 auto; min-width: 140px; }
+.rule-action-head .btn-remove { margin-left: auto; }
+.rule-action-toggles { display: flex; gap: 14px; flex-wrap: wrap; }
+.rule-action-add-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.rule-action-template-hint { margin-top: 2px; }
+
+/* ---- Event Rule: 「テスト実行」結果 (fixtureに対するmatcher/planのpreview) ---- */
+.rule-test-result { margin-top: 8px; padding: 10px; border: 1px solid var(--panel-edge); border-radius: 6px; background: #171c24; }
+.rule-test-status { font-weight: 600; margin: 0 0 4px; }
+.rule-test-status.is-match { color: var(--ok); }
+.rule-test-status.is-no-match { color: var(--ink-dim); }
+.rule-test-condition-trace { margin: 4px 0; padding-left: 18px; font-size: 11px; }
+.rule-test-condition-trace .is-pass { color: var(--ok); }
+.rule-test-condition-trace .is-fail { color: var(--ink-dim); }
+.rule-test-plans { margin: 6px 0 0; padding-left: 18px; font-size: 12px; }
+.rule-test-plans .is-fail { color: var(--onair); }
+
+@media (max-width: 720px) {
+  .twitch-overview-dialog[open] { width: 100vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; margin: 0; border-radius: 0; }
+  .twitch-preflight-item button { margin-left: 0; }
+  .twitch-subscription-table { display: block; overflow-x: auto; }
+  .rule-list-table { display: block; overflow-x: auto; }
+  .rule-list-ops { flex-wrap: nowrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .twitch-overview-dialog * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+@media (forced-colors: active) {
+  .twitch-overview-dialog, .twitch-preflight-item, .twitch-device-code, .twitch-confirm-dialog { border: 1px solid CanvasText; }
+  .twitch-tabs button.is-active { outline: 2px solid Highlight; outline-offset: -2px; }
+  .rule-condition-group, .rule-condition-leaf, .trace-match-row, .reward-selector-error { border: 1px solid CanvasText; }
 }
