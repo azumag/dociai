@@ -24,6 +24,8 @@ import { ModelRepository } from "./services/local-llm/models/model-repository";
 import { resolveRuntimeLayout, readBuildInfo } from "./runtime-layout";
 import { StreamEventBus } from "./services/stream-events/stream-event-bus";
 import { STREAM_EVENT_APP_EVENT_TYPE } from "../shared/services/stream-event-ipc-contract";
+import { UpdateService, type AutoUpdaterLike } from "./services/update/update-service";
+import { UPDATE_APP_EVENT_TYPE } from "../shared/services/update-ipc-contract";
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "dociai",
@@ -164,6 +166,32 @@ if (!hasLock) {
     const streamEventBus = new StreamEventBus();
     streamEventBus.subscribe((published) => controller?.emitToConsole(STREAM_EVENT_APP_EVENT_TYPE, published));
     streamEventBus.subscribe((published) => controller?.emitToObs(STREAM_EVENT_APP_EVENT_TYPE, published));
+    // Auto-update is macOS-only for now (see update-service.ts's header comment) and only ever
+    // makes sense for a packaged, real (non-"dev") build — a dev run has no `app-update.yml` and
+    // nothing published for its own "version" to compare against. `electron-updater`'s `autoUpdater`
+    // export is a lazy getter that constructs the real platform-specific updater singleton (which
+    // throws outside a packaged app) the first time the `autoUpdater` binding is actually read —
+    // `require("electron-updater")` alone (module evaluation) never touches it. Reached via
+    // `require(...)` INSIDE this conditional, rather than a top-level `import { autoUpdater } from
+    // "electron-updater"`, purely so the module is never even required/evaluated at all on a
+    // dev/non-mac run (skips pulling in its dependency graph for a build that will never use it) —
+    // not because a static import would itself trigger the getter, which it would not.
+    const updateServiceEnabled = process.platform === "darwin" && app.isPackaged && buildInfo.channel !== "dev";
+    const updateService = new UpdateService(
+      updateServiceEnabled ? (require("electron-updater").autoUpdater as AutoUpdaterLike) : null,
+      (state) => controller?.emitToConsole(UPDATE_APP_EVENT_TYPE, state),
+      { allowPrerelease: buildInfo.channel === "beta" },
+    );
+    // No separate "shortly after launch" initial check here: the console window's own boot
+    // sequence (src/app/boot.js's setupUpdateStatus()) already calls update.check() as soon as its
+    // page loads — which, since index.html only ever loads into the console window, correlates
+    // with an operator actually having the window open, unlike a bare startup timer. Confirmed live
+    // (real packaged run): an initial 30s main-process timer running ALONGSIDE that renderer-driven
+    // check fired two redundant checkForUpdates() calls seconds apart at every launch. The interval
+    // below exists only to keep checking while a console window stays open without ever reloading
+    // (a multi-hour stream is the normal case here).
+    let updateCheckInterval: ReturnType<typeof setInterval> | null = null;
+    if (updateService.enabled) updateCheckInterval = setInterval(() => void updateService.check(), 4 * 60 * 60 * 1000);
     // The native file dialog runs here, in Main, so the renderer only ever gets an opaque import
     // token back (electron/main/services/local-llm/models/local-import.ts) — it never learns or
     // chooses an arbitrary filesystem path itself.
@@ -231,7 +259,7 @@ if (!hasLock) {
       log: (message, fields) => console.error(`[dociai:twitch-composition] ${message}`, fields ?? {}),
     });
     await twitchComposition.initialize();
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, streamEventBus, buildInfo, devServerUrl });
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, streamEventBus, updateService, buildInfo, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
     app.once("before-quit", () => feedService.dispose());
@@ -243,6 +271,7 @@ if (!hasLock) {
     app.once("before-quit", () => { uninstallDisplayMediaHandler(); captureService.dispose(); });
     app.once("before-quit", () => modelRepository.dispose());
     app.once("before-quit", () => streamEventBus.dispose());
+    app.once("before-quit", () => { if (updateCheckInterval) clearInterval(updateCheckInterval); updateService.dispose(); });
     controller.createConsoleWindow();
     app.on("activate", () => controller?.createConsoleWindow());
   }).catch((error) => { logError("startup", error); if (!quitting) app.quit(); });

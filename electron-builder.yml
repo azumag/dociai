@@ -116,4 +116,18 @@ afterSign: scripts/release/notarize.mjs
 # userData (config/secrets/models/logs) is resolved at runtime via app.getPath("userData")
 # (electron/main/paths.ts) and is never copied into the app directory or referenced here, so
 # app updates never touch it.
-publish: null
+#
+# Auto-update (electron-updater, macOS-only for now — see electron/main/services/update/
+# update-service.ts): reuses the existing GitHub Releases the tag-triggered release pipeline
+# already publishes to, rather than standing up separate update infrastructure. This config only
+# makes electron-builder EMIT the `latest-mac.yml`/*.blockmap update metadata that
+# electron-updater's GitHub provider reads — it does not make electron-builder itself talk to
+# GitHub. `electron:package`'s `--publish never` flag (package.json) is what enforces that; the
+# existing `gh release create` step in .github/workflows/release.yml uploads the generated
+# metadata files as ordinary release assets alongside the zip/dmg it already uploads. Do not add a
+# GH_TOKEN to the package.yml build steps — its absence is what keeps electron-builder from ever
+# attempting to publish on its own even if `--publish never` were dropped by mistake.
+publish:
+  provider: github
+  owner: azumag
+  repo: dociai

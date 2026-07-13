@@ -133,11 +133,46 @@ scrubbed with `scripts/release/redact-log.mjs` (reusing `signing-credentials.mjs
 - **A tag pushed with the wrong version** never gets past `validate-tag` (see "Channel
   determination" above) — no package/publish work happens for it at all.
 
+## Auto-update (macOS)
+
+The macOS build auto-updates via `electron-updater`, reusing this same tag-triggered release
+pipeline as its update feed — no separate infrastructure. See
+`electron/main/services/update/update-service.ts`'s header comment for the in-app mechanics
+(check/download/install gating, broadcast-safety UX) and `electron-builder.yml`'s `publish:` block
+for why `package.yml`'s build step never itself talks to GitHub (`--publish never` — only this
+workflow's own `gh release create` step, below, ever uploads anything).
+
+- **Windows has no auto-update yet.** `win.target` is `zip` only (no NSIS installer), so no
+  `latest.yml` is ever produced for it; a Windows install stays a manual re-download until a
+  follow-up adds the NSIS target (see that change's own PR for why this was deliberately deferred —
+  in short, no Windows signing certificate exists yet either, and NSIS needs
+  `publish-manifest.mjs`'s `REQUIRED_TARGETS` check reworked to handle more than one artifact per
+  platform/arch first).
+- **Dormant until signing exists.** `validate-tag`'s "Require signing credentials for release" gate
+  (above) already refuses to publish any release at all without both signing secrets configured, so
+  an unsigned build can never reach the update feed in the first place — no separate feature-flag
+  is needed to keep auto-update off until signing lands. Once it does, treat the GitHub repo/Actions
+  pipeline itself as part of the trust boundary: anyone who can push a `v*` tag or forge a release
+  asset can ship code that auto-installs onto every user's machine. macOS code signing +
+  notarization (`docs/signing.md`) is what lets Gatekeeper/Squirrel.Mac refuse a tampered update
+  after the fact; there is no equivalent check today if the release pipeline's own credentials were
+  compromised upstream of signing.
+- **Manual end-to-end verification** (not CI-automatable — it needs two real, consecutively
+  published GitHub Releases): once signing secrets are configured, publish `v0.0.x-beta.1`, install
+  it locally, then publish `v0.0.x-beta.2` and confirm the running `beta.1` app detects, downloads,
+  and (after an explicit "restart and install" click) installs `beta.2`. The beta channel exists
+  exactly for this — it never affects `stable`-channel users, so this is safe to do against this
+  repo's real release feed rather than only in an isolated fixture.
+
 ## Rollback and redistribution of a previous version
 
-There is no auto-update channel in this repo (`electron-builder.yml`'s `publish: null`, per #72),
-so "rollback" means republishing a previous version's artifacts as the currently-recommended
-download, not an in-place downgrade of already-installed apps.
+Auto-update clients never downgrade — they only ever offer/install a version newer than the one
+currently running. So on a build with auto-update wired (macOS, once signing exists — see above),
+"rollback" for an already-installed app means publishing a *new*, higher version that reverts the
+regression, not un-publishing the bad one. Un-publishing (below) still matters for stopping *new*
+installs/manual downloads of the bad version, and for Windows (no auto-update yet, so
+republishing-as-the-recommended-download, below, is still how a fresh install gets the good
+version).
 
 1. **The previous version's GitHub Release still exists** (this workflow never deletes a release
    for a *different* tag): point users back at it directly — its assets, `publish-manifest.json`,

@@ -32,6 +32,10 @@
         <button id="btn-load-file" type="button">ファイルを選択</button>
         <button id="btn-settings" type="button">設定を編集</button>
         <input type="file" id="file-input" accept=".json,application/json" hidden>
+        <!-- Electron macOS版のみ (hasElectronUpdateService()) — idle/checking/not-availableでは
+             何も表示しない。詳細は src/app/boot.js の #renderUpdateStatus 参照。 -->
+        <span class="chip" id="update-status" hidden></span>
+        <button id="btn-update-action" type="button" hidden></button>
         <a class="obs-link" href="./obs.html" target="_blank" rel="noopener">OBS表示</a>
       </div>
     </div>

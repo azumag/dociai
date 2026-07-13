@@ -154,9 +154,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: package-macos-artifacts-${{ github.run_id }}
+          # `*-mac.yml`, not the broader `*.yml`: electron-builder's update-metadata file is named
+          # `<channel>-mac.yml` (`latest-mac.yml` for this repo, since electron-builder.yml sets no
+          # explicit `channel:` — electron-updater's own client-side fallback from a channel-specific
+          # file to `latest-mac.yml` means this stays correct if a channel ever is configured later)
+          # — a bare `*.yml` would also match `builder-debug.yml` (electron-builder's effective-config
+          # dump, only written when `DEBUG=electron-builder` is set for a debugging re-run) and leak
+          # it into a public release's assets.
           path: |
             dist/release/*.zip
             dist/release/*.dmg
+            dist/release/*-mac.yml
+            dist/release/*.blockmap
           if-no-files-found: error
           retention-days: 14
           overwrite: true
