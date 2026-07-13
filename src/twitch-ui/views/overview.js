@@ -103,6 +103,19 @@ export class TwitchOverviewApp {
       this.tabButtons[view] = button;
       tabs.append(button);
     }
+    // Bug fix: this dialog had no visible way to close it — only the native Esc key (a `<dialog>`
+    // cancel event) worked, which a review during #171 already flagged and the app owner hit
+    // directly in practice. Mirrors settings-ui.js's `.settings-close` "&times;" button exactly
+    // (same class name, so it inherits that styling with no new CSS needed) rather than inventing
+    // a second close-button pattern.
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "settings-close twitch-tabs-close";
+    closeBtn.innerHTML = "&times;";
+    closeBtn.title = "閉じる";
+    closeBtn.setAttribute("aria-label", "Twitch連携を閉じる");
+    closeBtn.addEventListener("click", () => this.close());
+    tabs.append(closeBtn);
     this.errorRoot = document.createElement("p");
     this.errorRoot.className = "twitch-error";
     this.errorRoot.hidden = true;

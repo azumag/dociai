@@ -375,6 +375,12 @@ function renderMicPanel() {
   const s = micMonitor.status();
   el.textContent = `監視: ${s.active ? "中" : "停止"}` + (s.active ? ` / ${s.speaking ? "発話検知中 (AI保留)" : "無音"}` : "");
   fill.style.width = `${Math.min(100, Math.round(s.level * 250))}%`;
+  // メーターの色ゾーン(緑/琥珀/赤)はトラック全幅を基準にした固定位置なので、fill自身の
+  // background-sizeをトラックの実測幅に毎回同期させる。固定px指定だと画面幅が変わった
+  // 環境(設定ウィンドウの縮小・狭い解像度等)でゾーン境界がずれ、パターンが繰り返し表示
+  // されて誤った配色に見えるバグがあった。
+  const track = fill.parentElement;
+  if (track) fill.style.backgroundSize = `${track.clientWidth}px 100%`;
   fill.classList.toggle("is-speaking", s.speaking);
 }
 
