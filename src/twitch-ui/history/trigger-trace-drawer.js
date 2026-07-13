@@ -273,11 +273,25 @@ function renderPromptPreviewSection(document, trace, getConfig, scrub) {
       planBox.append(failed);
     } else {
       for (const message of built.messages) {
-        const messageBox = document.createElement("pre");
+        // Split into a small colored "eyebrow" label + the message body, rather than one plain
+        // <pre> blob — issue #93's injection defense (trusted system prompt vs. task+quoted-
+        // untrusted user message) is this drawer's own core safety mechanism made visible, so the
+        // trusted/untrusted split deserves to actually READ as two distinct kinds of content (see
+        // styles/main.css's `.trace-prompt-message.is-system`/`.is-user`), not just two paragraphs
+        // of identically-styled text. `root.textContent` (what SECURITY tests scan for the literal
+        // "USER (task"/"SYSTEM (trusted" label text and for secret-leak absence) is unaffected —
+        // splitting into two child elements doesn't remove any text, only how it's grouped.
+        const messageBox = document.createElement("div");
         messageBox.className = `trace-prompt-message is-${message.role}`;
         messageBox.dataset.promptRole = message.role;
         const roleLabel = message.role === "system" ? "SYSTEM (trusted設定のみ)" : "USER (task + 引用untrustedテキスト)";
-        messageBox.textContent = `[${roleLabel}]\n${scrub(message.content)}`;
+        const roleEyebrow = document.createElement("p");
+        roleEyebrow.className = "trace-prompt-role";
+        roleEyebrow.textContent = `[${roleLabel}]`;
+        const bodyPre = document.createElement("pre");
+        bodyPre.className = "trace-prompt-body";
+        bodyPre.textContent = scrub(message.content);
+        messageBox.append(roleEyebrow, bodyPre);
         planBox.append(messageBox);
       }
     }

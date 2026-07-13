@@ -19,8 +19,11 @@ const CONSUME_ON_LABEL = { scheduled: "発火が決定した時点", started: "a
 const OVERFLOW_LABEL = { drop: "破棄", aggregate: "集約してまとめて応答", "template-only": "テンプレ発話のみ" };
 
 function section(document, titleText) {
+  // "card" reuses the existing bordered-panel/title vocabulary (styles/main.css's `.card` +
+  // `.card h3, .card h4`) instead of a parallel section style — this box (a title followed by a
+  // flat run of fields) is exactly card-shaped, it just doesn't split a card-head/card-body.
   const box = document.createElement("div");
-  box.className = "rule-editor-section";
+  box.className = "rule-editor-section card";
   const title = document.createElement("h4");
   title.textContent = titleText;
   box.append(title);
