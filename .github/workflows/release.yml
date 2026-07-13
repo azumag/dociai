@@ -163,13 +163,25 @@ jobs:
             fi
 
             ASSETS=(release-artifacts/publish-manifest.json release-artifacts/SHA256SUMS)
-            while IFS= read -r -d '' asset; do ASSETS+=("$asset"); done < <(find release-artifacts -maxdepth 2 -type f \( -name "*.zip" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" \) -print0)
+            # *-mac.yml/*.blockmap: electron-updater's update metadata (electron-builder.yml's
+            # `publish` config, generated during package.yml's build with `--publish never` so
+            # electron-builder itself never talks to GitHub — this step is the only thing that
+            # actually uploads them). `*-mac.yml`, not a bare `*.yml` — see package.yml's own
+            # upload-artifact step for why (avoids picking up a stray `builder-debug.yml`).
+            while IFS= read -r -d '' asset; do ASSETS+=("$asset"); done < <(find release-artifacts -maxdepth 2 -type f \( -name "*.zip" -o -name "*.dmg" -o -name "*.exe" -o -name "*.msi" -o -name "*-mac.yml" -o -name "*.blockmap" \) -print0)
 
+            # Created as --draft first: a draft Release is excluded from "latest release" lookups
+            # (both the public API and electron-updater's own GitHub provider), so a client
+            # checking for updates mid-upload can never observe the Release before *.yml is
+            # actually attached. Flipped to published only after every asset above is confirmed on
+            # GitHub's side.
             gh release create "$TAG" \
               --title "$TAG" \
               --notes-file release-artifacts/RELEASE_NOTES.md \
+              --draft \
               $PRERELEASE_FLAG \
               "${ASSETS[@]}"
+            gh release edit "$TAG" --draft=false
           } 2>&1 | tee test-results/release-publish/publish.log
 
       - name: Scrub failure diagnostics before upload

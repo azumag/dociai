@@ -24,9 +24,10 @@ import type { ModelRepository } from "../services/local-llm/models/model-reposit
 import type { DownloadStartInput, ModelLicense } from "../../shared/local-llm/model-contract";
 import type { StreamEventBus } from "../services/stream-events/stream-event-bus";
 import type { TwitchComposition } from "../services/twitch/twitch-composition";
+import type { UpdateService } from "../services/update/update-service";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; streamEventBus: StreamEventBus; buildInfo: BuildInfo; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -256,6 +257,9 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     options.streamEventBus.clearHistory();
     return { cleared: true };
   }, options, ["console"]);
+  register(CHANNELS.UPDATE_CHECK, (event, input) => { expectNoInput(input); return options.updateService.check(); }, options);
+  register(CHANNELS.UPDATE_DOWNLOAD, (event, input) => { expectNoInput(input); return options.updateService.download(); }, options);
+  register(CHANNELS.UPDATE_QUIT_AND_INSTALL, (event, input) => { expectNoInput(input); return { installing: options.updateService.quitAndInstall() }; }, options);
   ipcMain.on(CHANNELS.OBS_MESSAGE, (event, message) => {
     try {
       assertTrustedSender(event, options.devServerUrl, ["console", "obs"]);

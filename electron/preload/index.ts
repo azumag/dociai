@@ -117,6 +117,11 @@ const api: DociaiApi = {
     list: (input) => invoke(CHANNELS.STREAM_EVENTS_LIST, input),
     clear: () => invoke(CHANNELS.STREAM_EVENTS_CLEAR),
   },
+  update: {
+    check: () => invoke(CHANNELS.UPDATE_CHECK),
+    download: () => invoke(CHANNELS.UPDATE_DOWNLOAD),
+    quitAndInstall: () => invoke(CHANNELS.UPDATE_QUIT_AND_INSTALL),
+  },
   events: {
     subscribe(type, listener) {
       if (typeof type !== "string" || type.length === 0 || type.length > 128 || typeof listener !== "function") return () => {};

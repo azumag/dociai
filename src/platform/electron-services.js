@@ -58,6 +58,22 @@ export function hasElectronTwitchService() { return typeof globalThis.dociai?.tw
 export function hasElectronStreamEventsService() { return typeof globalThis.dociai?.streamEvents?.list === "function"; }
 export function subscribeStreamEventsThroughElectron(listener) { return globalThis.dociai.events.subscribe("stream-event", listener); }
 
+// Auto-update (macOS-only for now — electron/main/services/update/update-service.ts). `dociai.update`
+// always exists in Electron (it's part of DociaiApi), but is only ever functionally wired up (i.e.
+// backed by a real electron-updater instance rather than an idle no-op) on a packaged macOS build —
+// see UpdateService's own `enabled` guard. hasElectronUpdateService() only tells the renderer
+// "the IPC surface exists" (Electron vs Browser); the UI itself must still handle every response
+// staying at `{ phase: "idle" }` forever on platforms/builds where it's disabled.
+export function hasElectronUpdateService() { return typeof globalThis.dociai?.update?.check === "function"; }
+export async function checkForUpdateThroughElectron() { return globalThis.dociai.update.check(); }
+export async function downloadUpdateThroughElectron() { return globalThis.dociai.update.download(); }
+export async function quitAndInstallUpdateThroughElectron() { return globalThis.dociai.update.quitAndInstall(); }
+// "update:status" is the same literal electron/shared/services/update-ipc-contract.ts's
+// UPDATE_APP_EVENT_TYPE duplicates — see hasElectronStreamEventsService's own comment above for why
+// this repo duplicates the string per call site instead of sharing a constant across the
+// Renderer/Main boundary.
+export function subscribeUpdateStatusThroughElectron(listener) { return globalThis.dociai.events.subscribe("update:status", listener); }
+
 export class ElectronTwitchSource {
   id = "twitch"; label = "Twitch";
   constructor(config = {}, { onStatus = () => {} } = {}) { this.config = config; this.onStatus = onStatus; this.unsubComment = null; this.unsubStatus = null; this.status = { state: "idle", channels: [] }; }

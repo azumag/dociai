@@ -52,6 +52,13 @@ jobs:
   package-macos:
     name: package-macos
     runs-on: macos-latest
+    # #74 gave this workflow a `workflow_call` trigger, which makes GitHub Actions validate the
+    # whole file as a reusable workflow — under that validation, `secrets` is not a recognized
+    # named-value inside `if:` conditionals (only inside `env:`/`with:`). Resolve the "is a signing
+    # secret present" checks into job-level env vars here and reference those (`env.HAS_*`) in the
+    # `if:` conditions below instead of `secrets.*` directly.
+    env:
+      HAS_MACOS_CERT: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -75,14 +82,14 @@ jobs:
 
       # Mask before anything else in this job can touch the raw values.
       - name: Mask macOS signing secrets
-        if: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+        if: ${{ env.HAS_MACOS_CERT == 'true' }}
         run: |
           echo "::add-mask::${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}"
           echo "::add-mask::${{ secrets.MACOS_CERTIFICATE_PASSWORD }}"
           echo "::add-mask::${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}"
 
       - name: Set up temporary keychain
-        if: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+        if: ${{ env.HAS_MACOS_CERT == 'true' }}
         run: scripts/release/setup-macos-keychain.sh setup
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -109,10 +116,10 @@ jobs:
         run: node scripts/release/verify-artifact.mjs dist/release/mac/dociai.app
 
       - name: Verify code signature (arm64)
-        if: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+        if: ${{ env.HAS_MACOS_CERT == 'true' }}
         run: scripts/release/verify-macos-signing.sh dist/release/mac-arm64/dociai.app
       - name: Verify code signature (x64)
-        if: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+        if: ${{ env.HAS_MACOS_CERT == 'true' }}
         run: scripts/release/verify-macos-signing.sh dist/release/mac/dociai.app
 
       - name: Packaged app smoke (host arch)
@@ -147,9 +154,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: package-macos-artifacts-${{ github.run_id }}
+          # `*-mac.yml`, not the broader `*.yml`: electron-builder's update-metadata file is named
+          # `<channel>-mac.yml` (`latest-mac.yml` for this repo, since electron-builder.yml sets no
+          # explicit `channel:` — electron-updater's own client-side fallback from a channel-specific
+          # file to `latest-mac.yml` means this stays correct if a channel ever is configured later)
+          # — a bare `*.yml` would also match `builder-debug.yml` (electron-builder's effective-config
+          # dump, only written when `DEBUG=electron-builder` is set for a debugging re-run) and leak
+          # it into a public release's assets.
           path: |
             dist/release/*.zip
             dist/release/*.dmg
+            dist/release/*-mac.yml
+            dist/release/*.blockmap
           if-no-files-found: error
           retention-days: 14
           overwrite: true
@@ -165,6 +181,10 @@ jobs:
   package-windows:
     name: package-windows
     runs-on: windows-latest
+    # See package-macos's env block above for why this exists (secrets isn't a recognized
+    # named-value inside `if:` once the workflow has a `workflow_call` trigger).
+    env:
+      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -183,14 +203,14 @@ jobs:
           WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
 
       - name: Mask Windows signing secrets
-        if: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
+        if: ${{ env.HAS_WINDOWS_CERT == 'true' }}
         shell: bash
         run: |
           echo "::add-mask::${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}"
           echo "::add-mask::${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}"
 
       - name: Decode signing certificate
-        if: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
+        if: ${{ env.HAS_WINDOWS_CERT == 'true' }}
         shell: pwsh
         run: |
           $bytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64)
@@ -213,7 +233,7 @@ jobs:
         run: node scripts/release/verify-artifact.mjs dist/release/win-unpacked
 
       - name: Verify code signature
-        if: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
+        if: ${{ env.HAS_WINDOWS_CERT == 'true' }}
         shell: pwsh
         run: scripts/release/verify-windows-signing.ps1 dist/release/win-unpacked/dociai.exe
 

@@ -21,6 +21,7 @@ import { deriveSimulationStatus } from "../twitch-ui/history/history-store.js";
 import { AppRuntime } from "./app-runtime.js";
 import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } from "./runtime-factory.js";
 import { createAppActions } from "./app-actions.js";
+import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron } from "../platform/electron-services.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -554,6 +555,51 @@ async function applyEditedConfig(rawConfig) {
   if (!result.ok) throw new Error(`設定の適用に失敗しました (${result.stage})`);
 }
 
+// ---- 自動アップデート (Electron macOS版のみ。hasElectronUpdateService()が false のBrowser版/
+// Windows版/未packaged実行では何もしない) ----
+
+function renderUpdateStatus(state) {
+  const badge = $("#update-status");
+  const action = $("#btn-update-action");
+  if (!badge || !action) return;
+  const set = (text, actionLabel, onAction) => {
+    badge.hidden = !text;
+    badge.textContent = text ?? "";
+    action.hidden = !actionLabel;
+    action.textContent = actionLabel ?? "";
+    action.onclick = onAction ?? null;
+  };
+  if (state.phase === "available") {
+    set(`新バージョン v${state.version} があります`, "ダウンロード", () => { void downloadUpdateThroughElectron(); });
+  } else if (state.phase === "downloading") {
+    set(`アップデートをダウンロード中… ${Math.round(state.percent)}%`, null, null);
+  } else if (state.phase === "downloaded") {
+    set(`v${state.version} の準備ができました`, "再起動して適用", () => {
+      if (!window.confirm("dociaiを再起動してアップデートを適用します。配信中の場合は放送終了後に行ってください。よろしいですか？")) return;
+      quitAndInstallUpdateThroughElectron().then((result) => {
+        if (result?.ok && !result.value.installing) logEvent("アップデートの適用に失敗しました。ダウンロードが完了しているか確認してください", "warn");
+      });
+    });
+  } else if (state.phase === "error") {
+    set(`アップデート確認に失敗しました: ${scrub(state.message)}`, null, null);
+  } else {
+    // idle/checking/not-availableはヘッダーを静かなままにする — 「確認中」を毎回出すと
+    // 数時間ごとのバックグラウンドpollingがノイズになる。
+    set(null, null, null);
+  }
+}
+
+function setupUpdateStatus() {
+  if (!hasElectronUpdateService()) return;
+  renderUpdateStatus({ phase: "idle" });
+  subscribeUpdateStatusThroughElectron(renderUpdateStatus);
+  // The Main-process UpdateService instance (and its state) outlives any one console window/reload
+  // — check()'s return value, not just the app:event push, so a downloaded-but-not-yet-installed
+  // badge reappears immediately after a reload instead of only after the next state CHANGE (check()
+  // itself is now a safe no-op while downloading/downloaded, so this never regresses that state).
+  checkForUpdateThroughElectron().then((result) => { if (result?.ok) renderUpdateStatus(result.value); });
+}
+
 const settingsUI = new SettingsUI({
   getCurrent: () => state.config,
   onApply: (cfg) => applyEditedConfig(cfg),
@@ -695,6 +741,7 @@ function boot() {
   const unbindUI = bindUI();
   commentStore.onChange(renderComments);
   renderAll();
+  setupUpdateStatus();
   logEvent("dociai 操作卓を起動しました。設定を読み込んでください");
   loadFromServer()
     .then(applyLoadedConfig)

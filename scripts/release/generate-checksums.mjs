@@ -8,6 +8,11 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Deliberately excludes .yml/.blockmap: electron-builder's own auto-update metadata
+// (latest-mac.yml etc., electron-builder.yml's `publish` config) embeds its own SHA512 of each
+// artifact, which is what electron-updater actually verifies a downloaded update against — this
+// SHA256SUMS/release-manifest.json pipeline is a separate, human/scripts-facing integrity check
+// and has no reason to duplicate that.
 export const ARTIFACT_EXTENSIONS = new Set([".zip", ".dmg", ".exe", ".appimage", ".deb", ".rpm", ".msi"]);
 
 export function isArtifactFile(fileName) {

@@ -14,10 +14,15 @@ test("Electron renderer adapters route every external service through Main IPC",
   assert.match(voicevox, /hasElectronVoiceVoxService\(\)/); assert.match(bouyomi, /window\?\.dociai\?\.(?:bouyomi|speech)/); assert.match(runtimeFactory, /dociai\?\.twitch\?\.start/);
   assert.match(platform, /globalThis\.dociai\.speech\.voicevox/); assert.match(platform, /globalThis\.dociai\.twitch/);
   assert.match(captureAdapter, /globalThis\.dociai\?\.capture/);
-  for (const channel of ["SPEECH_VOICEVOX_SPEAKERS", "SPEECH_VOICEVOX_SYNTHESIZE", "SPEECH_BOUYOMI_TALK", "SPEECH_BOUYOMI_CLEAR", "TWITCH_START", "TWITCH_STOP", "TWITCH_RECONNECT", "SHORTCUT_STATUS", "CAPTURE_LIST_SOURCES", "CAPTURE_SELECT_SOURCE", "CAPTURE_STATUS"]) { assert.match(preload, new RegExp(`CHANNELS\\.${channel}`)); assert.match(ipc, new RegExp(`CHANNELS\\.${channel}`)); }
+  for (const channel of ["SPEECH_VOICEVOX_SPEAKERS", "SPEECH_VOICEVOX_SYNTHESIZE", "SPEECH_BOUYOMI_TALK", "SPEECH_BOUYOMI_CLEAR", "TWITCH_START", "TWITCH_STOP", "TWITCH_RECONNECT", "SHORTCUT_STATUS", "CAPTURE_LIST_SOURCES", "CAPTURE_SELECT_SOURCE", "CAPTURE_STATUS", "UPDATE_CHECK", "UPDATE_DOWNLOAD", "UPDATE_QUIT_AND_INSTALL"]) { assert.match(preload, new RegExp(`CHANNELS\\.${channel}`)); assert.match(ipc, new RegExp(`CHANNELS\\.${channel}`)); }
   assert.match(main, /new SpeechBackendService/); assert.match(main, /new TwitchChatService/);
   assert.match(main, /new ShortcutService/);
   assert.match(main, /new CaptureService/); assert.match(main, /installDisplayMediaHandler/);
+  // Auto-update (macOS-only for now — see update-service.ts's header comment): must never be
+  // constructed for a dev/unpackaged run or a non-darwin platform, since electron-updater throws
+  // reaching for `app-update.yml`/`dev-app-update.yml` outside a real packaged build.
+  assert.match(main, /new UpdateService/);
+  assert.match(main, /process\.platform === "darwin" && app\.isPackaged/);
 });
 
 test("packaged Electron CSP keeps provider connections out of Renderer", async () => {

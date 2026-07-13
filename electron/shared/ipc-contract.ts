@@ -6,6 +6,7 @@ import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./
 import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
 import type { StreamEventListInput, StreamEventListResult } from "./services/stream-event-ipc-contract";
 import type { TwitchAuthOverview, TwitchConnectionOverview, TwitchCustomRewardsOverview, TwitchSubscriptionsOverview } from "./twitch/overview-contract";
+import type { UpdateState } from "./services/update-ipc-contract";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PublicError };
 export type WindowRole = "console" | "obs";
@@ -115,6 +116,17 @@ export type DociaiApi = {
       list(): Promise<Result<{ jobs: DownloadJobRecord[] }>>;
       status(jobId: string): Promise<Result<{ job: DownloadJobRecord | null }>>;
     };
+  };
+  // macOS-only for now (electron/main/services/update/update-service.ts) — check()/download() are
+  // no-ops that resolve to the current (idle/unsupported) state on other platforms rather than
+  // erroring, so renderer code doesn't need its own platform branch on top of hasElectronUpdateService.
+  update: {
+    check(): Promise<Result<UpdateState>>;
+    download(): Promise<Result<UpdateState>>;
+    // Never called automatically — quits both windows and installs on next launch. Renderer must
+    // get explicit user confirmation first (see update-service.ts's header comment on why this
+    // app can't assume "restart" is ever a safe default while a broadcast may be live).
+    quitAndInstall(): Promise<Result<{ installing: boolean }>>;
   };
   streamEvents: {
     list(input?: StreamEventListInput): Promise<Result<StreamEventListResult>>;

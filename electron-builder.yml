@@ -14,19 +14,34 @@ directories:
   output: dist/release
   buildResources: build
 
-# Main/Preload/Renderer output (dist/electron) is packed into app.asar as-is; no native modules
-# are bundled into it today (esbuild's externals are `electron`, which the runtime provides, and
-# `node-llama-cpp` (#45) — kept external so it is never silently inlined by esbuild, but its
-# prebuilt native binaries are NOT copied anywhere by this file yet: scripts/electron/build.mjs
-# does not copy node_modules into dist/electron at all, so today this ships nothing node-llama-cpp
-# related (safe, if inert) either inside or outside the asar. #50 is the tracked follow-up that
-# actually places node-llama-cpp's platform binaries under build/native/node-llama-cpp/<platform>-
-# <arch>/ per build/native/README.md's documented layout and wires the matching extraResources
-# entry + native-loader.ts's packaged-mode resource path — do not assume that work is done here.
+# Main/Preload/Renderer output (dist/electron) is packed into app.asar as-is; esbuild bundles
+# everything Main/Preload need (externals are only `electron`, runtime-provided, and
+# `node-llama-cpp` (#45), kept external so it's never silently inlined). `dist/electron` itself has
+# no node_modules of its own (scripts/electron/build.mjs never copies one there) — but
+# electron-builder does its OWN separate dependency walk (via @electron/rebuild's npm workspace-root
+# detection, since package.json has a `workspaces` field) independently of `directories.app`, and
+# — unprompted — pulls the ENTIRE real root node_modules tree for every root `dependencies` entry
+# (node-llama-cpp, electron-updater, ws) plus their full transitive graphs into app.asar/
+# app.asar.unpacked, duplicating what esbuild already inlined. Confirmed the hard way:
+# scripts/release/verify-artifact.mjs's "no bare node_modules/ under Resources" check failed with
+# 1000+ forbidden files against a real package.yml CI run, the first time that workflow could run
+# at all (it previously never validated as a workflow file, so this had gone completely undetected
+# since #45/#72). `"!node_modules/**"` below is the actual fix, not a narrower per-package
+# exclusion: it enforces this file's own stated intent ("Root devDependencies never enter the
+# asar") for every current and future root dependency, not just the ones that happened to get
+# caught. Nothing here is currently loaded from a packaged app's node_modules at runtime — Main/
+# Preload are fully self-contained bundles (main.cjs/preload.cjs), and native binaries (node-
+# llama-cpp) go through the separate build/native/ -> extraResources mechanism below once #50
+# actually populates it (native-loader.ts still does a plain `import("node-llama-cpp")`, which a
+# packaged app can't resolve either way today — local-llm already silently reports "unavailable"
+# there, see native-loader.ts's own header comment; this exclusion doesn't change that, it just
+# stops the unusable copy from being bundled in the first place).
 asar: true
 files:
   - "**/*"
   - "!**/*.map"
+  - "!node_modules/**"
+  - "!**/node_modules/**"
 
 # Everything here lives outside app.asar, at <resources>/, so it stays readable without unpacking
 # the archive and so future native binaries never end up inside it.
@@ -116,4 +131,18 @@ afterSign: scripts/release/notarize.mjs
 # userData (config/secrets/models/logs) is resolved at runtime via app.getPath("userData")
 # (electron/main/paths.ts) and is never copied into the app directory or referenced here, so
 # app updates never touch it.
-publish: null
+#
+# Auto-update (electron-updater, macOS-only for now — see electron/main/services/update/
+# update-service.ts): reuses the existing GitHub Releases the tag-triggered release pipeline
+# already publishes to, rather than standing up separate update infrastructure. This config only
+# makes electron-builder EMIT the `latest-mac.yml`/*.blockmap update metadata that
+# electron-updater's GitHub provider reads — it does not make electron-builder itself talk to
+# GitHub. `electron:package`'s `--publish never` flag (package.json) is what enforces that; the
+# existing `gh release create` step in .github/workflows/release.yml uploads the generated
+# metadata files as ordinary release assets alongside the zip/dmg it already uploads. Do not add a
+# GH_TOKEN to the package.yml build steps — its absence is what keeps electron-builder from ever
+# attempting to publish on its own even if `--publish never` were dropped by mistake.
+publish:
+  provider: github
+  owner: azumag
+  repo: dociai
