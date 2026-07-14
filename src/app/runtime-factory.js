@@ -287,7 +287,8 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
           start: () => instance.onChange(() => {
             if (!isCurrent()) return;
             deps.onMicChange();
-            if (instance.speaking) speechQueue.hold("mic"); else speechQueue.release("mic");
+            const bargeInEnabled = deps.isMicBargeInEnabled?.() ?? true;
+            if (bargeInEnabled && instance.speaking) speechQueue.hold("mic"); else speechQueue.release("mic");
           }),
           stop: () => instance.stop(),
         }),

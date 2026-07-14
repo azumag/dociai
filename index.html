@@ -59,6 +59,11 @@
           <button id="btn-mic-start" type="button">監視開始</button>
           <button id="btn-mic-stop" type="button">監視停止</button>
         </div>
+        <label class="switch mic-bargein-toggle" title="AI発話中にマイク発話を検知したら読み上げを保留する">
+          <input type="checkbox" id="chk-mic-bargein" checked>
+          <span class="track"></span>
+          発話検知でAIの読み上げに割り込む
+        </label>
         <div class="mic-meter"><div id="mic-meter-fill" class="mic-meter-fill"></div></div>
         <div id="mic-status" class="muted"></div>
       </section>

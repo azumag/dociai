@@ -593,6 +593,16 @@ a { color: var(--focus); }
 .reader-failure span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .reader-failure button { padding: 3px 6px; font-size: 11px; }
 
+/* ---- マイク監視: 割り込みトグル ---- */
+.mic-bargein-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin-bottom: 6px;
+}
+
 /* ---- マイク監視: セグメントLEDメーター ---- */
 .mic-meter {
   position: relative;

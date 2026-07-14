@@ -394,6 +394,9 @@ function micLevelToPercent(peak) {
 function renderMicPanel() {
   const el = $("#mic-status");
   const fill = $("#mic-meter-fill");
+  const bargeInBox = $("#chk-mic-bargein");
+  const bargeInEnabled = state.micBargeInEnabled !== false;
+  if (bargeInBox) bargeInBox.checked = bargeInEnabled;
   const micMonitor = appRuntime.getComponent("micMonitor");
   const enabled = state.config?.micMonitor?.enabled;
   $("#btn-mic-start").disabled = !enabled || micMonitor?.active;
@@ -411,7 +414,8 @@ function renderMicPanel() {
     return;
   }
   const s = micMonitor.status();
-  el.textContent = `監視: ${s.active ? "中" : "停止"}` + (s.active ? ` / ${s.speaking ? "発話検知中 (AI保留)" : "無音"}` : "");
+  const speakingLabel = bargeInEnabled ? "発話検知中 (AI保留)" : "発話検知中 (割り込みOFF)";
+  el.textContent = `監視: ${s.active ? "中" : "停止"}` + (s.active ? ` / ${s.speaking ? speakingLabel : "無音"}` : "");
   fill.style.width = `${Math.round(micLevelToPercent(s.peak))}%`;
   // メーターの色ゾーン(緑/琥珀/赤)はトラック全幅を基準にした固定位置なので、fill自身の
   // background-sizeをトラックの実測幅に毎回同期させる。固定px指定だと画面幅が変わった
@@ -704,6 +708,7 @@ appRuntime = new AppRuntime({
     onSpeechUpdate,
     onScreenChange: () => renderScreenPanel(),
     onMicChange: () => renderMicPanel(),
+    isMicBargeInEnabled: () => state.micBargeInEnabled !== false,
     onResponseError: (error, persona) => logEvent(`「${persona?.name ?? "不明"}」応答失敗: ${scrub(error.message)}`, "error"),
     onAutomationError: (kind, error) => logEvent(`${kind === "news" ? "ニュース" : "話題"}読み上げ失敗: ${scrub(error.message)}`, "error"),
     onAutomationComplete: (kind) => (kind === "news" ? renderNewsPanel() : renderTopicPanel()),
@@ -760,7 +765,7 @@ function bindUI() {
     twitchOverviewOpen: "#btn-twitch-overview-open",
     commentForm: "#comment-form", commentText: "#comment-text", commentAuthor: "#comment-author",
     speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
-    micStart: "#btn-mic-start", micStop: "#btn-mic-stop", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
+    micStart: "#btn-mic-start", micStop: "#btn-mic-stop", micBargeIn: "#chk-mic-bargein", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
     screenSourceRefresh: "#btn-screen-source-refresh", screenSourceSelect: "#screen-source-select",
     newsRead: "#btn-news-read", topicRead: "#btn-topic-read", twitchReconnect: "#btn-twitch-reconnect",
   });
