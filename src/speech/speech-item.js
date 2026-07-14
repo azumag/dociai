@@ -10,6 +10,7 @@ export function createSpeechItem(input, now = Date.now()) {
     id: input.id ?? `s${itemSequence}`,
     sequence: itemSequence,
     source: String(input.source ?? input.personaId ?? "default"),
+    commentId: input.commentId ?? null,
     personaId: input.personaId,
     personaName: input.personaName,
     text: String(input.text ?? ""),

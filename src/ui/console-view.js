@@ -113,7 +113,7 @@ export class ConsoleView {
       if (!items.length) list.innerHTML = `<li class="detail">${empty}</li>`;
     };
     this.element("#speech-current").textContent = model.current ? `${model.current.personaName}: ${model.current.text}` : "再生中なし";
-    renderItems("#speech-pending", model.pending, "待機なし"); renderItems("#speech-list", model.history, "履歴なし");
+    renderItems("#speech-pending", model.pending, "待機なし");
     this.element("#speech-diagnostics").textContent = model.diagnostics;
     const chip = this.element("#speech-state"); chip.textContent = model.status; chip.className = model.statusClass;
   }
@@ -121,7 +121,14 @@ export class ConsoleView {
     const list = this.element("#comment-log"); list.replaceChildren();
     for (const comment of comments) {
       const li = this.document.createElement("li"); li.innerHTML = `<span class="time">${comment.time}</span><span class="author"></span>`;
-      li.querySelector(".author").textContent = comment.author; li.append(comment.text); list.append(li);
+      li.querySelector(".author").textContent = comment.author; li.append(comment.text);
+      if (comment.speechState) {
+        const badge = this.document.createElement("span");
+        badge.className = `badge state-${comment.speechState}`;
+        badge.textContent = speechLabels[comment.speechState] ?? comment.speechState;
+        li.append(badge);
+      }
+      list.append(li);
     }
   }
   renderDebug(model) {

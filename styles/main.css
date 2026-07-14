@@ -484,7 +484,7 @@ a { color: var(--focus); }
 
 .comment-log li {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: start;
   gap: 0;
   padding: 8px 11px;
@@ -494,6 +494,7 @@ a { color: var(--focus); }
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
+.comment-log li .badge { margin-left: 8px; }
 .comment-log li:last-child { border-bottom: none; }
 /* 最新行 = 次にキューされる行: 琥珀のキュー刻み */
 .comment-log li:first-child {
@@ -677,6 +678,7 @@ a { color: var(--focus); }
 .badge.state-waiting { color: var(--ink-dim); }
 .badge.state-speaking { color: var(--onair); border-color: var(--onair-edge); }
 .badge.state-done { color: var(--ok); }
+.badge.state-submitted { color: var(--ok); }
 .badge.state-skipped { color: var(--ink-dim); }
 .badge.state-failed { color: var(--onair); }
 

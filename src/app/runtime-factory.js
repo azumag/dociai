@@ -375,7 +375,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     const body = cr.skipEmotes && comment.emotes ? stripEmotes(comment.text, comment.emotes) : comment.text;
     if (!body.trim()) return;
     const text = cr.includeAuthor === false ? body : `${comment.author}: ${body}`;
-    speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice: cr });
+    speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice: cr, commentId: comment.id });
   });
 
   const addComment = expose("addComment", (raw) => {
