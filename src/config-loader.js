@@ -361,6 +361,7 @@ export function applyDefaults(cfg) {
       volume: -1,
       speed: -1,
       tone: -1,
+      charsPerSecond: 6,
       ...(cfg.bouyomi ?? {}),
     },
     speechQueue: {
@@ -386,6 +387,7 @@ export function applyDefaults(cfg) {
       name: "default",
       rate: 1.0,
       pitch: 1.0,
+      speed: -1,
       includeAuthor: true,
       skipEmotes: false,
       ignoreUsers: [],

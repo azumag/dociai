@@ -30,7 +30,9 @@ export class BouyomiClient {
       text: String(text),
       voice: finiteOr(options.voice, finiteOr(this.defaults.voice, 0)),
       volume: finiteOr(options.volume, finiteOr(this.defaults.volume, -1)),
-      speed: finiteOr(options.speed ?? options.rate, finiteOr(this.defaults.speed, -1)),
+      // 棒読みちゃんの speed は 50-200 (既定は本体設定に従う -1) のスケールで、
+      // webspeech の rate (0.5-2 程度) とは互換性がないため rate へはフォールバックしない。
+      speed: finiteOr(options.speed, finiteOr(this.defaults.speed, -1)),
       tone: finiteOr(options.tone, finiteOr(this.defaults.tone, -1)),
       signal: options.signal ?? null,
     };

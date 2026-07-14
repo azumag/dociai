@@ -5,7 +5,7 @@ import { SpeechExecution } from "./speech/speech-execution.js";
 import { SpeechScheduler } from "./speech/speech-scheduler.js";
 
 export class SpeechQueue {
-  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {}, strictOrdering = false, onHealth = () => {}, webSpeech = {} } = {}) {
+  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {}, strictOrdering = false, onHealth = () => {}, webSpeech = {}, bouyomiCharsPerSecond } = {}) {
     this.scheduler = new SpeechScheduler(policy);
     this.onUpdate = onUpdate;
     this.log = log;
@@ -21,6 +21,7 @@ export class SpeechQueue {
       webSpeech,
       onWarning: (message) => this.log(message),
       onHealth,
+      bouyomiCharsPerSecond,
     });
     this.controls = new SpeechControls({
       onFirstHold: () => {
