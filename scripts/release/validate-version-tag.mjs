@@ -4,7 +4,7 @@
 // 一番最初に走り、不一致・不正な形式のtagはここでrelease workflow全体を安く落とす — 実際の
 // packaging/signing (macOS/Windowsランナーを使う高価なjob) を一切実行する前に検出するのが目的。
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { readPackageJson } from "./build-info.mjs";
 
 // `v` prefix は tag の命名規約であり、semver比較そのもの (package.jsonのversion) には含めない。
@@ -53,7 +53,7 @@ export async function validateVersionTagForRepo(repoRoot, tag) {
   return validateVersionTag({ tag, packageVersion: pkg.version });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const tag = process.argv[2] ?? process.env.GITHUB_REF_NAME;
   if (!tag) {

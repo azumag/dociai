@@ -7,6 +7,7 @@
 // 「失敗releaseが部分的なstable配布を残さない」を実装する場所。
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { computeSha256 } from "./generate-checksums.mjs";
 
 // `ext` (not just platform/arch) matters now that win/x64 legitimately ships two artifacts (zip +
@@ -197,7 +198,7 @@ export async function publishManifest({
   return { ok: true, publish, manifestPath, sha256sumsPath };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const rootDir = process.argv[2] ? path.resolve(process.argv[2]) : null;
   if (!rootDir) {
     console.error("Usage: node scripts/release/publish-manifest.mjs <rootDir> [outDir]");

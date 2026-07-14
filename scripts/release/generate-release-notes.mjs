@@ -6,7 +6,7 @@
 // 前提にしている(publishする側がその見出し以下を埋めるかどうかは release.md のrunbook側の責務)。
 import { execFile } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -100,7 +100,7 @@ export async function generateReleaseNotes({ version, toRef = "HEAD", repoRoot, 
   return { version, previousTag, toRef, commits, referencedNumbers, markdown };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const version = process.argv[2];
   if (!version) {

@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { listPackage } from "@electron/asar";
 
 // basenameの完全一致で弾くもの。開発中に生成される実体だけを対象にし、
@@ -132,7 +133,7 @@ export async function verifyArtifactTree(resourcesDir) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const target = process.argv[2];
   if (!target) {
     console.error("Usage: node scripts/release/verify-artifact.mjs <artifact-root>");

@@ -3,7 +3,7 @@
 // Usage: node scripts/release/print-runtime-layout.mjs [--mode dev|unpacked|packaged] [--platform darwin|win32] [--arch arm64|x64] [--output-root <dir>]
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveLayout } from "./runtime-layout.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -43,7 +43,7 @@ export function formatLayout(mode, layout) {
   return lines.join("\n");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const platform = argValue("platform") ?? process.platform;
   const arch = argValue("arch") ?? process.arch;
   const outputRoot = argValue("output-root");

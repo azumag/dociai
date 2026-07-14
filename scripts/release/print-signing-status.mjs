@@ -2,9 +2,10 @@
 // print-signing-status.mjs (#73): CI/localで「今回のbuildは何を署名/notarizeするか」を
 // secretの値そのものを一切出さずに1行ずつ表示する。workflow内のログで
 // "unsigned PR build" と "signed build" のどちらの経路を通ったか目視確認できるようにする。
+import { pathToFileURL } from "node:url";
 import { describeSigningStatus } from "./signing-credentials.mjs";
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const status = describeSigningStatus(process.env);
   console.log(`INFO | signing-status | macOS code signing: ${status.macCodeSigning}`);
   console.log(`INFO | signing-status | macOS notarization: ${status.macNotarization}`);

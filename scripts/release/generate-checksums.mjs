@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Deliberately excludes .yml/.blockmap: electron-builder's own auto-update metadata
 // (latest-mac.yml etc., electron-builder.yml's `publish` config) embeds its own SHA512 of each
@@ -81,7 +81,7 @@ export async function generateChecksums(outputDir, buildInfo, licenses = []) {
   return { artifacts, manifest, manifestPath };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const outputDir = process.argv[2] ? path.resolve(process.argv[2]) : path.join(repoRoot, "dist/release");
   const buildInfoPath = path.join(repoRoot, "build/generated/build-info.json");
