@@ -136,12 +136,6 @@ a { color: var(--focus); }
   font-size: 16px;
   color: var(--ink);
 }
-.brand-sub {
-  color: var(--ink-faint);
-  font-size: 10px;
-  letter-spacing: 0.12em;
-}
-
 /* シグネチャ: ON AIR プレート。どれかのペルソナが発話中のときだけ点灯する。
    (プレート自体は装飾 aria-hidden — 状態のアクセシブルな実体は隣のタリーランプ群) */
 .onair-plate {

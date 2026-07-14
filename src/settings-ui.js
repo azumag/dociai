@@ -73,6 +73,16 @@ export class SettingsUI {
         if (this.root?.open) this.#render();
       });
     }
+    // Electronにはブラウザのような入力デバイス選択UIが無いため、マイク監視の対象デバイスを
+    // 明示指定できるようここでenumerateDevices()する (issue #32のフォローアップ)。ラベルは
+    // マイク権限が許可済みの場合のみ得られる (この操作卓はconsoleウィンドウのmedia権限を
+    // electron/main/security/permissions.tsで常時許可しているため、通常は取得できる)。
+    this._micDevices = [];
+    this._micDeviceSupported = typeof navigator !== "undefined" && !!navigator.mediaDevices?.enumerateDevices;
+    if (this._micDeviceSupported) {
+      this.#refreshMicDevices();
+      navigator.mediaDevices.addEventListener?.("devicechange", () => this.#refreshMicDevices());
+    }
   }
 
   open() {
@@ -114,6 +124,28 @@ export class SettingsUI {
     });
     for (const v of sorted) opts.push({ value: v.name, label: `${v.name} (${v.lang})` });
     if (current && current !== "default" && !this._voices.some((v) => v.name === current)) {
+      opts.push({ value: current, label: `${current} (未検出)` });
+    }
+    return opts;
+  }
+
+  async #refreshMicDevices() {
+    try {
+      this._micDevices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+    } catch {
+      this._micDevices = [];
+    }
+    if (this.root?.open && this.activeTab === "micMonitor") this.#render();
+  }
+
+  // micMonitor.deviceId 用select肢。ラベルはマイク権限が許可済みでないと空文字になる
+  // (ブラウザ/Electron共通の仕様) — その場合はdeviceIdの先頭を仮ラベルとして出す。
+  #micDeviceOptions(current) {
+    const opts = [{ value: "", label: "既定のデバイス (OS/ブラウザの既定を使用)" }];
+    for (const d of this._micDevices) {
+      opts.push({ value: d.deviceId, label: d.label || `マイク (${d.deviceId.slice(0, 8)}…)` });
+    }
+    if (current && !this._micDevices.some((d) => d.deviceId === current)) {
       opts.push({ value: current, label: `${current} (未検出)` });
     }
     return opts;
@@ -987,12 +1019,13 @@ export class SettingsUI {
       g.append(this.#pathField("threshold (0-1)", "micMonitor.threshold", { type: "number", value: m.threshold ?? 0.05, attrs: { step: "0.01", min: "0", max: "1" } }));
       g.append(this.#pathField("minSpeechMs", "micMonitor.minSpeechMs", { type: "number", value: m.minSpeechMs ?? 150 }));
       g.append(this.#pathField("silenceHoldMs", "micMonitor.silenceHoldMs", { type: "number", value: m.silenceHoldMs ?? 800 }));
+      g.append(this.#pathSelect("device (入力デバイス)", this.#micDeviceOptions(m.deviceId), "micMonitor.deviceId", { value: m.deviceId ?? "" }));
       cardBody.append(g);
     }
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "配信者の発話を検知するとAI音声キューを保留し、無音に戻ると再開します (中断された発話は最初から読み上げ直されます)。スピーカー環境ではAI自身の声を誤検知することがあるため、ヘッドホンや仮想オーディオデバイスでの分離を推奨します (docs/obs-mode.md 参照)。";
+    note.textContent = "配信者の発話を検知するとAI音声キューを保留し、無音に戻ると再開します (中断された発話は最初から読み上げ直されます)。スピーカー環境ではAI自身の声を誤検知することがあるため、ヘッドホンや仮想オーディオデバイスでの分離を推奨します (docs/obs-mode.md 参照)。deviceが「既定のデバイス」以外に一覧されない場合は、一度「監視開始」でマイク権限を許可してから設定を開き直してください。";
     this._body.append(note);
   }
 

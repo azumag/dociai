@@ -39,7 +39,14 @@ export class MicMonitor {
         // echoCancellation/noiseSuppression: 同一タブで再生するAI音声がマイクに
         // 回り込んでの自己検知を抑える (ブラウザ標準のAEC)。autoGainControl は
         // 無音時のノイズを持ち上げて閾値判定を狂わせるため無効にする。
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
+        // deviceId: Electronにはブラウザのような入力デバイス選択UIが無いため、
+        // config.micMonitor.deviceId で明示指定できるようにする (未指定ならOS/既定デバイス)。
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false,
+          ...(this.cfg.deviceId ? { deviceId: { exact: this.cfg.deviceId } } : {}),
+        },
       });
       // 隠れた許可ダイアログやOS/ブラウザ側の不具合でgetUserMedia()がハングすると、
       // このawaitが永久に終わらず finally も走らないため _starting が true のまま固着し、

@@ -161,7 +161,8 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
     "enabled": false,
     "threshold": 0.05,
     "minSpeechMs": 150,
-    "silenceHoldMs": 800
+    "silenceHoldMs": 800,
+    "deviceId": null
   }
 }
 ```
@@ -172,6 +173,7 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
 | `threshold` | 0.05 | 発話とみなすRMS音量のしきい値 (0-1)。マイクのゲイン・部屋の暗騒音により調整が必要 |
 | `minSpeechMs` | 150 | しきい値超えがこの時間継続したら「発話中」と判定するまでの継続時間 (ms) |
 | `silenceHoldMs` | 800 | しきい値未満がこの時間継続したら「無音」と判定し読み上げを再開するまでの継続時間 (ms) |
+| `deviceId` | null | 監視対象の入力デバイスの`MediaDeviceInfo.deviceId`。未指定 (null) の場合はOS/ブラウザの既定デバイスを使う。Electronにはブラウザのようなデバイス選択UIが無いため、設定パネルの「マイク監視」タブから明示的に選択する (issue #32) |
 
 「発話中」判定になると `SpeechQueue.stop()` が呼ばれ、再生中の発話は中断されて
 **保留 (waiting) に戻ります** (手動の「停止」ボタンと同じ挙動)。無音判定に戻ると
