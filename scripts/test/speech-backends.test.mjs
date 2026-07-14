@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BackendRegistry } from "../../src/speech/backends/backend-registry.js";
-import { BouyomiBackend } from "../../src/speech/backends/bouyomi-backend.js";
+import { BouyomiBackend, estimateBouyomiSpeakMs } from "../../src/speech/backends/bouyomi-backend.js";
 import { VoiceVoxBackend } from "../../src/speech/backends/voicevox-backend.js";
 import { WebSpeechBackend } from "../../src/speech/backends/web-speech-backend.js";
 import { SpeechQueue } from "../../src/speech-queue.js";
@@ -26,11 +26,64 @@ test("Web Speech classifies completion, cancellation, error, and stale callbacks
 
 test("Bouyomi reports submitted and exposes remote clear", async () => {
   let cleared = 0;
-  const backend = new BouyomiBackend({ talk: async () => ({ ok: true }), clear: async () => { cleared++; } });
+  const backend = new BouyomiBackend({ talk: async () => ({ ok: true }), clear: async () => { cleared++; } }, { wait: async () => {} });
   assert.equal((await backend.play({ text: "hello", voice: {} }, { executionId: "b1" })).state, "submitted");
   await backend.clear();
   assert.equal(cleared, 1);
   assert.equal(backend.capabilities.reportsPlaybackCompletion, false);
+});
+
+test("estimateBouyomiSpeakMs scales with text length and speed, within a floor and ceiling", () => {
+  assert.equal(estimateBouyomiSpeakMs("", 100), 400);
+  assert.ok(estimateBouyomiSpeakMs("あ".repeat(60), 100) > estimateBouyomiSpeakMs("あ".repeat(30), 100));
+  assert.ok(estimateBouyomiSpeakMs("あ".repeat(60), 200) < estimateBouyomiSpeakMs("あ".repeat(60), 100));
+  assert.equal(estimateBouyomiSpeakMs("あ".repeat(10000), 100), 60_000);
+});
+
+test("Bouyomi waits out the estimated speaking time before reporting completion, but cancel interrupts it immediately", async () => {
+  const waited = [];
+  const backend = new BouyomiBackend({ talk: async () => ({ ok: true }) }, {
+    wait: (ms, signal) => { waited.push(ms); return new Promise((resolve) => { if (signal?.aborted) return resolve(); signal?.addEventListener("abort", resolve, { once: true }); resolve(); }); },
+  });
+  const result = await backend.play({ text: "コメントを読み上げます", voice: {} }, { executionId: "b1" });
+  assert.equal(result.state, "submitted");
+  assert.equal(waited.length, 1);
+  assert.ok(waited[0] > 0);
+
+  const slowBackend = new BouyomiBackend({ talk: async () => ({ ok: true }) });
+  const playPromise = slowBackend.play({ text: "あ".repeat(500), voice: {} }, { executionId: "long" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const startedCancelAt = Date.now();
+  slowBackend.cancel("long");
+  const cancelled = await playPromise;
+  assert.equal(cancelled.state, "cancelled");
+  assert.ok(Date.now() - startedCancelAt < 500, "推定発話時間(最大60秒)を待たずにキャンセルされる");
+});
+
+test("SpeechQueue keeps a later backend silent until Bouyomi's estimated comment-reading time elapses", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const bouyomiClient = { talk: async () => ({ ok: true }), clear: async () => {} };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance }, bouyomi: bouyomiClient });
+
+  const comment = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "a", voice: { engine: "bouyomi" } });
+  const aiReply = queue.enqueue({ personaId: "ai", personaName: "AI", text: "reply", voice: { engine: "webspeech" } });
+  assert.equal(comment.state, "speaking");
+  assert.equal(aiReply.state, "waiting");
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(aiReply.state, "waiting", "棒読みちゃんの推定発話時間中はAI応答を開始しない (音声の被り防止)");
+  assert.equal(FakeUtterance.items.length, 0);
+
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  assert.equal(comment.state, "submitted");
+  assert.equal(aiReply.state, "speaking");
+  assert.equal(FakeUtterance.items.length, 1);
+
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  assert.equal(aiReply.state, "done");
+  queue.dispose();
 });
 
 test("VOICEVOX owns and releases audio listeners and Blob URLs", async () => {
