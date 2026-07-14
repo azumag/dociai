@@ -5,9 +5,9 @@ export function showDiscardChangesDialog(document, { canSave = true } = {}) {
     const detail = document.createElement("p"); detail.textContent = "変更を保存して適用するか、破棄するか選択してください。";
     const actions = document.createElement("div"); actions.className = "settings-actions";
     const finish = (choice) => { dialog.close(); dialog.remove(); resolve(choice); };
-    const continued = document.createElement("button"); continued.type = "button"; continued.textContent = "編集を続ける"; continued.autofocus = true; continued.onclick = () => finish("continue");
-    const discard = document.createElement("button"); discard.type = "button"; discard.textContent = "変更を破棄"; discard.onclick = () => finish("discard");
-    const save = document.createElement("button"); save.type = "button"; save.textContent = "保存して適用"; save.disabled = !canSave; save.onclick = () => finish("save");
+    const continued = document.createElement("button"); continued.type = "button"; continued.className = "btn-ghost"; continued.textContent = "編集を続ける"; continued.autofocus = true; continued.onclick = () => finish("continue");
+    const discard = document.createElement("button"); discard.type = "button"; discard.className = "btn-ghost"; discard.textContent = "変更を破棄"; discard.onclick = () => finish("discard");
+    const save = document.createElement("button"); save.type = "button"; save.className = "btn-primary"; save.textContent = "保存して適用"; save.disabled = !canSave; save.onclick = () => finish("save");
     dialog.addEventListener("cancel", (event) => { event.preventDefault(); finish("continue"); });
     actions.append(continued, discard, save); dialog.append(title, detail, actions); document.body.append(dialog); dialog.showModal(); continued.focus();
   });

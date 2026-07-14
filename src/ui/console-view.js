@@ -63,6 +63,8 @@ export class ConsoleView {
       list.append(li);
     }
     if (!list.children.length) list.innerHTML = `<li class="detail">設定を読み込むと表示されます</li>`;
+    const failed = connectors.filter((connector) => connector.apiKeyMasked === "(初期化失敗)").length;
+    this.element("#connector-summary").textContent = connectors.length ? `${connectors.length}件${failed ? ` · 要確認 ${failed}` : ""}` : "未設定";
   }
   renderPersonas(personas, actions) {
     const list = this.element("#persona-list"); list.replaceChildren();
@@ -80,6 +82,9 @@ export class ConsoleView {
       li.append(dot, grow, switchLabel, fire); list.append(li);
     }
     if (!list.children.length) list.innerHTML = `<li class="detail">設定を読み込むと表示されます</li>`;
+    const enabled = personas.filter((persona) => persona.enabled).length;
+    const active = personas.filter((persona) => persona.state === "speaking" || persona.state === "thinking").length;
+    this.element("#persona-summary").textContent = personas.length ? `有効 ${enabled}/${personas.length}${active ? ` · 稼働中 ${active}` : ""}` : "未設定";
   }
   renderTriggers(triggers, actions) {
     const list = this.element("#trigger-list"); list.replaceChildren();
@@ -92,6 +97,8 @@ export class ConsoleView {
       li.append(badge, grow, fire); list.append(li);
     }
     if (!list.children.length) list.innerHTML = `<li class="detail">設定を読み込むと表示されます</li>`;
+    const unused = triggers.filter((trigger) => trigger.unused).length;
+    this.element("#trigger-summary").textContent = triggers.length ? `${triggers.length}件${unused ? ` · 未使用 ${unused}` : ""}` : "未設定";
   }
   renderSpeech(model) {
     const renderItems = (selector, items, empty) => {

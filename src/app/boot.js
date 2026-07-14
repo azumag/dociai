@@ -290,7 +290,7 @@ function renderTriggers() {
     const uses = [...users];
     if (newsUses) uses.push("ニュース読み上げ");
     if (topicUses) uses.push("話題読み上げ");
-    return { id, type: t.type, detail: `${triggerDetail(t)} → ${uses.join(", ") || "(使用ペルソナなし)"}` };
+    return { id, type: t.type, detail: `${triggerDetail(t)} → ${uses.join(", ") || "(使用ペルソナなし)"}`, unused: uses.length === 0 };
   });
   consoleView.renderTriggers(triggers, { fireTrigger: (id) => triggerEngine?.fire(id, { reason: "manual" }) });
 }

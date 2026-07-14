@@ -142,6 +142,8 @@ try {
 
   // ---- issue #4: 無効化ペルソナは反応しない (手動発話でも) ----
   step("disable persona + manual fire");
+  // ペルソナパネルは既定で折りたたまれているため、内部のボタンをクリックする前に展開する
+  await page.evaluate(() => { document.querySelector("#persona-list").closest("details").open = true; });
   await page.click("#persona-list li:nth-child(1) .switch .track");
   await page.click("#persona-list li:nth-child(1) button");
   await page.waitForFunction(
@@ -154,6 +156,8 @@ try {
   // ---- issue #7: 手動トリガー発火 (トリガー一覧の発火ボタン = mention_ai) ----
   step("manual trigger fire");
   const replyCountBefore = await page.$eval("#reply-log", (el) => el.children.length);
+  // トリガーパネルも既定で折りたたまれているため展開してからクリックする
+  await page.evaluate(() => { document.querySelector("#trigger-list").closest("details").open = true; });
   await page.click("#trigger-list li:nth-child(1) button");
   await page.waitForFunction(
     (n) => document.querySelector("#reply-log")?.children.length > n,

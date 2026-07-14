@@ -109,21 +109,35 @@
 
     <div class="col col-right">
       <section class="panel panel-integration-health" aria-labelledby="integration-health-heading">
-        <div class="panel-title-row">
-          <h2 id="integration-health-heading">連携ヘルス <span class="mod-en" aria-hidden="true">Health</span></h2>
-          <button id="btn-integrations-open-panel" type="button">詳細</button>
-        </div>
-        <div id="integration-health-summary" class="integration-summary" aria-live="polite"></div>
-        <div id="integration-health-mini-list" class="integration-mini-list"></div>
-        <div id="integration-health-notice" class="integration-notice" role="status" aria-live="polite" hidden></div>
+        <details class="panel-collapsible">
+          <summary>
+            <h2 id="integration-health-heading">連携ヘルス <span class="mod-en" aria-hidden="true">Health</span></h2>
+            <div id="integration-health-summary" class="integration-summary" aria-live="polite"></div>
+          </summary>
+          <div class="btn-row">
+            <button id="btn-integrations-open-panel" type="button">詳細</button>
+          </div>
+          <div id="integration-health-mini-list" class="integration-mini-list"></div>
+          <div id="integration-health-notice" class="integration-notice" role="status" aria-live="polite" hidden></div>
+        </details>
       </section>
       <section class="panel">
-        <h2>ペルソナ <span class="mod-en" aria-hidden="true">Persona</span></h2>
-        <ul id="persona-list" class="rack-list"></ul>
+        <details class="panel-collapsible">
+          <summary>
+            <h2>ペルソナ <span class="mod-en" aria-hidden="true">Persona</span></h2>
+            <span id="persona-summary" class="panel-summary-compact" aria-live="polite"></span>
+          </summary>
+          <ul id="persona-list" class="rack-list"></ul>
+        </details>
       </section>
       <section class="panel">
-        <h2>トリガー <span class="mod-en" aria-hidden="true">Trigger</span></h2>
-        <ul id="trigger-list" class="rack-list"></ul>
+        <details class="panel-collapsible">
+          <summary>
+            <h2>トリガー <span class="mod-en" aria-hidden="true">Trigger</span></h2>
+            <span id="trigger-summary" class="panel-summary-compact" aria-live="polite"></span>
+          </summary>
+          <ul id="trigger-list" class="rack-list"></ul>
+        </details>
       </section>
       <section class="panel">
         <h2>画面キャプチャ <span class="mod-en" aria-hidden="true">Capture</span></h2>
@@ -158,8 +172,13 @@
         <div id="topic-failures" class="reader-failures" aria-live="polite"></div>
       </section>
       <section class="panel">
-        <h2>コネクタ <span class="mod-en" aria-hidden="true">Connector</span></h2>
-        <ul id="connector-list" class="rack-list"></ul>
+        <details class="panel-collapsible">
+          <summary>
+            <h2>コネクタ <span class="mod-en" aria-hidden="true">Connector</span></h2>
+            <span id="connector-summary" class="panel-summary-compact" aria-live="polite"></span>
+          </summary>
+          <ul id="connector-list" class="rack-list"></ul>
+        </details>
       </section>
     </div>
   </main>
