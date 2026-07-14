@@ -32,8 +32,12 @@ assert.equal(bridged[0].text, "Electron経由");
 const queue = new SpeechQueue({ bouyomi: bridgeClient });
 const queued = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "キュー経由", voice: { engine: "bouyomi" } });
 await new Promise((resolve) => setTimeout(resolve, 10));
-assert.equal(queued.state, "submitted");
 assert.equal(bridged.at(-1).text, "キュー経由");
+// /Talk自体は即応答するが、実際の再生完了通知が無いため見積もり時間分は "speaking" のまま保持され、
+// 他backendとの被り (コメント読み上げとAI読み上げの重複) を防ぐ
+assert.equal(queued.state, "speaking");
+await new Promise((resolve) => setTimeout(resolve, 1000));
+assert.equal(queued.state, "submitted");
 
 const cfg = applyDefaults({
   connectors: { mock: { provider: "mock" } },

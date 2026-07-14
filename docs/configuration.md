@@ -150,6 +150,12 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
 ブラウザ版で CORS に阻まれる場合は Electron 版を使うと、限定された preload API 経由で
 メインプロセスからローカル HTTP API を呼び出せます。
 
+`/Talk` は投入した瞬間に応答が返る (実際の再生完了は通知されない) ため、`commentReader`
+と `personas[].voice` で異なるエンジンを組み合わせている場合 (例: コメント読み上げは
+`bouyomi`、AIペルソナは `voicevox`/`webspeech`)、文字数と `speed` から発話時間を見積もり、
+その時間が経過するまで次のアイテムの再生を待たせることでコメント読み上げとAI読み上げの
+音声が被らないようにしています。見積もりのため実際の発話時間とはずれる場合があります。
+
 ## micMonitor
 
 マイク入力を監視し、配信者が発話している間はAI音声キューを保留、無音に戻ると
