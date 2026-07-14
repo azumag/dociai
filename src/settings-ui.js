@@ -11,7 +11,7 @@
 // ときだけ再描画する (入力フォーカスは失われるが、入力値は draft に反映済みなので保持される)。
 
 import { validateConfig } from "./config-loader.js";
-import { DEFAULT_COMMON_RULES } from "./config/config-defaults.js";
+import { DEFAULT_COMMON_RULES, DEFAULT_SCREEN_CAPTURE_INSTRUCTION } from "./config/config-defaults.js";
 import { registryOptions } from "./config/config-registry.js";
 import { CONFIG_UI_METADATA } from "./config/config-ui-metadata.js";
 import { SettingsController } from "./settings/settings-controller.js";
@@ -926,12 +926,14 @@ export class SettingsUI {
     const scGrid = document.createElement("div");
     scGrid.className = "card-grid";
     scGrid.append(this.#pathField("sourceName (画面/ウィンドウ名)", "context.screenCapture.sourceName", { value: sc.sourceName ?? "", attrs: { spellcheck: "false" } }));
+    scGrid.append(this.#pathSelect("displaySurface (共有ピッカーの既定タブ)", ["", "window", "monitor", "browser"], "context.screenCapture.displaySurface", { value: sc.displaySurface ?? "" }));
     scGrid.append(this.#pathField("maxAgeSeconds", "context.screenCapture.maxAgeSeconds", { type: "number", value: sc.maxAgeSeconds ?? 120 }));
     scGrid.append(this.#pathField("maxTokens", "context.screenCapture.maxTokens", { type: "number", value: sc.maxTokens ?? 768 }));
     scGrid.append(this.#pathField("commentHistoryLimit", "context.commentHistoryLimit", { type: "number", value: ctx.commentHistoryLimit ?? 80 }));
     scGrid.append(this.#pathField("includeRecentComments", "context.includeRecentComments", { type: "number", value: ctx.includeRecentComments ?? 20 }));
     scGrid.append(this.#pathField("maxPromptChars", "context.maxPromptChars", { type: "number", value: ctx.maxPromptChars ?? 4000 }));
     scBody.append(scGrid);
+    scBody.append(this.#pathField("instruction (画面説明の指示文)", "context.screenCapture.instruction", { value: sc.instruction ?? DEFAULT_SCREEN_CAPTURE_INSTRUCTION, textarea: true, rows: 2 }));
     this._body.append(scCard);
 
     // commonRules — 全ペルソナのsystemPromptの後ろに共通で付加される指示文 (issue: ハードコード

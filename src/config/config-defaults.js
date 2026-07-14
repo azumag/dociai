@@ -9,10 +9,14 @@ export const DEFAULT_COMMON_RULES = [
   "配信者や視聴者を不快にさせる発言はしない。",
 ].join("\n");
 
+// screenCapture.instruction の既定値。運用者が言語/文の長さ等をconfigで調整できるよう、
+// ハードコードせずここ1箇所だけが既定文言を持つ (src/screen-capture.js はこの値を使う)。
+export const DEFAULT_SCREEN_CAPTURE_INSTRUCTION = "この配信画面に映っている内容を、日本語で2文以内で簡潔に説明してください。";
+
 export function applyConfigDefaults(config) {
   const copy = structuredClone(config);
   copy.router = { defaultPersona: copy.personas?.[0]?.id, maxRepliesPerComment: 1, cooldownSeconds: 8, historyTtlSeconds: 7200, historyMaxEntries: 2000, ...(copy.router ?? {}) };
-  copy.context = { commentHistoryLimit: 80, includeRecentComments: 20, maxPromptChars: 4000, commonRules: DEFAULT_COMMON_RULES, ...(copy.context ?? {}), screenCapture: { enabled: false, maxAgeSeconds: 120, maxTokens: 768, sourceName: "", ...(copy.context?.screenCapture ?? {}) } };
+  copy.context = { commentHistoryLimit: 80, includeRecentComments: 20, maxPromptChars: 4000, commonRules: DEFAULT_COMMON_RULES, ...(copy.context ?? {}), screenCapture: { enabled: false, maxAgeSeconds: 120, maxTokens: 768, sourceName: "", displaySurface: "", instruction: DEFAULT_SCREEN_CAPTURE_INSTRUCTION, ...(copy.context?.screenCapture ?? {}) } };
   copy.speechQueue = { maxPending: 50, maxPendingPerSource: 20, maxAgeMs: 120000, maxHistory: 50, overflow: "drop-oldest", expireWhileHeld: true, strictOrdering: false, ...(copy.speechQueue ?? {}) };
   copy.voicevox = { enabled: false, baseUrl: "http://127.0.0.1:50021", defaultSpeaker: 3, maxChars: 200, timeoutMs: 30000, retries: 1, ...(copy.voicevox ?? {}) };
   copy.bouyomi = { enabled: false, baseUrl: "http://127.0.0.1:50080", timeoutMs: 5000, voice: 0, volume: -1, speed: -1, tone: -1, ...(copy.bouyomi ?? {}) };

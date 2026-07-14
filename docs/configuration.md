@@ -253,6 +253,9 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 | `screenCapture.connector` | — | 画面説明に使うVision対応コネクタID |
 | `screenCapture.maxAgeSeconds` | 120 | これより古い画面説明はプロンプトに入れない |
 | `screenCapture.maxTokens` | 768 | 画面説明生成に使う最大出力トークン数。thinking系vision modelでは大きめを推奨 |
+| `screenCapture.sourceName` | "" | 優先する画面/ウィンドウ名。Electron版では起動時にこの名前のsourceを自動選択する (対象を更新ドロップダウンでも変更可) |
+| `screenCapture.displaySurface` | "" | `window` / `monitor` / `browser` のいずれか。ブラウザ版の共有ピッカーに渡す既定タブのヒント (対応ブラウザのみ)。Electron版は独自の対象選択UIを使うため無視される |
+| `screenCapture.instruction` | (下記既定文言) | 画面説明生成時にVisionモデルへ渡す指示文。既定値は「この配信画面に映っている内容を、日本語で2文以内で簡潔に説明してください。」。言語や文の長さをconfigで調整できる |
 
 ## commentSources
 

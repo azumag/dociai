@@ -3,6 +3,7 @@
 // Visionモデルへ送って screenSummary を更新する。maxAgeSeconds を超えた説明は使わない。
 
 import { RequestCancelledError } from "./runtime/request-registry.js";
+import { DEFAULT_SCREEN_CAPTURE_INSTRUCTION } from "./config/config-defaults.js";
 
 export class ScreenContext {
   constructor({ config, getConnector, log = () => {} }) {
@@ -23,7 +24,12 @@ export class ScreenContext {
 
   async start() {
     if (this.stream) return;
-    this.stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    // displaySurface はブラウザのgetDisplayMediaピッカーに渡すヒント (Electronは自前のsource選択
+    // UIでピッカー自体をバイパスするため無視される)。対応ブラウザでは指定した種別 (window/monitor/
+    // browser) のタブが既定選択された状態でピッカーが開く。
+    const surface = this.cfg.displaySurface;
+    const video = surface ? { displaySurface: surface } : true;
+    this.stream = await navigator.mediaDevices.getDisplayMedia({ video, audio: false });
     this.video = document.createElement("video");
     this.video.srcObject = this.stream;
     this.video.muted = true;
@@ -73,7 +79,7 @@ export class ScreenContext {
         {
           role: "user",
           content: [
-            { type: "text", text: "この配信画面に映っている内容を、日本語で2文以内で簡潔に説明してください。" },
+            { type: "text", text: this.cfg.instruction || DEFAULT_SCREEN_CAPTURE_INSTRUCTION },
             { type: "image_url", image_url: { url: dataUrl } },
           ],
         },

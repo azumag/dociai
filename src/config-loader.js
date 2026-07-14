@@ -5,13 +5,15 @@
 import { registryIds } from "./config/config-registry.js";
 import { processConfigText } from "./config/config-adapters.js";
 import { processConfig } from "./config/config-pipeline.js";
-import { DEFAULT_COMMON_RULES } from "./config/config-defaults.js";
+import { DEFAULT_COMMON_RULES, DEFAULT_SCREEN_CAPTURE_INSTRUCTION } from "./config/config-defaults.js";
 const KNOWN_PROVIDERS = registryIds("providers");
 const KNOWN_TRIGGER_TYPES = registryIds("triggerTypes");
 const KNOWN_NEWS_SOURCE_TYPES = registryIds("newsSourceTypes");
 const KNOWN_TOPIC_SOURCE_TYPES = registryIds("topicSourceTypes");
 const KNOWN_NEWS_MODES = registryIds("newsModes");
 const VOICE_ENGINES = registryIds("voiceEngines");
+// getDisplayMedia() の video.displaySurface 制約が受け付ける値 (W3C Screen Capture仕様)
+const SCREEN_CAPTURE_DISPLAY_SURFACES = ["window", "monitor", "browser"];
 const DEFAULT_TOPIC_INTRO = "上のお題について、あなたのキャラクターとして自由にコメントしてください。";
 const DEFAULT_TOPIC_STYLE = "雑談のお題として、自然な自分の言葉で自由にコメントする";
 const DEFAULT_READER_RETRY = { maxAttempts: 3, initialDelaySeconds: 30, maxDelaySeconds: 900 };
@@ -206,6 +208,12 @@ export function validateConfig(cfg) {
       errors.push(`context.screenCapture.connector "${cfg.context.screenCapture.connector}" が connectors に存在しません`);
     }
   }
+  if (cfg.context?.screenCapture?.displaySurface) {
+    const surface = cfg.context.screenCapture.displaySurface;
+    if (!SCREEN_CAPTURE_DISPLAY_SURFACES.includes(surface)) {
+      errors.push(`context.screenCapture.displaySurface "${surface}" は未対応です (対応: ${SCREEN_CAPTURE_DISPLAY_SURFACES.join(", ")})`);
+    }
+  }
 
   // voicevox (issue #17)
   if (cfg.voicevox?.enabled) {
@@ -341,6 +349,8 @@ export function applyDefaults(cfg) {
         maxAgeSeconds: 120,
         maxTokens: 768,
         sourceName: "",
+        displaySurface: "",
+        instruction: DEFAULT_SCREEN_CAPTURE_INSTRUCTION,
         ...(cfg.context?.screenCapture ?? {}),
       },
     },
