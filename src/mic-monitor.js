@@ -23,6 +23,7 @@ export class MicMonitor {
     this._belowSince = null;
     this.speaking = false;
     this.level = 0;
+    this.peak = 0;
     this.listeners = new Set();
   }
 
@@ -70,6 +71,7 @@ export class MicMonitor {
       this._buf = new Float32Array(this.analyser.fftSize);
       this.speaking = false;
       this.level = 0;
+      this.peak = 0;
       this._aboveSince = null;
       this._belowSince = null;
       // OS側の権限取消/デバイス切断に追従して自動停止する
@@ -95,12 +97,13 @@ export class MicMonitor {
     this._buf = null;
     this.speaking = false;
     this.level = 0;
+    this.peak = 0;
     this.log("マイク監視を停止しました");
     this.#notify();
   }
 
   status() {
-    return { active: this.active, speaking: this.speaking, level: this.level };
+    return { active: this.active, speaking: this.speaking, level: this.level, peak: this.peak };
   }
 
   onChange(fn) {
@@ -114,8 +117,17 @@ export class MicMonitor {
   #tick() {
     this.analyser.getFloatTimeDomainData(this._buf);
     let sumSquares = 0;
-    for (let i = 0; i < this._buf.length; i++) sumSquares += this._buf[i] * this._buf[i];
+    let peak = 0;
+    for (let i = 0; i < this._buf.length; i++) {
+      const v = this._buf[i];
+      sumSquares += v * v;
+      const abs = Math.abs(v);
+      if (abs > peak) peak = abs;
+    }
     this.level = Math.sqrt(sumSquares / this._buf.length);
+    // ピーク瞬間振幅 (0-1)。UIメーターは実際のサンプルが±1.0 (0dBFS) に達したときに
+    // 初めてMAX表示となるよう、しきい値判定用のRMS (level) とは別にこちらを使う。
+    this.peak = peak;
 
     const threshold = this.cfg.threshold ?? 0.05;
     const minSpeechMs = this.cfg.minSpeechMs ?? 150;

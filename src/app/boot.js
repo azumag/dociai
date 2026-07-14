@@ -378,6 +378,16 @@ function renderTwitchChatStatus() {
   renderIntegrationHealth();
 }
 
+// マイクのピーク振幅 (0-1, 1.0が0dBFS=クリッピング上限) を、メーター表示用の
+// パーセンテージ (0-100) に変換する。人の声のように波形の頂点だけが瞬間的に
+// 振れる音は線形マッピングだと針が振れているように見えないため、dB(対数)スケールで
+// -50dB〜0dBの範囲を0〜100%に割り当てる。0dBFS(クリップ直前)で確実にMAXへ張り付く。
+const MIC_METER_FLOOR_DB = -50;
+function micLevelToPercent(peak) {
+  const db = peak > 0 ? 20 * Math.log10(peak) : MIC_METER_FLOOR_DB;
+  return Math.max(0, Math.min(100, ((db - MIC_METER_FLOOR_DB) / -MIC_METER_FLOOR_DB) * 100));
+}
+
 function renderMicPanel() {
   const el = $("#mic-status");
   const fill = $("#mic-meter-fill");
@@ -399,7 +409,7 @@ function renderMicPanel() {
   }
   const s = micMonitor.status();
   el.textContent = `監視: ${s.active ? "中" : "停止"}` + (s.active ? ` / ${s.speaking ? "発話検知中 (AI保留)" : "無音"}` : "");
-  fill.style.width = `${Math.min(100, Math.round(s.level * 250))}%`;
+  fill.style.width = `${Math.round(micLevelToPercent(s.peak))}%`;
   // メーターの色ゾーン(緑/琥珀/赤)はトラック全幅を基準にした固定位置なので、fill自身の
   // background-sizeをトラックの実測幅に毎回同期させる。固定px指定だと画面幅が変わった
   // 環境(設定ウィンドウの縮小・狭い解像度等)でゾーン境界がずれ、パターンが繰り返し表示
