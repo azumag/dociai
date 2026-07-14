@@ -40,6 +40,47 @@ test("estimateBouyomiSpeakMs scales with text length and speed, within a floor a
   assert.equal(estimateBouyomiSpeakMs("あ".repeat(10000), 100), 60_000);
 });
 
+test("estimateBouyomiSpeakMs's charsPerSecond is adjustable and defaults sanely", () => {
+  const text = "あ".repeat(30);
+  const slower = estimateBouyomiSpeakMs(text, 100, 3);
+  const faster = estimateBouyomiSpeakMs(text, 100, 12);
+  assert.ok(slower > faster, "charsPerSecondを下げると見積り時間は伸びる");
+  assert.equal(estimateBouyomiSpeakMs(text, 100), estimateBouyomiSpeakMs(text, 100, 6), "charsPerSecond省略時は既定の6");
+  // 0/負/非数値は既定値へフォールバックする (ゼロ除算防止)
+  assert.equal(estimateBouyomiSpeakMs(text, 100, 0), estimateBouyomiSpeakMs(text, 100, 6));
+  assert.equal(estimateBouyomiSpeakMs(text, 100, -5), estimateBouyomiSpeakMs(text, 100, 6));
+  assert.equal(estimateBouyomiSpeakMs(text, 100, NaN), estimateBouyomiSpeakMs(text, 100, 6));
+});
+
+test("BouyomiBackend does not mistake a webspeech-scale rate for its own speed (regression)", async () => {
+  // commentReader.rate (webspeech用、既定1.0) は棒読みちゃんのspeed (50-200スケール) とは
+  // 別物であり、フォールバックとして流用すると speed=1 相当と誤解釈され待機が60秒に張り付く。
+  const waited = [];
+  const backend = new BouyomiBackend({ talk: async () => ({ ok: true }) }, {
+    wait: (ms) => { waited.push(ms); return Promise.resolve(); },
+  });
+  // commentReader由来のvoiceには speed が無く rate:1 のみが乗る典型ケースを再現する
+  await backend.play({ text: "短いコメント", voice: { rate: 1, pitch: 1 } }, { executionId: "c1" });
+  assert.ok(waited[0] < 5000, `rateがspeedへ誤って伝播すると60秒に張り付く (実測 ${waited[0]}ms)`);
+});
+
+test("BouyomiBackend's charsPerSecond option lets the completion-wait estimate be tuned", async () => {
+  const waitedDefault = [];
+  const defaultBackend = new BouyomiBackend({ talk: async () => ({ ok: true }) }, {
+    wait: (ms) => { waitedDefault.push(ms); return Promise.resolve(); },
+  });
+  await defaultBackend.play({ text: "あ".repeat(30), voice: {} }, { executionId: "d1" });
+
+  const waitedTuned = [];
+  const tunedBackend = new BouyomiBackend({ talk: async () => ({ ok: true }) }, {
+    wait: (ms) => { waitedTuned.push(ms); return Promise.resolve(); },
+    charsPerSecond: 3,
+  });
+  await tunedBackend.play({ text: "あ".repeat(30), voice: {} }, { executionId: "t1" });
+
+  assert.ok(waitedTuned[0] > waitedDefault[0], "charsPerSecondを下げると同じ文章でも待機時間見積りが伸びる");
+});
+
 test("Bouyomi waits out the estimated speaking time before reporting completion, but cancel interrupts it immediately", async () => {
   const waited = [];
   const backend = new BouyomiBackend({ talk: async () => ({ ok: true }) }, {

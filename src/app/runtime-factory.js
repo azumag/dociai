@@ -255,6 +255,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
         : null,
       policy: config.speechQueue,
       strictOrdering: config.speechQueue?.strictOrdering,
+      bouyomiCharsPerSecond: config.bouyomi?.charsPerSecond,
       onHealth: ({ backend, status, error }) => deps.log(`音声backend[${backend}] ${status}${error ? `: ${error}` : ""}`, status === "error" ? "warn" : "info"),
     }),
     (instance) => ({

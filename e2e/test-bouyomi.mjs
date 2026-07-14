@@ -21,6 +21,12 @@ assert.equal(request.searchParams.get("tone"), "90");
 await client.clear();
 assert.equal(request.pathname, "/Clear");
 
+// rate (webspeech用、~0.5-2スケール) は speed (棒読みちゃん用、~50-200スケール) の代わりに
+// 使ってはいけない。フォールバックすると speed=1 相当に誤解釈され、実際の再生も待機見積りも
+// 極端に遅くなる (「待機時間が長すぎる」不具合の原因だった)。
+await client.talk("rateはspeedに使わない", { rate: 1 });
+assert.equal(request.searchParams.get("speed"), "-1", "speed未指定時はrateへフォールバックせず棒読みちゃん本体の設定(-1)に従う");
+
 const bridged = [];
 const bridgeClient = new BouyomiClient({ bridge: {
   talk: async (payload) => { bridged.push(payload); return { ok: true }; },
@@ -47,6 +53,8 @@ const cfg = applyDefaults({
   commentReader: { enabled: true, engine: "bouyomi" },
 });
 assert.equal(cfg.bouyomi.baseUrl, "http://127.0.0.1:50080");
+assert.equal(cfg.bouyomi.charsPerSecond, 6);
+assert.equal(cfg.commentReader.speed, -1);
 assert.deepEqual(validateConfig(cfg).errors, []);
 
 globalThis.fetch = async () => { throw new TypeError("offline"); };

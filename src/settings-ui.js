@@ -1002,11 +1002,12 @@ export class SettingsUI {
     g.append(this.#pathField("volume", "bouyomi.volume", { type: "number", value: b.volume ?? -1 }));
     g.append(this.#pathField("speed", "bouyomi.speed", { type: "number", value: b.speed ?? -1 }));
     g.append(this.#pathField("tone", "bouyomi.tone", { type: "number", value: b.tone ?? -1 }));
+    g.append(this.#pathField("charsPerSecond (待機時間の見積り基準)", "bouyomi.charsPerSecond", { type: "number", value: b.charsPerSecond ?? 6, attrs: { step: "0.5", min: "0.5" } }));
     cardBody.append(g);
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "棒読みちゃんの「HTTP連携」を有効にし、通常は 127.0.0.1:50080 を使います。コメント読み上げまたはペルソナ音声の engine に bouyomi を選択してください。";
+    note.textContent = "棒読みちゃんの「HTTP連携」を有効にし、通常は 127.0.0.1:50080 を使います。コメント読み上げまたはペルソナ音声の engine に bouyomi を選択してください。charsPerSecond は「他backendとの音声かぶり防止」のための発話時間見積り (speed=100相当で1秒に読む文字数、既定6) で、実際の再生速度には影響しません。読み上げが速い/遅い声を使っていて待機が長すぎる・短すぎる場合はここを調整してください。";
     this._body.append(note);
   }
 
@@ -1054,10 +1055,11 @@ export class SettingsUI {
         this.#pathSelect("name (webspeech音声名)", this.#voiceNameOptions(cr.name), "commentReader.name", { value: cr.name ?? "default" }),
         () => ({ rate: this.draft.commentReader?.rate, pitch: this.draft.commentReader?.pitch }),
       ));
-      g.append(this.#pathField("rate", "commentReader.rate", { type: "number", value: cr.rate ?? 1.0, attrs: { step: "0.1" } }));
+      g.append(this.#pathField("rate (webspeech/voicevox速度)", "commentReader.rate", { type: "number", value: cr.rate ?? 1.0, attrs: { step: "0.1" } }));
       g.append(this.#pathField("pitch", "commentReader.pitch", { type: "number", value: cr.pitch ?? 1.0, attrs: { step: "0.1" } }));
       g.append(this.#pathField("speaker (voicevox話者ID)", "commentReader.speaker", { type: "number", value: cr.speaker ?? "" }));
       g.append(this.#pathField("voice (棒読みちゃん話者)", "commentReader.voice", { type: "number", value: cr.voice ?? this.draft.bouyomi?.voice ?? 0 }));
+      g.append(this.#pathField("speed (棒読みちゃん速度)", "commentReader.speed", { type: "number", value: cr.speed ?? -1 }));
       cardBody.append(g);
       cardBody.append(this.#pathCheckbox("ユーザー名を読み上げる", "commentReader.includeAuthor", { value: cr.includeAuthor !== false }));
       cardBody.append(this.#pathCheckbox("エモートを読み上げない", "commentReader.skipEmotes", { value: !!cr.skipEmotes }));
@@ -1066,7 +1068,7 @@ export class SettingsUI {
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。エモート除去はTwitchの emotes タグ (正確な文字範囲) を使うため、Twitch経由のコメントのみ対象です。";
+    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。エモート除去はTwitchの emotes タグ (正確な文字範囲) を使うため、Twitch経由のコメントのみ対象です。rate は webspeech/voicevox 用の速度 (0.5〜2程度)、speed は棒読みちゃん用の速度 (50〜200、既定 -1 は棒読みちゃん本体の設定に従う) で、スケールが異なるため別々に設定します。engine が bouyomi のときに待機時間が長すぎる/短すぎる場合は speed、または bouyomi タブの charsPerSecond を調整してください。";
     this._body.append(note);
   }
 

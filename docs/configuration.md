@@ -139,7 +139,8 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
     "voice": 0,
     "volume": -1,
     "speed": -1,
-    "tone": -1
+    "tone": -1,
+    "charsPerSecond": 6
   }
 }
 ```
@@ -150,11 +151,20 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
 ブラウザ版で CORS に阻まれる場合は Electron 版を使うと、限定された preload API 経由で
 メインプロセスからローカル HTTP API を呼び出せます。
 
+`speed` は棒読みちゃんの speed パラメータで 50〜200 程度のスケール (既定 -1 は
+棒読みちゃん本体の設定に従う) です。`personas[].voice.rate` / `commentReader.rate`
+(webspeech/voicevox 用、0.5〜2程度のスケール) とは互換性がないため、bouyomi の
+速度を変えたい場合は `bouyomi.speed` または `personas[].voice.speed` /
+`commentReader.speed` を個別に指定してください。
+
 `/Talk` は投入した瞬間に応答が返る (実際の再生完了は通知されない) ため、`commentReader`
 と `personas[].voice` で異なるエンジンを組み合わせている場合 (例: コメント読み上げは
 `bouyomi`、AIペルソナは `voicevox`/`webspeech`)、文字数と `speed` から発話時間を見積もり、
 その時間が経過するまで次のアイテムの再生を待たせることでコメント読み上げとAI読み上げの
 音声が被らないようにしています。見積もりのため実際の発話時間とはずれる場合があります。
+見積りの基準は `charsPerSecond` (既定 6、speed=100相当のとき1秒に読む文字数) で、
+実際に使っている声の速さと見積りがずれていて待機が長すぎる/短すぎると感じる場合は
+この値を調整してください (小さくすると見積り時間が延び、大きくすると縮みます)。
 
 ## micMonitor
 
@@ -204,6 +214,7 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
     "name": "default",
     "rate": 1.0,
     "pitch": 1.0,
+    "speed": -1,
     "includeAuthor": true,
     "skipEmotes": false,
     "ignoreUsers": []
@@ -216,9 +227,10 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 | `enabled` | false | コメント読み上げを有効化 |
 | `engine` | webspeech | `webspeech` / `voicevox` / `bouyomi` (personas の `voice.engine` と同じ選択肢) |
 | `name` | default | webspeech使用時の音声名。省略時は日本語音声を自動選択 |
-| `rate` / `pitch` | 1.0 / 1.0 | 読み上げ速度・音高 |
+| `rate` / `pitch` | 1.0 / 1.0 | webspeech/voicevox使用時の読み上げ速度・音高 (0.5〜2程度のスケール) |
 | `speaker` | (voicevox.defaultSpeakerを使用) | voicevox使用時の話者ID。省略可 |
 | `voice` | 0 | bouyomi使用時の話者ID。0 は棒読みちゃん側の既定 |
+| `speed` | -1 | bouyomi使用時の読み上げ速度 (50〜200程度のスケール、`rate` とは別スケール)。-1 は棒読みちゃん本体の設定に従う。engine が bouyomi のとき、コメント読み上げの待機時間が長すぎる/短すぎる場合はここか `bouyomi.charsPerSecond` を調整する |
 | `includeAuthor` | true | falseにすると「author: 本文」ではなく本文のみ読み上げる |
 | `skipEmotes` | false | trueにするとTwitchのエモートを読み上げから除去する。Twitchが送るIRCの `emotes` タグ (エモートの正確な文字範囲) を使うため、手動入力コメントなど emotes 情報がないソースには影響しない |
 | `ignoreUsers` | `[]` | このユーザー名 (大文字小文字区別なし、前後空白は無視) からのコメントは読み上げをスキップする。AI応答のトリガー判定自体には影響しない |
