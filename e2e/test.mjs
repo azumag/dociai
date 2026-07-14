@@ -74,7 +74,7 @@ try {
     heading: document.querySelector(".panel-comments-primary h1")?.textContent,
     center: document.querySelector("#comment-log")?.closest(".col")?.classList.contains("col-center"),
     readerStatus: document.querySelector("#comment-reader-status")?.textContent,
-    controlsLeft: document.querySelector("#speech-list")?.closest(".col")?.classList.contains("col-left"),
+    controlsLeft: document.querySelector("#speech-pending")?.closest(".col")?.classList.contains("col-left"),
   }));
   check("コメント読み上げが中央の主画面", commentFirstUi.heading === "コメント読み上げ" && commentFirstUi.center, JSON.stringify(commentFirstUi));
   check("読み上げ状態とキュー操作が左に集約", commentFirstUi.controlsLeft && commentFirstUi.readerStatus.includes("読み上げ"), commentFirstUi.readerStatus);
@@ -125,8 +125,8 @@ try {
     debug.slice(0, 60).replace(/\n/g, " "));
 
   // ---- issue #8: 音声キューに投入され状態が出る ----
-  const speech = await page.$eval("#speech-list", (el) => el.textContent);
-  check("音声キューにアイテムが入る", speech.includes("相棒AI"), speech.trim().slice(0, 100));
+  const speechLog = await page.$eval("#event-log", (el) => el.textContent);
+  check("音声キューにアイテムが入る", speechLog.includes("音声[相棒AI]"), speechLog.trim().slice(0, 300));
 
   // ---- issue #4: クールダウン (2通目は応答しない) ----
   step("second comment (cooldown)");
@@ -209,8 +209,8 @@ try {
   const micStopDisabled = await page.$eval("#btn-mic-stop", (el) => el.disabled);
   check("マイク監視: 開始前は開始のみ活性・停止不活性", micStartEnabled && micStopDisabled, micStatus.trim().slice(0, 60));
 
-  const speechFinal = await page.$eval("#speech-list", (el) => el.textContent);
-  console.log("INFO | 音声キュー最終状態:", speechFinal.trim().slice(0, 200));
+  const eventLogFinal = await page.$eval("#event-log", (el) => el.textContent);
+  console.log("INFO | 音声キュー最終ログ:", eventLogFinal.trim().slice(0, 200));
   await page.screenshot({ path: `${SHOT_DIR}/console-ui.png` });
 
   // ---- issue #14: OBS表示の描画ロジック ----

@@ -62,6 +62,7 @@ function onSpeechUpdate(items, queue, generation) {
   if (!appRuntime.isCurrent(generation)) return;
   state.speakingPersonaId = queue.current?.personaId ?? null;
   renderSpeechQueue();
+  renderComments();
   renderTally();
   const current = queue.current;
   broadcast("speech", current
@@ -336,7 +337,7 @@ function renderSpeechQueue() {
     status = `待機 ${speechQueue.waitingCount()}`;
   }
   const diagnostics = snapshot ? `待機 ${snapshot.pending.length} / 最古 ${Math.round(snapshot.oldestPendingAgeMs / 1000)}秒 / drop ${snapshot.metrics.dropped} / hold ${snapshot.holdReasons.join(", ") || "なし"}${snapshot.activeExecution ? ` / 実行 ${snapshot.activeExecution.id}` : ""}${snapshot.backendWarnings.length ? ` / 警告: ${snapshot.backendWarnings.join("; ")}` : ""}${snapshot.remoteClear.status === "failed" ? ` / remote clear失敗: ${snapshot.remoteClear.error}` : ""}` : "キュー未初期化";
-  consoleView.renderSpeech({ current: snapshot?.current ?? null, pending: snapshot ? [...snapshot.pending] : [], history: snapshot ? [...snapshot.history].reverse().slice(0, 8) : [], diagnostics, status, statusClass });
+  consoleView.renderSpeech({ current: snapshot?.current ?? null, pending: snapshot ? [...snapshot.pending] : [], diagnostics, status, statusClass });
 }
 
 function renderCommentReaderStatus() {
@@ -550,7 +551,18 @@ function renderReaderFailures(container, reader, status, onRetry, onChange) {
 }
 
 function renderComments() {
-  consoleView.renderComments(commentStore.recent(50).reverse().map((comment) => ({ ...comment, time: hhmmss(comment.timestamp) })));
+  const speechQueue = appRuntime.getComponent("speechQueue");
+  const speechStateByCommentId = new Map();
+  if (speechQueue) {
+    for (const item of speechQueue.items) {
+      if (item.commentId != null) speechStateByCommentId.set(item.commentId, item.state);
+    }
+  }
+  consoleView.renderComments(commentStore.recent(50).reverse().map((comment) => ({
+    ...comment,
+    time: hhmmss(comment.timestamp),
+    speechState: speechStateByCommentId.get(comment.id) ?? null,
+  })));
 }
 
 function renderDebug() {

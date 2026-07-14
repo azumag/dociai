@@ -46,10 +46,10 @@ export class SpeechQueue {
   }
   waitingCount() { return this.scheduler.pending.length; }
 
-  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt }) {
+  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt, commentId }) {
     const engines = [...this.scheduler.pending, ...(this.current ? [this.current] : [])].map((item) => item.voice?.engine ?? this.#defaultEngine());
     this.backends.validateMix([...engines, voice?.engine ?? this.#defaultEngine()]);
-    const item = this.scheduler.enqueue({ personaId, personaName, text, voice, source, priority, deadlineAt });
+    const item = this.scheduler.enqueue({ personaId, personaName, text, voice, source, priority, deadlineAt, commentId });
     this.#notify(item);
     this.#pump();
     return item;

@@ -77,20 +77,20 @@ try {
 
   // 音声キューにアイテムが入り、speaking 状態になる (合成～再生)
   await page.waitForFunction(
-    () => document.querySelector("#speech-list")?.textContent.includes("発話中") ||
-          document.querySelector("#speech-list")?.textContent.includes("完了"),
+    () => document.querySelector("#event-log")?.textContent.includes("読み上げ中") ||
+          document.querySelector("#event-log")?.textContent.includes("完了"),
     { timeout: 15000 },
   );
-  const speechText = await page.$eval("#speech-list", (el) => el.textContent);
-  check("音声キューにvoicevoxアイテムが入る", speechText.length > 0, speechText.trim().slice(0, 120));
+  const speechLogText = await page.$eval("#event-log", (el) => el.textContent);
+  check("音声キューにvoicevoxアイテムが入る", speechLogText.includes("音声["), speechLogText.trim().slice(0, 200));
 
   // 完了まで待つ (長くても数チャンクなので 30秒)
   await page.waitForFunction(
-    () => document.querySelector("#speech-list")?.textContent.includes("完了"),
+    () => document.querySelector("#event-log")?.textContent.includes("完了"),
     { timeout: 30000 },
   );
-  const finalSpeech = await page.$eval("#speech-list", (el) => el.textContent);
-  check("voicevox再生が完了する", finalSpeech.includes("完了"), finalSpeech.trim().slice(0, 120));
+  const finalSpeechLogText = await page.$eval("#event-log", (el) => el.textContent);
+  check("voicevox再生が完了する", finalSpeechLogText.includes("完了"), finalSpeechLogText.trim().slice(0, 200));
 
   // event-log にチャンク進捗または合成ログが出ている
   const eventLog = await page.$eval("#event-log", (el) => el.textContent);
