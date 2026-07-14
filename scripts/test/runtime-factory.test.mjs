@@ -121,6 +121,48 @@ test("buildDociaiRuntime wires a candidate bundle in dependency order without st
   assert.deepEqual(runCalls, [["news", true]]);
 });
 
+test("micMonitor only interrupts AI speech (speechQueue.hold(\"mic\")) while deps.isMicBargeInEnabled() is true; toggling it off releases an existing hold", async () => {
+  const config = minimalConfig({ micMonitor: { enabled: true } });
+  let bargeInEnabled = true;
+  const { deps } = fakeDeps({ isMicBargeInEnabled: () => bargeInEnabled });
+  // isCurrent(1) must actually be true for generation 1 — outside of AppRuntime (which calls this
+  // as part of commit()), a fresh BrowserRuntimeController starts at generation 0.
+  deps.runtimeController.generations.next("test");
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+
+  const micMonitor = bundle.get("micMonitor");
+  const speechQueue = bundle.get("speechQueue");
+  assert.ok(micMonitor, "micMonitor must be constructed when config.micMonitor.enabled is true");
+
+  // start() only registers the onChange listener (no real getUserMedia/audio capture) — grab it
+  // to simulate what MicMonitor's real #tick()/#notify() would fire on a speaking-state change.
+  await bundle.components.find((c) => c.name === "micMonitor").start();
+  const notifyListener = [...micMonitor.listeners][0];
+  assert.equal(typeof notifyListener, "function");
+
+  micMonitor.speaking = true;
+  notifyListener();
+  assert.equal(speechQueue.paused, true, "mic speech must hold/interrupt the AI speech queue when barge-in is enabled");
+  assert.deepEqual(speechQueue.holdReasons, ["mic"]);
+
+  micMonitor.speaking = false;
+  notifyListener();
+  assert.equal(speechQueue.paused, false, "silence must release the hold");
+
+  bargeInEnabled = false;
+  micMonitor.speaking = true;
+  notifyListener();
+  assert.equal(speechQueue.paused, false, "mic speech must NOT interrupt the AI speech queue while barge-in is disabled");
+
+  // Disabling barge-in mid-hold must release any pre-existing "mic" hold, not just skip future ones.
+  bargeInEnabled = true;
+  notifyListener();
+  assert.equal(speechQueue.paused, true);
+  bargeInEnabled = false;
+  notifyListener();
+  assert.equal(speechQueue.paused, false, "toggling barge-in off must release an already-held mic hold");
+});
+
 test("starting a candidate bundle activates the trigger engine and comment sources", async () => {
   // TriggerEngine.start() always binds a "keydown" listener, even with no hotkey triggers
   // configured — same window shim scripts/test/electron-shortcut.test.mjs uses.
