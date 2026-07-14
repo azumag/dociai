@@ -507,15 +507,19 @@ export class SettingsUI {
     input.value = value ?? "";
     if (placeholder) input.placeholder = placeholder;
     for (const [k, v] of Object.entries(inputAttrs)) input[k] = v;
-    input.addEventListener("input", () => {
-      let v = input.value;
-      if (type === "number") v = v === "" ? null : Number(v);
-      if (field === "__id__") {
-        this.#renameMapKey(mapName, key, v || key);
-      } else {
+    if (field === "__id__") {
+      // ID変更はキー変更(=オブジェクトの再構築+再描画)を伴うため、input(キー入力の都度)ではなく
+      // change(フォーカスが外れた時)で確定する。inputで#render()すると入力中のinput要素ごと
+      // 作り直されてしまい、1文字入力するたびにフォーカスが外れる不具合になる。
+      input.addEventListener("change", () => this.#renameMapKey(mapName, key, input.value || key));
+    } else {
+      const handler = () => {
+        let v = input.value;
+        if (type === "number") v = v === "" ? null : Number(v);
         this.draft[mapName][key][field] = v;
-      }
-    });
+      };
+      input.addEventListener("input", handler);
+    }
     return this.#attachFieldInput(shell, input, path);
   }
 
