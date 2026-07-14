@@ -580,7 +580,6 @@ a { color: var(--focus); }
 .speech-actions button:first-child { border-color: var(--cue-edge); color: var(--cue); }
 .speech-actions button:nth-child(2) { border-color: var(--ok-edge); color: var(--ok); }
 .speech-actions button:last-child { color: var(--ink-dim); }
-.speech-list { max-height: 42vh; overflow-y: auto; }
 .speech-current, .speech-diagnostics { padding: 6px 0; }
 .speech-current { font-size: 12px; }
 .panel-reader-controls h3 {

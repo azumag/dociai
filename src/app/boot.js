@@ -337,7 +337,7 @@ function renderSpeechQueue() {
     status = `待機 ${speechQueue.waitingCount()}`;
   }
   const diagnostics = snapshot ? `待機 ${snapshot.pending.length} / 最古 ${Math.round(snapshot.oldestPendingAgeMs / 1000)}秒 / drop ${snapshot.metrics.dropped} / hold ${snapshot.holdReasons.join(", ") || "なし"}${snapshot.activeExecution ? ` / 実行 ${snapshot.activeExecution.id}` : ""}${snapshot.backendWarnings.length ? ` / 警告: ${snapshot.backendWarnings.join("; ")}` : ""}${snapshot.remoteClear.status === "failed" ? ` / remote clear失敗: ${snapshot.remoteClear.error}` : ""}` : "キュー未初期化";
-  consoleView.renderSpeech({ current: snapshot?.current ?? null, pending: snapshot ? [...snapshot.pending] : [], diagnostics, status, statusClass });
+  consoleView.renderSpeech({ current: snapshot?.current ?? null, diagnostics, status, statusClass });
 }
 
 function renderCommentReaderStatus() {

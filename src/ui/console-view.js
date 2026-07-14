@@ -101,19 +101,7 @@ export class ConsoleView {
     this.element("#trigger-summary").textContent = triggers.length ? `${triggers.length}件${unused ? ` · 未使用 ${unused}` : ""}` : "未設定";
   }
   renderSpeech(model) {
-    const renderItems = (selector, items, empty) => {
-      const list = this.element(selector); list.replaceChildren();
-      for (const item of items) {
-        const li = this.document.createElement("li");
-        const badge = this.document.createElement("span"); badge.className = `badge state-${item.state}`; badge.textContent = speechLabels[item.state] ?? item.state;
-        const grow = this.document.createElement("div"); grow.className = "grow"; grow.innerHTML = `<div class="detail"></div>`;
-        grow.querySelector(".detail").textContent = `${item.personaName}: ${item.text.slice(0, 60)}${item.error ? ` (${item.error})` : ""}`;
-        li.append(badge, grow); list.append(li);
-      }
-      if (!items.length) list.innerHTML = `<li class="detail">${empty}</li>`;
-    };
     this.element("#speech-current").textContent = model.current ? `${model.current.personaName}: ${model.current.text}` : "再生中なし";
-    renderItems("#speech-pending", model.pending, "待機なし");
     this.element("#speech-diagnostics").textContent = model.diagnostics;
     const chip = this.element("#speech-state"); chip.textContent = model.status; chip.className = model.statusClass;
   }
