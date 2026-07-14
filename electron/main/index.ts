@@ -26,6 +26,7 @@ import { StreamEventBus } from "./services/stream-events/stream-event-bus";
 import { STREAM_EVENT_APP_EVENT_TYPE } from "../shared/services/stream-event-ipc-contract";
 import { UpdateService, type AutoUpdaterLike } from "./services/update/update-service";
 import { UPDATE_APP_EVENT_TYPE } from "../shared/services/update-ipc-contract";
+import { backfillReferencedTriggers } from "./config/seed-merge";
 // @ts-expect-error JavaScript config core intentionally has no separate declaration build.
 import { splitConnectorSecrets } from "../../src/config/config-secrets-split.js";
 
@@ -77,6 +78,14 @@ async function seedAiConnectorConfig(configRepository: ConfigRepository, secretS
   const missingTopics = !("topics" in current.config);
   const missingPersonas = !Array.isArray(current.config.personas) || !current.config.personas.length;
   if (isFreshInstall || missingNews || missingTopics || missingPersonas) {
+    const personasBackfill = missingPersonas && migrated.publicConfig.personas !== undefined ? migrated.publicConfig.personas : undefined;
+    // isFreshInstallでなければtriggers全体は上書きしない (#405: ユーザーが設定UIで全トリガーを
+    // 意図的に削除した状態を保つため) が、personasBackfillだけが起きると「古いtrigger参照を
+    // 持つpersonaだけ復活し、参照先のtriggerは無い」という不整合になる。参照されているIDに
+    // 限定してlegacy configから補完する。
+    const triggersBackfill = isFreshInstall && migrated.publicConfig.triggers !== undefined
+      ? migrated.publicConfig.triggers
+      : backfillReferencedTriggers(current.config.triggers, personasBackfill, migrated.publicConfig.triggers);
     const config = {
       ...current.config,
       schemaVersion: raw.schemaVersion ?? 1,
@@ -88,8 +97,8 @@ async function seedAiConnectorConfig(configRepository: ConfigRepository, secretS
       ...(isFreshInstall ? { connectors: migrated.publicConfig.connectors ?? {} } : {}),
       ...((isFreshInstall || missingNews) && migrated.publicConfig.news !== undefined ? { news: migrated.publicConfig.news } : {}),
       ...((isFreshInstall || missingTopics) && migrated.publicConfig.topics !== undefined ? { topics: migrated.publicConfig.topics } : {}),
-      ...(missingPersonas && migrated.publicConfig.personas !== undefined ? { personas: migrated.publicConfig.personas } : {}),
-      ...(isFreshInstall && migrated.publicConfig.triggers !== undefined ? { triggers: migrated.publicConfig.triggers } : {}),
+      ...(personasBackfill !== undefined ? { personas: personasBackfill } : {}),
+      ...(triggersBackfill !== null ? { triggers: triggersBackfill } : {}),
     };
     try { await configRepository.save(config, current.revision); }
     catch (error) { console.error("[dociai:seed] failed to persist seeded config, continuing with in-memory defaults", error); }
