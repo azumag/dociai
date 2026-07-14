@@ -6,6 +6,7 @@
 
 const TICK_MS = 50;
 const FFT_SIZE = 512;
+const START_TIMEOUT_MS = 15000;
 
 export class MicMonitor {
   constructor({ config, log = () => {} } = {}) {
@@ -32,13 +33,26 @@ export class MicMonitor {
   async start() {
     if (this.stream || this._starting) return;
     this._starting = true;
+    let timedOut = false;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      const mediaPromise = navigator.mediaDevices.getUserMedia({
         // echoCancellation/noiseSuppression: 同一タブで再生するAI音声がマイクに
         // 回り込んでの自己検知を抑える (ブラウザ標準のAEC)。autoGainControl は
         // 無音時のノイズを持ち上げて閾値判定を狂わせるため無効にする。
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
       });
+      // 隠れた許可ダイアログやOS/ブラウザ側の不具合でgetUserMedia()がハングすると、
+      // このawaitが永久に終わらず finally も走らないため _starting が true のまま固着し、
+      // 以後「監視開始」を押しても無反応になる。タイムアウトで諦めてエラーとして伝える。
+      // タイムアウト後に遅れてストリームが届いた場合は使わずに即破棄する。
+      mediaPromise.then((stream) => { if (timedOut) stream.getTracks().forEach((t) => t.stop()); }, () => {});
+      this.stream = await Promise.race([
+        mediaPromise,
+        new Promise((_, reject) => setTimeout(() => {
+          timedOut = true;
+          reject(new Error(`マイクの許可待ちがタイムアウトしました (${START_TIMEOUT_MS / 1000}秒)`));
+        }, START_TIMEOUT_MS)),
+      ]);
       this.audioCtx = new AudioContext();
       this.sourceNode = this.audioCtx.createMediaStreamSource(this.stream);
       this.analyser = this.audioCtx.createAnalyser();
