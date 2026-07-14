@@ -98,3 +98,9 @@ test("SafeStorageSecretStore never persists plaintext and falls back to memory",
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+test("electron/main/index.ts shares the connector-secret split with the Browser pipeline instead of redefining it", async () => {
+  const main = await fs.readFile(path.resolve(new URL("../../electron/main/index.ts", import.meta.url).pathname), "utf8");
+  assert.match(main, /import\s*\{\s*splitConnectorSecrets\s*\}\s*from\s*"..\/..\/src\/config\/config-secrets-split\.js"/);
+  assert.doesNotMatch(main, /function moveConnectorSecrets/);
+});

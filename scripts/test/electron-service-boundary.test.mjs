@@ -7,14 +7,18 @@ const root = path.resolve(new URL("../..", import.meta.url).pathname);
 async function source(relative) { return fs.readFile(path.join(root, relative), "utf8"); }
 
 test("Electron renderer adapters route every external service through Main IPC", async () => {
-  const [connectors, news, topics, voicevox, bouyomi, runtimeFactory, platform, captureAdapter, preload, ipc, main] = await Promise.all([
-    source("src/connectors.js"), source("src/news-reader.js"), source("src/topic-reader.js"), source("src/voicevox.js"), source("src/bouyomi.js"), source("src/app/runtime-factory.js"), source("src/platform/electron-services.js"), source("src/platform/capture-adapter.js"), source("electron/preload/index.ts"), source("electron/main/ipc/register.ts"), source("electron/main/index.ts"),
+  const [connectors, news, topics, voicevox, bouyomi, runtimeFactory, platform, captureAdapter, preload, ipc, main, boot] = await Promise.all([
+    source("src/connectors.js"), source("src/news-reader.js"), source("src/topic-reader.js"), source("src/voicevox.js"), source("src/bouyomi.js"), source("src/app/runtime-factory.js"), source("src/platform/electron-services.js"), source("src/platform/capture-adapter.js"), source("electron/preload/index.ts"), source("electron/main/ipc/register.ts"), source("electron/main/index.ts"), source("src/app/boot.js"),
   ]);
   assert.match(connectors, /hasElectronAiService\(\)/); assert.match(news, /hasElectronFeedService\(\)/); assert.match(topics, /hasElectronTopicService\(\)/);
   assert.match(voicevox, /hasElectronVoiceVoxService\(\)/); assert.match(bouyomi, /window\?\.dociai\?\.(?:bouyomi|speech)/); assert.match(runtimeFactory, /dociai\?\.twitch\?\.start/);
   assert.match(platform, /globalThis\.dociai\.speech\.voicevox/); assert.match(platform, /globalThis\.dociai\.twitch/);
   assert.match(captureAdapter, /globalThis\.dociai\?\.capture/);
-  for (const channel of ["SPEECH_VOICEVOX_SPEAKERS", "SPEECH_VOICEVOX_SYNTHESIZE", "SPEECH_BOUYOMI_TALK", "SPEECH_BOUYOMI_CLEAR", "TWITCH_START", "TWITCH_STOP", "TWITCH_RECONNECT", "SHORTCUT_STATUS", "CAPTURE_LIST_SOURCES", "CAPTURE_SELECT_SOURCE", "CAPTURE_STATUS", "UPDATE_CHECK", "UPDATE_DOWNLOAD", "UPDATE_QUIT_AND_INSTALL"]) { assert.match(preload, new RegExp(`CHANNELS\\.${channel}`)); assert.match(ipc, new RegExp(`CHANNELS\\.${channel}`)); }
+  // #405 fix: 設定保存は window.dociai.config/secrets IPC (Main の config.json + safeStorage) を
+  // 経由する。config.local.json への直接PUTは405になるread-only プロトコルなので使わない。
+  assert.match(platform, /globalThis\.dociai\.config\.get/); assert.match(platform, /globalThis\.dociai\.config\.save/); assert.match(platform, /globalThis\.dociai\.secrets\.set/);
+  assert.match(boot, /hasElectronConfigService\(\)/);
+  for (const channel of ["SPEECH_VOICEVOX_SPEAKERS", "SPEECH_VOICEVOX_SYNTHESIZE", "SPEECH_BOUYOMI_TALK", "SPEECH_BOUYOMI_CLEAR", "TWITCH_START", "TWITCH_STOP", "TWITCH_RECONNECT", "SHORTCUT_STATUS", "CAPTURE_LIST_SOURCES", "CAPTURE_SELECT_SOURCE", "CAPTURE_STATUS", "UPDATE_CHECK", "UPDATE_DOWNLOAD", "UPDATE_QUIT_AND_INSTALL", "CONFIG_GET", "CONFIG_SAVE", "SECRET_SET"]) { assert.match(preload, new RegExp(`CHANNELS\\.${channel}`)); assert.match(ipc, new RegExp(`CHANNELS\\.${channel}`)); }
   assert.match(main, /new SpeechBackendService/); assert.match(main, /new TwitchChatService/);
   assert.match(main, /new ShortcutService/);
   assert.match(main, /new CaptureService/); assert.match(main, /installDisplayMediaHandler/);

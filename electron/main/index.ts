@@ -26,6 +26,8 @@ import { StreamEventBus } from "./services/stream-events/stream-event-bus";
 import { STREAM_EVENT_APP_EVENT_TYPE } from "../shared/services/stream-event-ipc-contract";
 import { UpdateService, type AutoUpdaterLike } from "./services/update/update-service";
 import { UPDATE_APP_EVENT_TYPE } from "../shared/services/update-ipc-contract";
+// @ts-expect-error JavaScript config core intentionally has no separate declaration build.
+import { splitConnectorSecrets } from "../../src/config/config-secrets-split.js";
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "dociai",
@@ -35,39 +37,6 @@ protocol.registerSchemesAsPrivileged([{
 type JsonRecord = Record<string, unknown>;
 
 function object(value: unknown): JsonRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {}; }
-
-function moveConnectorSecrets(config: JsonRecord): { publicConfig: JsonRecord; secretEntries: Array<{ key: string; value: string }> } {
-  const publicConfig = structuredClone(config);
-  const connectors = object(publicConfig.connectors);
-  const secretEntries: Array<{ key: string; value: string }> = [];
-  for (const [id, value] of Object.entries(connectors)) {
-    const connector = object(value);
-    if (typeof connector.apiKey === "string" && connector.apiKey) {
-      const key = `connectors.${id}.apiKey`;
-      secretEntries.push({ key, value: connector.apiKey });
-      delete connector.apiKey;
-      connector.apiKeyConfigured = true;
-      connector.apiKeySecretRef = key;
-    }
-    connectors[id] = connector;
-  }
-  publicConfig.connectors = connectors;
-  const topics = object(publicConfig.topics);
-  const sources = Array.isArray(topics.sources) ? topics.sources : [];
-  topics.sources = sources.map((value, index) => {
-    const source = object(value);
-    if (typeof source.token === "string" && source.token) {
-      const key = `topics.sources.${index}.token`;
-      secretEntries.push({ key, value: source.token });
-      delete source.token;
-      source.tokenConfigured = true;
-      source.tokenSecretRef = key;
-    }
-    return source;
-  });
-  if ("topics" in publicConfig) publicConfig.topics = topics;
-  return { publicConfig, secretEntries };
-}
 
 async function readJsonRecord(file: string): Promise<JsonRecord | null> {
   try { return object(JSON.parse(await fs.readFile(file, "utf8"))); } catch { return null; }
@@ -85,13 +54,45 @@ async function seedAiConnectorConfig(configRepository: ConfigRepository, secretS
   const source = await exists(paths.configFile) ? paths.configFile : path.join(appPath, "config.local.example.json");
   const raw = await readJsonRecord(source);
   if (!raw) return source;
-  const migrated = moveConnectorSecrets(raw);
+  const migrated = splitConnectorSecrets(raw);
   // Mainへ移管済みの資格情報だけをsafeStorageへ移し、次のサービス移管までは他の値を触らない。
-  for (const entry of migrated.secretEntries) await secretStore.set(parseSecretKey(entry.key), entry.value);
+  // legacy configの壊れた/文字種の合わないキー (parseSecretKey/assertNoSecretsが弾く値) で
+  // アプリ全体の起動 (app.whenReady) を落とさないよう、1件ずつ握りつぶして続行する。
+  for (const entry of migrated.secretEntries) {
+    try { await secretStore.set(parseSecretKey(entry.key), entry.value); }
+    catch (error) { console.error(`[dociai:seed] skipping unsaveable secret ${entry.key}`, error); }
+  }
   const current = await configRepository.getPublic();
-  if (!await exists(paths.configRepositoryFile) || !("news" in current.config) || !("topics" in current.config)) {
-    const config = { ...current.config, schemaVersion: raw.schemaVersion ?? 1, connectors: migrated.publicConfig.connectors ?? {}, ...(migrated.publicConfig.news === undefined ? {} : { news: migrated.publicConfig.news }), ...(migrated.publicConfig.topics === undefined ? {} : { topics: migrated.publicConfig.topics }) };
-    await configRepository.save(config, current.revision);
+  // #405 fix: Rendererの設定読込がconfig.local.json(legacy)からconfigRepository(config.json)
+  // 経由に変わったため、personasが空のままだと最初の起動でvalidateConfig()が
+  // 「personasが空です」で落ちて操作卓が起動しなくなる。personasは空配列だと保存自体が
+  // validateConfigのエラーで常にブロックされる (src/config-loader.js) ため、「空」は
+  // fresh install/破損以外ではあり得ず、毎回チェックしてbackfillしても安全。
+  // 一方triggersは空オブジェクト {} が正当な保存済み状態になり得る (validateConfigは
+  // 空triggersを許容する) ため、「空だからbackfillする」をtriggersに適用すると、ユーザーが
+  // 設定UIで全トリガーを削除して保存するたびに毎起動でlegacy configのtriggersが復活して
+  // しまう。triggersの引き継ぎはfresh installのときだけに限定する (connectorsと同じ扱い)。
+  const isFreshInstall = !await exists(paths.configRepositoryFile);
+  const missingNews = !("news" in current.config);
+  const missingTopics = !("topics" in current.config);
+  const missingPersonas = !Array.isArray(current.config.personas) || !current.config.personas.length;
+  if (isFreshInstall || missingNews || missingTopics || missingPersonas) {
+    const config = {
+      ...current.config,
+      schemaVersion: raw.schemaVersion ?? 1,
+      // 各セクションはそれが実際に欠けている場合 (またはfresh install) にのみlegacy configから
+      // 引き継ぐ。以前はガード全体がpersonas/triggers起因で発火するたび、connectors/news/topics
+      // まで無条件に上書きしていたため、UIで空にしただけのtriggersを保存するたびにElectron設定UI
+      // 経由で編集済みのconnectors (と実際のsafeStorage secretRef) が毎起動でlegacy configへ
+      // 巻き戻っていた。
+      ...(isFreshInstall ? { connectors: migrated.publicConfig.connectors ?? {} } : {}),
+      ...((isFreshInstall || missingNews) && migrated.publicConfig.news !== undefined ? { news: migrated.publicConfig.news } : {}),
+      ...((isFreshInstall || missingTopics) && migrated.publicConfig.topics !== undefined ? { topics: migrated.publicConfig.topics } : {}),
+      ...(missingPersonas && migrated.publicConfig.personas !== undefined ? { personas: migrated.publicConfig.personas } : {}),
+      ...(isFreshInstall && migrated.publicConfig.triggers !== undefined ? { triggers: migrated.publicConfig.triggers } : {}),
+    };
+    try { await configRepository.save(config, current.revision); }
+    catch (error) { console.error("[dociai:seed] failed to persist seeded config, continuing with in-memory defaults", error); }
   }
   if (source === paths.configFile && migrated.secretEntries.length) await writePublicConfig(source, migrated.publicConfig);
   return source;
@@ -134,7 +135,7 @@ if (!hasLock) {
           if (request.method !== "GET") return new Response("Method not allowed", { status: 405, headers });
           const raw = await readJsonRecord(rendererConfigSource);
           if (!raw) return new Response("Not found", { status: 404, headers });
-          const body = Buffer.from(`${JSON.stringify(moveConnectorSecrets(raw).publicConfig, null, 2)}\n`);
+          const body = Buffer.from(`${JSON.stringify(splitConnectorSecrets(raw).publicConfig, null, 2)}\n`);
           return new Response(body, { headers: { ...headers, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
         }
         const candidate = path.resolve(appPath, relativePath);

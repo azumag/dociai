@@ -55,7 +55,7 @@ export function validateConfig(cfg) {
       }
       if (c.provider && c.provider !== "mock") {
         if (!c.model) errors.push(`connectors.${id}.model がありません`);
-        if (!c.apiKey && !["openai-compatible", "ollama"].includes(c.provider)) {
+        if (!c.apiKey && !c.apiKeyConfigured && !["openai-compatible", "ollama"].includes(c.provider)) {
           warnings.push(`connectors.${id} にapiKeyがありません。呼び出し時に認証エラーになる可能性があります`);
         }
       }
@@ -140,7 +140,7 @@ export function validateConfig(cfg) {
         if (!src.type) errors.push(`${label}.type がありません`);
         else if (src.type === "todoist") {
           warnings.push(`${label}.type "todoist" は news から分離されました。topics.sources へ移してください`);
-          if (!src.token) errors.push(`${label}.token がありません (Todoist の個人アクセストークン)`);
+          if (!src.token && !src.tokenConfigured) errors.push(`${label}.token がありません (Todoist の個人アクセストークン)`);
           if (!src.projectId) errors.push(`${label}.projectId がありません`);
         } else if (!KNOWN_NEWS_SOURCE_TYPES.includes(src.type)) {
           errors.push(`${label}.type "${src.type}" は未対応です (対応: ${KNOWN_NEWS_SOURCE_TYPES.join(", ")})`);
@@ -178,7 +178,7 @@ export function validateConfig(cfg) {
           errors.push(`${label}.type "${src.type}" は未対応です (対応: ${KNOWN_TOPIC_SOURCE_TYPES.join(", ")})`);
         }
         if (src.type === "todoist") {
-          if (!src.token) errors.push(`${label}.token がありません (Todoist の個人アクセストークン)`);
+          if (!src.token && !src.tokenConfigured) errors.push(`${label}.token がありません (Todoist の個人アクセストークン)`);
           if (!src.projectId) errors.push(`${label}.projectId がありません`);
         }
       });

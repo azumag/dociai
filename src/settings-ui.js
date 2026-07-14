@@ -1,9 +1,10 @@
 // 設定UIエディタ (issue #15)
 // connectors / personas / triggers / context(screenCapture) / voicevox / news / topics / commentSources を
 // UIから追加・編集・削除できる。編集した設定はメモリ上の draft に保持し、「保存して適用」で
-// onApply(config) を呼ぶ。onApply は scripts/serve.py の PUT /config.local.json 経由でディスクへ
-// 保存してから現在のアプリ状態に反映する (src/app/boot.js の applyEditedConfig)。保存に対応しない
-// サーバー (python -m http.server 等) では失敗し、モーダルは閉じずエラーを表示する。
+// onApply(config) を呼ぶ (src/app/boot.js の applyEditedConfig)。保存先はBrowser版なら
+// scripts/serve.py 経由の config.local.json、Electron版なら window.dociai.config/secrets IPC
+// (config.json + safeStorage) で、保存に対応しないサーバー (python -m http.server 等) では失敗し、
+// モーダルは閉じずエラーを表示する。
 // APIキーは localStorage/sessionStorage には書かない (issue #13)。「JSONエクスポート」は
 // ファイルダウンロードによる手動バックアップ/保存失敗時のフォールバック用。
 //
@@ -495,7 +496,7 @@ export class SettingsUI {
   }
 
   // リスト要素のフィールド (オブジェクトマップ版)。onChange で setter 呼び出し。
-  #mapField(label, mapName, key, field, { type = "text", value = "", attrs = {} } = {}) {
+  #mapField(label, mapName, key, field, { type = "text", value = "", placeholder = "", attrs = {} } = {}) {
     const metadata = field === "__id__" ? {} : configUiMetadata(`${mapName}.${key}.${field}`);
     const inputType = metadata.secret && type === "text" ? "password" : type;
     const inputAttrs = { ...attrs, ...(metadata.min != null ? { min: metadata.min } : {}), ...(metadata.max != null ? { max: metadata.max } : {}) };
@@ -504,6 +505,7 @@ export class SettingsUI {
     const input = document.createElement("input");
     input.type = inputType;
     input.value = value ?? "";
+    if (placeholder) input.placeholder = placeholder;
     for (const [k, v] of Object.entries(inputAttrs)) input[k] = v;
     input.addEventListener("input", () => {
       let v = input.value;
@@ -582,7 +584,7 @@ export class SettingsUI {
   }
 
   // 配列要素のフィールド (personas, news.sources, topics.sources)
-  #arrField(label, arrPath, index, field, { type = "text", value = "", attrs = {}, textarea = false, rows = 3 } = {}) {
+  #arrField(label, arrPath, index, field, { type = "text", value = "", placeholder = "", attrs = {}, textarea = false, rows = 3 } = {}) {
     const metadata = configUiMetadata(`${arrPath}.${index}.${field}`);
     const inputType = metadata.secret && type === "text" ? "password" : type;
     const inputAttrs = { ...attrs, ...(metadata.min != null ? { min: metadata.min } : {}), ...(metadata.max != null ? { max: metadata.max } : {}) };
@@ -597,6 +599,7 @@ export class SettingsUI {
       input.type = inputType;
     }
     input.value = value ?? "";
+    if (placeholder) input.placeholder = placeholder;
     for (const [k, v] of Object.entries(inputAttrs)) input[k] = v;
     input.addEventListener("input", () => {
       const arr = this.#getArr(arrPath);
@@ -739,7 +742,7 @@ export class SettingsUI {
       const row2 = document.createElement("div");
       row2.className = "compact-row";
       row2.append(
-        this.#mapField("apiKey", "connectors", id, "apiKey", { value: c.apiKey ?? "", attrs: { spellcheck: "false", autocomplete: "off" } }),
+        this.#mapField("apiKey", "connectors", id, "apiKey", { value: c.apiKey ?? "", placeholder: c.apiKeyConfigured && !c.apiKey ? "設定済み（変更する場合のみ入力）" : "", attrs: { spellcheck: "false", autocomplete: "off" } }),
         this.#mapField("baseUrl", "connectors", id, "baseUrl", { value: c.baseUrl ?? "", attrs: { spellcheck: "false" } }),
         this.#mapField("timeoutMs (ms)", "connectors", id, "timeoutMs", { type: "number", value: c.timeoutMs ?? "" }),
       );
@@ -1159,7 +1162,7 @@ export class SettingsUI {
       const g2 = document.createElement("div");
       g2.className = "card-grid";
       g2.append(this.#arrSelect("type", TOPIC_SOURCE_TYPES, "topics.sources", i, "type", { value: s.type ?? "todoist" }));
-      g2.append(this.#arrField("token (Todoist個人アクセストークン)", "topics.sources", i, "token", { value: s.token ?? "", attrs: { spellcheck: "false", autocomplete: "off" } }));
+      g2.append(this.#arrField("token (Todoist個人アクセストークン)", "topics.sources", i, "token", { value: s.token ?? "", placeholder: s.tokenConfigured && !s.token ? "設定済み（変更する場合のみ入力）" : "", attrs: { spellcheck: "false", autocomplete: "off" } }));
       g2.append(this.#arrField("projectId", "topics.sources", i, "projectId", { value: s.projectId ?? "", attrs: { spellcheck: "false" } }));
       cBody.append(g2);
       this._body.append(c);
@@ -1226,7 +1229,7 @@ export class SettingsUI {
     this._announcer?.announce("設定を保存して適用しています");
     try {
       await this.onApply(clone(this.draft));
-      this.log("設定を config.local.json に保存し、適用しました");
+      this.log("設定を保存し、適用しました");
       this.controller.changed(this.draft);
       this.controller.state.dirty = false;
       this._announcer?.announce("設定を保存して適用しました");

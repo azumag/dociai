@@ -49,7 +49,7 @@ test("formatReleaseNotes describes an unbounded range as a first release when th
   assert.match(markdown, /_None found in commit subjects\._/);
 });
 
-test("generateReleaseNotes against this repository's real git log: no tags exist yet, so it falls back to full history", async () => {
+test("generateReleaseNotes against this repository's real git log: falls back to full history only when no tag is reachable", async () => {
   // CI's checkout runs with the default shallow fetch-depth (1 commit), while a normal
   // developer clone has full history — assert only what's true in both: the fixture-repo
   // test above already proves the exact commit-range/reference-extraction logic in detail.
@@ -57,11 +57,21 @@ test("generateReleaseNotes against this repository's real git log: no tags exist
   const isShallow = stdout.trim() === "true";
 
   const result = await generateReleaseNotes({ version: "0.1.0", toRef: "HEAD", repoRoot, repoSlug: "azumag/dociai" });
-  assert.equal(result.previousTag, null, "this repository has never cut a tag as of #74");
+  if (isShallow) {
+    assert.equal(result.previousTag, null, "a shallow checkout (CI's default fetch-depth) cannot see any tags");
+  } else {
+    // This repo has cut releases since #74 (v0.1.1+), so a full clone must find the most
+    // recent one reachable from HEAD^ rather than falling back to a full-history first release.
+    assert.match(result.previousTag ?? "", /^v\d+\.\d+\.\d+$/, "a full clone should resolve the most recent tag reachable from HEAD");
+  }
   assert.ok(result.commits.length >= 1, `expected at least the current commit, got ${result.commits.length}`);
   if (!isShallow) {
-    assert.ok(result.commits.length > 50, `expected a substantial real commit history, got ${result.commits.length}`);
-    assert.ok(result.referencedNumbers.includes(150), "PR #150 should be discoverable in this repo's real commit log");
+    // Hardcoding a specific PR number or commit-count threshold here goes stale the moment this
+    // repo cuts another tag (exactly what made the previous version of this assertion wrong) — the
+    // fixture-repo test above already proves the exact extraction logic against synthetic data.
+    // This just confirms the real-repo run produces a well-formed, deduped, ascending-sorted array.
+    assert.ok(Array.isArray(result.referencedNumbers));
+    assert.deepEqual(result.referencedNumbers, [...new Set(result.referencedNumbers)].sort((a, b) => a - b), "referencedNumbers must stay deduped and sorted against real commit subjects too");
   }
   assert.match(result.markdown, /^# 0\.1\.0/);
   assert.match(result.markdown, /## Manual notes/);

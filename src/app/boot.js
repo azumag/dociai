@@ -21,7 +21,8 @@ import { deriveSimulationStatus } from "../twitch-ui/history/history-store.js";
 import { AppRuntime } from "./app-runtime.js";
 import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } from "./runtime-factory.js";
 import { createAppActions } from "./app-actions.js";
-import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron } from "../platform/electron-services.js";
+import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron } from "../platform/electron-services.js";
+import { splitConnectorSecrets } from "../config/config-secrets-split.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -132,6 +133,29 @@ function reportConfigError(e) {
   logEvent(`設定の読み込みに失敗: ${scrub(e.message)}`, "error");
   for (const d of details) logEvent(`- ${scrub(d)}`, "error");
   renderConfigStatus();
+}
+
+// Electron版はconfig.local.json(read-only)ではなく、Main側のconfig.json + safeStorage secretsを
+// window.dociai.config/secrets 経由で読み書きする (#405 fix)。戻り値の形は parseAndValidate() と
+// 揃えてあり、そのまま applyLoadedConfig()/reportConfigError() に渡せる。
+async function loadFromElectronConfig() {
+  const result = await getConfigThroughElectron();
+  if (!result?.ok) throw new Error(`Electron設定の取得に失敗しました (${result?.error?.code ?? "UNKNOWN"}): ${result?.error?.message ?? "unknown error"}`);
+  const { config, revision, warnings: mainWarnings = [] } = result.value;
+  const { errors, warnings } = validateConfig(config);
+  if (errors.length) {
+    const err = new Error("設定エラー (Electron設定ストア)");
+    err.validationErrors = errors;
+    throw err;
+  }
+  // revisionはvalidateConfigを通過した (=applyLoadedConfigへ渡る) 場合にのみ更新する。失敗した
+  // 読込のrevisionを反映すると、次の保存がCONFIG_CONFLICTチェックなしでそのrevisionを使ってしまう。
+  state.configRevision = revision;
+  return { config, warnings: [...mainWarnings, ...warnings], source: "Electron設定ストア (config.json)", migration: { steps: [], secretCandidates: [], revision } };
+}
+
+function loadCurrentConfig() {
+  return hasElectronConfigService() ? loadFromElectronConfig() : loadFromServer();
 }
 
 // ---- 描画 ----
@@ -537,6 +561,33 @@ function renderDebug() {
 
 // ---- 設定UI (issue #15) ----
 
+// connectors.*.apiKey / topics.sources[].token を secrets IPC へ分離してから公開configを保存する。
+// config.save を先に行い、secrets.set はその後にする: 逆順だとconfig.saveがCONFIG_CONFLICTで
+// 失敗した場合に「保存は失敗扱いなのにsecretだけ差し替わる」不整合が起きるため。
+async function saveToElectronConfig(processedConfig) {
+  const { publicConfig, secretEntries, invalidIds } = splitConnectorSecrets(processedConfig);
+  if (invalidIds.length) {
+    throw new Error(`保存できないコネクタIDがあります: ${invalidIds.map((entry) => entry.path).join(", ")} (半角英数字と . _ - のみ使用できます)`);
+  }
+  // revisionを一度も読み込めていない状態での保存はCONFIG_CONFLICTチェックが効かず、他window/
+  // 前回起動からの更新を無条件に上書きしてしまう。通常はloadCurrentConfig()の成功なしに設定UIを
+  // 開けないため起こらないはずだが、念のため明示的に読込直しを促す。
+  if (!state.configRevision) throw new Error("設定を一度も読み込めていないため保存できません。「サーバーから読込」を試してください");
+  const saveResult = await saveConfigThroughElectron(publicConfig, state.configRevision);
+  if (!saveResult?.ok) {
+    if (saveResult?.error?.code === "CONFIG_CONFLICT") {
+      throw new Error("設定が別のwindowまたは前回起動時から更新されています。「サーバーから読込」で最新の設定を読み込み直してから編集をやり直してください");
+    }
+    throw new Error(`設定の保存に失敗しました (${saveResult?.error?.code ?? "UNKNOWN"}): ${saveResult?.error?.message ?? "unknown error"}`);
+  }
+  state.configRevision = saveResult.value.revision;
+  for (const entry of secretEntries) {
+    const secretResult = await setSecretThroughElectron(entry.key, entry.value);
+    if (!secretResult?.ok) logEvent(`シークレットの保存に失敗しました (${entry.key}): ${scrub(secretResult?.error?.message ?? "unknown error")}`, "error");
+  }
+  return publicConfig;
+}
+
 async function applyEditedConfig(rawConfig) {
   const processed = processConfig(rawConfig);
   if (!processed.ok) throw new Error(`設定pipeline失敗: ${processed.stage}`);
@@ -545,13 +596,16 @@ async function applyEditedConfig(rawConfig) {
     for (const e of errors) logEvent(`設定エディタ: ${scrub(e)}`, "error");
     throw new Error("設定エラーのため保存を中止しました");
   }
-  await saveToServer(processed.config);
-  const config = processed.config;
+  const usesElectronConfig = hasElectronConfigService();
+  let config = processed.config;
+  if (usesElectronConfig) config = await saveToElectronConfig(processed.config);
+  else await saveToServer(processed.config);
   // このパスは設定エディタ自身の保存フロー (SettingsUI#apply → onApply) から呼ばれるため、
   // applyLoadedConfig の「設定エディタが開いていたら閉じるか確認する」ガードは常に自分自身に
   // 発火してしまい、保存の途中で二重の確認ダイアログが出て保存が失敗扱いになる (settingsUI は
   // まだ閉じていない状態でここに来る)。ここでは呼び出し元自身が保存後に閉じるので不要。
-  const result = await applyLoadedConfig({ config, warnings: [...processed.notes, ...warnings], source: "UI編集 (config.local.json に保存済み)", migration: { steps: processed.migrations, secretCandidates: processed.secretCandidates, revision: processed.hash }, guardSettingsEditor: false });
+  const source = usesElectronConfig ? "UI編集 (Electron設定ストアに保存済み)" : "UI編集 (config.local.json に保存済み)";
+  const result = await applyLoadedConfig({ config, warnings: [...processed.notes, ...warnings], source, migration: { steps: processed.migrations, secretCandidates: processed.secretCandidates, revision: processed.hash }, guardSettingsEditor: false });
   if (!result.ok) throw new Error(`設定の適用に失敗しました (${result.stage})`);
 }
 
@@ -696,7 +750,7 @@ function bindUI() {
     getScreenSources: () => screenSources,
     log: (m, level) => logEvent(m, level),
     scrub,
-    loadServer: loadFromServer,
+    loadServer: loadCurrentConfig,
     loadFile: loadFromFile,
     applyLoadedConfig,
     reportConfigError,
@@ -743,7 +797,7 @@ function boot() {
   renderAll();
   setupUpdateStatus();
   logEvent("dociai 操作卓を起動しました。設定を読み込んでください");
-  loadFromServer()
+  loadCurrentConfig()
     .then(applyLoadedConfig)
     .catch((e) => logEvent(`自動読込は見送り: ${scrub(e.message)}`, "warn"));
   addEventListener("pagehide", () => {

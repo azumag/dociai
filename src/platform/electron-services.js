@@ -74,6 +74,15 @@ export async function quitAndInstallUpdateThroughElectron() { return globalThis.
 // Renderer/Main boundary.
 export function subscribeUpdateStatusThroughElectron(listener) { return globalThis.dociai.events.subscribe("update:status", listener); }
 
+// Electron設定ストア (config.json in Main, safeStorage経由のsecrets) — hasElectronUpdateService()
+// と同じ「IPC面の存在確認」+「そのまま呼ぶだけ」の流儀。ok/errorの分岐は呼び出し側 (boot.js) で行う。
+export function hasElectronConfigService() { return typeof globalThis.dociai?.config?.get === "function"; }
+export async function getConfigThroughElectron() { return globalThis.dociai.config.get(); }
+export async function saveConfigThroughElectron(config, expectedRevision) {
+  return globalThis.dociai.config.save({ config, ...(expectedRevision !== undefined ? { expectedRevision } : {}) });
+}
+export async function setSecretThroughElectron(key, value) { return globalThis.dociai.secrets.set({ key, value }); }
+
 export class ElectronTwitchSource {
   id = "twitch"; label = "Twitch";
   constructor(config = {}, { onStatus = () => {} } = {}) { this.config = config; this.onStatus = onStatus; this.unsubComment = null; this.unsubStatus = null; this.status = { state: "idle", channels: [] }; }
