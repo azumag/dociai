@@ -343,6 +343,8 @@ a { color: var(--focus); }
   background: var(--well);
 }
 .integration-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.integration-card-head strong { min-width: 0; overflow-wrap: anywhere; }
+.integration-card-head .integration-status { flex: none; }
 .integration-card-detail { color: var(--ink-dim); font-size: 11px; overflow-wrap: anywhere; }
 .integration-card-actions { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
 .integration-card-actions button { padding: 2px 7px; font-size: 11px; }
@@ -643,7 +645,7 @@ a { color: var(--focus); }
 }
 .rack-list li:last-child { border-bottom: none; }
 .rack-list .grow { flex: 1; min-width: 0; }
-.rack-list .name { font-weight: 700; font-size: 12px; }
+.rack-list .name { font-weight: 700; font-size: 12px; overflow-wrap: anywhere; }
 .rack-list .detail {
   font-family: var(--mono);
   font-size: 10px;

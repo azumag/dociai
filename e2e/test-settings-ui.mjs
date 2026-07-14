@@ -181,7 +181,7 @@ try {
   );
   check("適用でモーダルが閉じる", true);
   const logText = await page.$eval("#event-log", (el) => el.textContent);
-  check("適用ログが残る", logText.includes("config.local.json に保存し、適用しました"), logText.slice(0, 120).replace(/\n/g, " "));
+  check("適用ログが残る", logText.includes("設定を保存し、適用しました"), logText.slice(0, 120).replace(/\n/g, " "));
 
   // 11. コネクタ一覧パネルに new_connector_1 が出る
   const listText = await page.$eval("#connector-list", (el) => el.textContent);
