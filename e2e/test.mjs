@@ -74,7 +74,7 @@ try {
     heading: document.querySelector(".panel-comments-primary h1")?.textContent,
     center: document.querySelector("#comment-log")?.closest(".col")?.classList.contains("col-center"),
     readerStatus: document.querySelector("#comment-reader-status")?.textContent,
-    controlsLeft: document.querySelector("#speech-pending")?.closest(".col")?.classList.contains("col-left"),
+    controlsLeft: document.querySelector("#speech-current")?.closest(".col")?.classList.contains("col-left"),
   }));
   check("コメント読み上げが中央の主画面", commentFirstUi.heading === "コメント読み上げ" && commentFirstUi.center, JSON.stringify(commentFirstUi));
   check("読み上げ状態とキュー操作が左に集約", commentFirstUi.controlsLeft && commentFirstUi.readerStatus.includes("読み上げ"), commentFirstUi.readerStatus);
