@@ -3,8 +3,13 @@ name: Release
 # Tag-triggered release pipeline (#74). Deliberately does NOT duplicate the build/sign/verify
 # steps from .github/workflows/package.yml (#72/#73) — it calls that workflow directly via
 # `workflow_call` and only adds what a *release* needs on top of "PR-quality package build":
-# tag/version validation, channel classification, a hard signing-required gate, cross-platform
-# manifest consolidation, release notes, and publishing to a GitHub Release.
+# tag/version validation, channel classification, an opportunistic signing check (warns but does
+# not block when no signing credential is configured — see the "Check signing credentials" step),
+# cross-platform manifest consolidation, release notes, and publishing to a GitHub Release.
+#
+# Triggered either by pushing a `vX.Y.Z` tag directly, or (the common path today) automatically by
+# .github/workflows/auto-release.yml on every push to main — see that workflow and docs/release.md
+# for the auto-versioning behavior.
 #
 # validate-tag (cheap, ubuntu-latest, fails fast) -> package (reused package.yml, macOS+Windows)
 #   -> publish (verify manifest completeness, create/replace the GitHub Release)
@@ -61,25 +66,29 @@ jobs:
           echo "resolved_tag=$TAG" >> "$GITHUB_OUTPUT"
           node scripts/release/validate-version-tag.mjs "$TAG"
 
-      # Enforced here, before the expensive macOS/Windows package job even starts — not left to
-      # package.yml's own graceful unsigned fallback. package.yml's signing steps only *skip*
-      # (exit 0) when secrets are absent, by design, so an ordinary PR build never fails just for
-      # being unsigned; a release must never publish an unsigned artifact, so this workflow adds
-      # its own hard gate on top.
-      - name: Require signing credentials for release
+      # Project decision (2026-07-13): this repo has no real Apple Developer ID / Windows
+      # code-signing certificate yet, and releases are now cut continuously — every merge to main,
+      # via auto-release.yml — rather than by a deliberate manual tag. Blocking every release on
+      # credentials that don't exist would mean no release ever publishes, so signing is
+      # opportunistic here, not required: package.yml's own steps already skip signing gracefully
+      # (exit 0) when a secret is absent, and this step only WARNS so the gap stays visible in
+      # every run's log instead of being silently unsigned. Once real credentials are added as
+      # repository secrets (see docs/signing.md), releases start being signed automatically with
+      # no workflow changes needed — this step, and the publish job's signed-status computation
+      # below, both key off the exact same secret-presence check package.yml's own steps use.
+      - name: Check signing credentials (unsigned releases are allowed)
         run: |
           missing=0
           if [ -z "${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}" ]; then
-            echo "::error::MACOS_CERTIFICATE_P12_BASE64 is not set; refusing to publish an unsigned macOS release artifact."
+            echo "::warning::MACOS_CERTIFICATE_P12_BASE64 is not set; this release's macOS artifact will be UNSIGNED (Gatekeeper will warn on first launch). See docs/signing.md to add a real Apple Developer ID credential."
             missing=1
           fi
           if [ -z "${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}" ]; then
-            echo "::error::WINDOWS_CERTIFICATE_PFX_BASE64 is not set; refusing to publish an unsigned Windows release artifact."
+            echo "::warning::WINDOWS_CERTIFICATE_PFX_BASE64 is not set; this release's Windows artifact will be UNSIGNED (SmartScreen will warn on first launch). See docs/signing.md to add a real code-signing certificate."
             missing=1
           fi
           if [ "$missing" = "1" ]; then
-            echo "::error::See docs/release.md and docs/signing.md for how to configure signing secrets before releasing."
-            exit 1
+            echo "::warning::Publishing this release WITHOUT code signing on at least one platform, by explicit project decision — not a failure."
           fi
 
       # In electron-builder 26, when a real certificate is present and `verifyUpdateCodeSignature`
@@ -141,14 +150,15 @@ jobs:
 
       - name: Verify manifest completeness across all targets, build publish-manifest.json + SHA256SUMS
         env:
-          # Reaching this step already implies both signing secrets were present (validate-tag's
-          # "Require signing credentials for release" gate) AND package.yml's own
-          # verify-macos-signing.sh/verify-windows-signing.ps1 steps passed (they fail the
-          # `package` job outright when signing was attempted but didn't actually succeed, which
-          # would have skipped this job via `needs:`) — so "true" is a correct, not just assumed,
-          # value here.
-          DOCIAI_MACOS_SIGNED: "true"
-          DOCIAI_WINDOWS_SIGNED: "true"
+          # Signing is opportunistic (see validate-tag's "Check signing credentials" step above),
+          # so "signed" in the manifest must reflect whether the credential actually existed for
+          # THIS run — not be hardcoded true. This is the exact same secret-presence check
+          # package.yml's own signing steps use to decide whether to sign at all, so a "true" here
+          # is still a correct, not just assumed, value whenever it appears; when a secret is
+          # absent, package.yml's package job already produced (and this run downloaded) a real
+          # unsigned artifact, and publish-manifest.mjs will now correctly record that.
+          DOCIAI_MACOS_SIGNED: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+          DOCIAI_WINDOWS_SIGNED: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
         run: node scripts/release/publish-manifest.mjs release-artifacts
 
       - name: Generate release notes

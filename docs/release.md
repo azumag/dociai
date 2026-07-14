@@ -1,26 +1,66 @@
-# Release process (#74)
+# Release process (#74, #177-followup auto-release)
 
 Parent: #44. Depends on #72 (electron-builder packaging), #73 (macOS/Windows code signing +
-notarization). This documents `.github/workflows/release.yml`, the three
-`scripts/release/{validate-version-tag,generate-release-notes,publish-manifest}.mjs` scripts it
-runs, and the tag/rollback/redistribution procedure — plus, like `docs/signing.md`, exactly what
-has and has not been exercised against a real GitHub Actions run in this repository's development
-sandbox (see "What is verified, and how" at the bottom before trusting any claim about an actual
-tag push or `gh release create` having run).
+notarization). This documents `.github/workflows/{auto-release,release}.yml`, the three
+`scripts/release/{validate-version-tag,generate-release-notes,publish-manifest}.mjs` scripts
+release.yml runs, and the tag/rollback/redistribution procedure — plus, like `docs/signing.md`,
+exactly what has and has not been exercised against a real GitHub Actions run in this repository's
+development sandbox (see "What is verified, and how" at the bottom before trusting any claim about
+an actual tag push or `gh release create` having run).
 
-## Overview
+## Continuous release (project decision, 2026-07-13)
+
+Every push to `main` triggers `.github/workflows/auto-release.yml`, which:
+
+1. Bumps `package.json`'s patch version (via `npm version patch --no-git-tag-version`, which also
+   updates `package-lock.json`'s recorded version).
+2. Commits that bump directly to `main` (author `github-actions[bot]`, message
+   `chore(release): vX.Y.Z`) and tags the resulting commit `vX.Y.Z`.
+3. Dispatches `release.yml` (below) for that tag via `gh workflow run release.yml -f tag=vX.Y.Z`
+   — a real `workflow_dispatch` call, not relying on the tag push itself to trigger it (GitHub
+   Actions never lets a `GITHUB_TOKEN`-authored push trigger further `on: push` workflow runs,
+   which is also what keeps this workflow from re-triggering itself on its own bump commit — see
+   the workflow file's own comments for the exact mechanism and the docs link).
+
+This means **every merge to `main` produces a new GitHub Release** with no manual tagging step.
+There is currently no path/commit-message filter (e.g. skipping docs-only merges) — if that
+becomes noisy, it's a small follow-up to `auto-release.yml`'s trigger condition, not a redesign.
+
+A tag can still be pushed and released manually (or `workflow_dispatch`ed directly against
+`release.yml`) exactly as before; `auto-release.yml` is simply what drives that same mechanism
+automatically today.
+
+### Signing is opportunistic, not required
+
+This repository has no real Apple Developer ID or Windows code-signing certificate configured
+(see `docs/signing.md`). Given releases are now continuous, gating every release on credentials
+that don't exist would mean **no release ever publishes** — so `release.yml`'s `validate-tag` job
+only **warns** (via `::warning::`, visible in every run's log) when a signing secret is absent,
+and still proceeds to package/publish an **unsigned** artifact for that platform. Installing an
+unsigned build triggers a Gatekeeper warning on macOS and a SmartScreen warning on Windows — both
+bypassable (macOS: right-click → Open; Windows: "More info" → "Run anyway") but visible to anyone
+installing it.
+
+Once real `MACOS_CERTIFICATE_P12_BASE64`/`WINDOWS_CERTIFICATE_PFX_BASE64` (and the accompanying
+notarization secrets — see `docs/signing.md`) are added as repository secrets, releases start
+being signed automatically on the very next run — no workflow or code changes needed. The
+`publish-manifest.json`'s per-target `signed` field (see "Manifest integrity" below) always
+reflects what actually happened for that specific run, so a signed and an unsigned release are
+both self-documenting on their own.
+
+## Overview (release.yml itself)
 
 ```
-git push origin vX.Y.Z
+git push origin vX.Y.Z   (or: auto-release.yml doing the same, automatically, on every main push)
   -> .github/workflows/release.yml
        validate-tag   (ubuntu-latest, cheap, fails fast)
          - scripts/release/validate-version-tag.mjs: tag vX.Y.Z must equal package.json's
            "version" field exactly, or the run fails before anything else happens.
          - classifies the release channel (stable vs beta) from the tag itself.
-         - requires MACOS_CERTIFICATE_P12_BASE64 and WINDOWS_CERTIFICATE_PFX_BASE64 to both be
-           set as repository secrets, or the run fails here — a release must never publish an
-           unsigned artifact (contrast package.yml's PR path, which is *designed* to build
-           unsigned when secrets are absent).
+         - checks whether MACOS_CERTIFICATE_P12_BASE64 / WINDOWS_CERTIFICATE_PFX_BASE64 are set as
+           repository secrets; warns (does not fail) for whichever is missing — see "Signing is
+           opportunistic, not required" above. Contrast package.yml's PR path, which is *designed*
+           to build unsigned when secrets are absent regardless of this workflow's own behavior.
        package        (workflow_call into .github/workflows/package.yml, unchanged job bodies)
          - the exact same package-macos/package-windows jobs #72/#73 already run on every PR,
            reused via `uses: ./.github/workflows/package.yml` so this file never duplicates their
@@ -86,11 +126,13 @@ behind for a subsequent step to accidentally upload. This is the concrete implem
 releaseが部分的なstable配布を残さない": the `gh release create` step never runs at all unless this
 check passed for every required target in the same run.
 
-The resulting `publish-manifest.json` also records `signed: true/false` per target. As of this
-issue, reaching the `publish` job already guarantees signing occurred (see "Overview" above), so
-today's release.yml always writes `true` there — the field exists so a manifest is
-self-documenting on its own, without cross-referencing which workflow run produced it, satisfying
-this issue's "version、commit SHA、checksum、署名状態をmanifestで確認できる" acceptance criterion.
+The resulting `publish-manifest.json` also records `signed: true/false` per target, computed from
+whether the corresponding signing secret was actually present for that run (see "Signing is
+opportunistic, not required" above) — not hardcoded, since reaching the `publish` job no longer
+implies signing happened. The field exists so a manifest is self-documenting on its own, without
+cross-referencing which workflow run produced it, satisfying this issue's "version、commit SHA、
+checksum、署名状態をmanifestで確認できる" acceptance criterion — today that will typically read
+`signed: false` for both targets until real signing credentials are configured.
 
 ## Release notes
 
