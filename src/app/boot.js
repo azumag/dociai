@@ -370,7 +370,9 @@ function renderTwitchChatStatus() {
   if (!enabled) return;
   const status = state.twitchStatus;
   if (!status) { el.textContent = "Twitch: 接続準備中"; return; }
-  const channels = (status.channels ?? []).map((entry) => `#${entry.channel}:${entry.status}`).join(" / ");
+  const channels = (status.channels ?? [])
+    .map((entry) => (typeof entry === "string" ? `#${entry}` : `#${entry.channel}:${entry.status}`))
+    .join(" / ");
   const retrySeconds = status.nextRetryAt ? Math.max(0, Math.ceil((status.nextRetryAt - Date.now()) / 1000)) : null;
   const health = status.health?.status ?? status.state;
   const message = status.health?.message ?? "";
