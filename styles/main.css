@@ -251,6 +251,11 @@ a { color: var(--focus); }
   border-top: 1px solid var(--edge);
   border-radius: 0;
   padding: 12px 14px;
+  /* .col は display:grid の実装上の単一カラム — グリッドアイテムは overflow:visible
+     (既定) だと内容に応じた最小幅を自動確保しようとし、.col の固定幅を突き破って広がった
+     ぶんが .col の overflow:hidden で右端だけ見た目上切り取られる (グリッドの blowout)。
+     min-width:0 でその自動最小幅を無効化し、実際に .col の幅に収まらせる。 */
+  min-width: 0;
 }
 .panel:first-child { border-top: none; }
 
