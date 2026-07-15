@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { personaTriggerIdsForDisplay } from "../../src/ui/persona-trigger-display.js";
 import { createAppState } from "../../src/app/app-state.js";
 import { AppStore } from "../../src/app/app-store.js";
 import { bindConsoleUI } from "../../src/ui/bindings.js";
 import { ElementRegistry } from "../../src/ui/element-registry.js";
+
+test("persona trigger display follows settings definition order and retains missing references", () => {
+  assert.deepEqual(
+    personaTriggerIdsForDisplay(["hotkey", "mention", "missing"], { mention: {}, random: {}, hotkey: {} }),
+    ["mention", "hotkey", "missing"],
+  );
+  assert.deepEqual(personaTriggerIdsForDisplay([], { mention: {} }), []);
+});
 
 test("AppStore reducer snapshots are immutable and subscribers are isolated", () => {
   const store = new AppStore(createAppState({ generation: 1, thinking: new Set(["p1"]) }));

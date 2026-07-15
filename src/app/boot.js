@@ -23,6 +23,7 @@ import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } fr
 import { createAppActions } from "./app-actions.js";
 import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron } from "../platform/electron-services.js";
 import { splitConnectorSecrets } from "../config/config-secrets-split.js";
+import { personaTriggerIdsForDisplay } from "../ui/persona-trigger-display.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -288,7 +289,8 @@ function renderPersonas() {
   const personas = (personaRouter?.list() ?? []).map((p) => {
     const cooldown = personaRouter.cooldownRemaining(p);
     const pState = personaState(p);
-    return { ...p, state: pState, dotColor: p.enabled && pState === "ready" ? personaColor(p.id) : "", detail: `${p.connector} / triggers: ${(p.triggers ?? []).join(", ") || "なし"}${cooldown > 0 ? ` / CD ${Math.ceil(cooldown)}s` : ""}` };
+    const triggerIds = personaTriggerIdsForDisplay(p.triggers, state.config?.triggers);
+    return { ...p, state: pState, dotColor: p.enabled && pState === "ready" ? personaColor(p.id) : "", detail: `${p.connector} / triggers: ${triggerIds.join(", ") || "なし"}${cooldown > 0 ? ` / CD ${Math.ceil(cooldown)}s` : ""}` };
   });
   consoleView.renderPersonas(personas, {
     setPersonaEnabled: (id, enabled) => { const persona = personas.find((entry) => entry.id === id); personaRouter.setEnabled(id, enabled); logEvent(`ペルソナ「${persona.name}」を${enabled ? "有効化" : "無効化"}しました`); },
