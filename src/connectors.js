@@ -14,6 +14,14 @@ const BASE_URLS = {
   minimax: "https://api.minimax.io/anthropic",
 };
 
+const DEFAULT_MAX_TOKENS = 300;
+const MAX_MAX_TOKENS = 32768;
+
+function boundedMaxTokens(value, fallback = DEFAULT_MAX_TOKENS) {
+  const parsed = Number(value ?? fallback);
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(MAX_MAX_TOKENS, Math.floor(parsed))) : fallback;
+}
+
 // 秒未満のtimeoutMsをそのまま切り捨てると「0秒でタイムアウトしました」という
 // 誤解を招く表示になる (例: ミリ秒のつもりで秒の値を入力した設定ミス)。
 function formatTimeout(ms) {
@@ -175,6 +183,7 @@ class OpenAICompatibleConnector {
     this.model = cfg.model;
     this.baseUrl = (cfg.baseUrl ?? BASE_URLS[cfg.provider] ?? BASE_URLS.openai).replace(/\/$/, "");
     this.timeoutMs = cfg.timeoutMs ?? 30000;
+    this.maxTokens = boundedMaxTokens(cfg.maxTokens);
     this.retries = cfg.retries ?? 1;
     this.log = log;
     this.#apiKey = cfg.apiKey ?? "";
@@ -199,7 +208,7 @@ class OpenAICompatibleConnector {
     return chatWithRetry(this.id, this.retries, this.log, (...args) => this.#chatOnce(...args), messages, opts);
   }
 
-  async #chatOnce(messages, { maxTokens = 300, temperature, signal: parentSignal } = {}) {
+  async #chatOnce(messages, { maxTokens, temperature, signal: parentSignal } = {}) {
     const request = requestSignal(parentSignal, this.timeoutMs);
     let res;
     try {
@@ -209,7 +218,10 @@ class OpenAICompatibleConnector {
         body: JSON.stringify({
           model: this.model,
           messages,
-          max_tokens: maxTokens,
+          max_tokens: boundedMaxTokens(maxTokens, this.maxTokens),
+          // dociaiは内部思考を表示・読み上げない。OllamaのOpenAI互換APIでは
+          // thinkingモデルに最終回答用の予算を残すため、reasoningを明示的に無効化する。
+          ...(this.provider === "ollama" ? { reasoning_effort: "none" } : {}),
           ...(temperature != null ? { temperature } : {}),
         }),
         signal: request.signal,
@@ -266,6 +278,7 @@ class MiniMaxConnector {
     this.model = cfg.model;
     this.baseUrl = (cfg.baseUrl ?? BASE_URLS.minimax).replace(/\/$/, "");
     this.timeoutMs = cfg.timeoutMs ?? 30000;
+    this.maxTokens = boundedMaxTokens(cfg.maxTokens);
     this.retries = cfg.retries ?? 1;
     this.log = log;
     this.#apiKey = cfg.apiKey ?? "";
@@ -279,7 +292,7 @@ class MiniMaxConnector {
     return chatWithRetry(this.id, this.retries, this.log, (...args) => this.#chatOnce(...args), messages, opts);
   }
 
-  async #chatOnce(messages, { maxTokens = 300, temperature, signal: parentSignal } = {}) {
+  async #chatOnce(messages, { maxTokens, temperature, signal: parentSignal } = {}) {
     const { system, messages: anthropicMessages } = toAnthropicMessages(messages);
     const request = requestSignal(parentSignal, this.timeoutMs);
     let res;
@@ -294,7 +307,7 @@ class MiniMaxConnector {
         body: JSON.stringify({
           model: this.model,
           messages: anthropicMessages,
-          max_tokens: maxTokens,
+          max_tokens: boundedMaxTokens(maxTokens, this.maxTokens),
           ...(system ? { system } : {}),
           ...(temperature != null ? { temperature } : {}),
         }),

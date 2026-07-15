@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { build } from "esbuild";
+import { ConnectorError, createConnector } from "../../src/connectors.js";
 
 async function loadModules() {
   const result = await build({
@@ -49,9 +50,88 @@ test("AiService resolves secrets in Main, normalizes OpenAI response, and never 
     assert.equal(seen[0].url, "https://openrouter.ai/api/v1/chat/completions");
     assert.equal(seen[0].headers.Authorization, "Bearer test-secret");
     assert.equal(seen[0].headers["HTTP-Referer"], "https://dociai.local");
+    assert.equal(seen[0].body.max_tokens, 300);
     assert.doesNotMatch(JSON.stringify(result), /test-secret/);
     assert.doesNotMatch(JSON.stringify(seen[0].body), /test-secret/);
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("AiService disables Ollama reasoning, honors connector maxTokens, and never exposes reasoning as the answer", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    const bodies = [];
+    const { configRepository, secretStore } = dependencies({ local: { provider: "ollama", model: "gemma4:12b", maxTokens: 4096, retries: 0 } });
+    const service = new modules.AiService(configRepository, secretStore, async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ choices: [{ message: { reasoning: "private chain", content: " final answer " } }] }), { status: 200 });
+    });
+    assert.equal((await service.chat(input("local"))).text, "final answer");
+    assert.equal(bodies[0].reasoning_effort, "none");
+    assert.equal(bodies[0].max_tokens, 4096);
+
+    const reasoningOnly = new modules.AiService(configRepository, secretStore, async () => new Response(JSON.stringify({ choices: [{ message: { reasoning: "must stay private", content: "" } }] }), { status: 200 }));
+    await assert.rejects(reasoningOnly.chat(input("local")), (error) => error.code === "EMPTY" && !error.message.includes("must stay private"));
+
+    const encoder = new TextEncoder();
+    const streamBodies = [];
+    const streamTokens = [];
+    const streaming = new modules.AiService(configRepository, secretStore, async (_url, init) => {
+      streamBodies.push(JSON.parse(init.body));
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning":"private stream"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"public"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":" answer"}}]}\n\n'));
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }, (event) => streamTokens.push(event.text));
+    assert.equal((await streaming.chat(input("local", { stream: true }))).text, "public answer");
+    assert.deepEqual(streamTokens, ["public", " answer"]);
+    assert.equal(streamBodies[0].reasoning_effort, "none");
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("browser connector applies Ollama-only reasoning controls without exposing reasoning-only output", async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  try {
+    globalThis.fetch = async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ choices: [{ message: { reasoning: "private", content: bodies.length === 1 ? " answer " : "" } }] }), { status: 200 });
+    };
+    const ollama = createConnector("local", { provider: "ollama", model: "gemma4:12b", maxTokens: 2048, retries: 0 });
+    assert.equal((await ollama.chat([{ role: "user", content: "hello" }])).text, "answer");
+    assert.equal(bodies[0].reasoning_effort, "none");
+    assert.equal(bodies[0].max_tokens, 2048);
+
+    const compatible = createConnector("remote", { provider: "openai-compatible", model: "model", apiKey: "test", retries: 0 });
+    await assert.rejects(compatible.chat([{ role: "user", content: "hello" }]), (error) => error instanceof ConnectorError && error.kind === "empty" && !error.message.includes("private"));
+    assert.equal("reasoning_effort" in bodies[1], false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("browser MiniMax connector honors configured maxTokens and per-call overrides", async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  try {
+    globalThis.fetch = async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ content: [{ type: "text", text: "answer" }] }), { status: 200 });
+    };
+    const configured = createConnector("mini", { provider: "minimax", model: "MiniMax-M3", apiKey: "test", maxTokens: 4096, retries: 0 });
+    await configured.chat([{ role: "user", content: "hello" }]);
+    await configured.chat([{ role: "user", content: "hello" }], { maxTokens: 1024 });
+    const defaulted = createConnector("mini-default", { provider: "minimax", model: "MiniMax-M3", apiKey: "test", retries: 0 });
+    await defaulted.chat([{ role: "user", content: "hello" }]);
+    assert.deepEqual(bodies.map((body) => body.max_tokens), [4096, 1024, 300]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("AiService delivers SSE tokens with request/generation and rejects empty streams", async () => {

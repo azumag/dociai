@@ -107,6 +107,18 @@ try {
   const connText = await visibleText(page);
   const hasConnector = connText.includes("openai_main") || connText.includes("mock_main") || connText.includes("ollama");
   check("コネクタ一覧に既存IDが表示される", hasConnector, connText.slice(0, 120).replace(/\n/g, " "));
+  const connectorLimits = await page.evaluate(() => {
+    const maxTokens = document.querySelector('[data-config-path="connectors.mock_main.maxTokens"]');
+    const timeout = document.querySelector('[data-config-path="connectors.mock_main.timeoutMs"]');
+    const timeoutLabel = timeout?.getAttribute("aria-labelledby") ? document.getElementById(timeout.getAttribute("aria-labelledby"))?.textContent : "";
+    return { min: maxTokens?.min, max: maxTokens?.max, step: maxTokens?.step, timeoutLabel };
+  });
+  check("コネクタ maxTokens の境界と timeoutMs の単位が表示される", connectorLimits.min === "1" && connectorLimits.max === "32768" && connectorLimits.step === "1" && connectorLimits.timeoutLabel.includes("(ms)"), JSON.stringify(connectorLimits));
+  await page.evaluate(() => {
+    const input = document.querySelector('[data-config-path="connectors.mock_main.maxTokens"]');
+    input.value = "32768";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
 
   // 4. ペルソナタブ
   await page.click('.settings-sidebar button[data-tab="personas"]');
@@ -194,6 +206,7 @@ try {
   const diskConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
   check("config.local.json に new_connector_1 が書き込まれる", !!diskConfig.connectors?.new_connector_1);
   check("config.local.json に new_persona_1 が書き込まれる", (diskConfig.personas ?? []).some((p) => p.id === "new_persona_1"));
+  check("config.local.json に connector maxTokens が保存される", diskConfig.connectors?.mock_main?.maxTokens === 32768);
 
   // 11c. ページを再読み込みしても編集内容が残る (ダウンロード→手動コピー不要であることの確認)
   await page.reload({ waitUntil: "networkidle0" });
@@ -207,6 +220,8 @@ try {
   // 12. エクスポートのダウンロードを捕捉
   await page.click("#btn-settings");
   await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === true, { timeout: 3000 });
+  const reloadedMaxTokens = await page.$eval('[data-config-path="connectors.mock_main.maxTokens"]', (input) => input.value);
+  check("再読み込み後も connector maxTokens が再表示される", reloadedMaxTokens === "32768", `value=${reloadedMaxTokens}`);
   const client = await page.target().createCDPSession();
   await client.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: DOWNLOAD_DIR });
   // 既存のダウンロードファイルがあれば掃除

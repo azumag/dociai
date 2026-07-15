@@ -29,11 +29,13 @@
 | `model` | モデルID。`mock` では省略可 |
 | `baseUrl` | 省略可。ローカルLLM やOpenAI互換サーバーを指す。`ollama` の既定は `http://localhost:11434/v1` |
 | `timeoutMs` | 省略可。既定 30000 (ミリ秒。秒ではない点に注意) |
+| `maxTokens` | 省略可。通常応答の最大出力トークン数。既定 300、範囲 1〜32768 |
 | `retries` | 省略可。既定 1。タイムアウトした場合のみ即座に再試行する回数 (認証エラー等はリトライしない) |
 
 `mock` はAPIキーなしで応答・画面認識・ニュース要約の動作確認ができるモックです。
 
 Ollama を使う場合は、Ollama を起動してモデルを pull したうえで `provider: "ollama"` を指定します。発話用ペルソナ、ニュース要約、`context.screenCapture.connector` の vision_model 参照先として同じように選べます。
+Ollama の OpenAI 互換APIには `reasoning_effort: "none"` を自動指定し、thinking対応モデルでも内部思考ではなく最終回答に出力予算を使わせます。内部思考は応答や読み上げには使用しません。モデル側がthinking無効化に対応しておらず回答が途中で切れる場合は、設定画面の `maxTokens` を増やしてください。
 
 ```json
 {

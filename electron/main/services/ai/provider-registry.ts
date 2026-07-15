@@ -23,5 +23,5 @@ export function providerConfig(id: string, connector: Record<string, unknown>, a
       throw new ServiceError("BAD_REQUEST", "connector base URL is invalid", { serviceId: id, retryable: false });
     }
   }
-  return { id, provider, model, baseUrl: configuredBaseUrl, apiKey: apiKey ?? undefined, retries: boundedInteger(connector.retries, 1, 0, 3), timeoutMs: boundedInteger(connector.timeoutMs, 30000, 1000, 120000) };
+  return { id, provider, model, baseUrl: configuredBaseUrl, apiKey: apiKey ?? undefined, retries: boundedInteger(connector.retries, 1, 0, 3), timeoutMs: boundedInteger(connector.timeoutMs, 30000, 1000, 120000), maxTokens: boundedInteger(connector.maxTokens, 300, 1, 32768) };
 }
