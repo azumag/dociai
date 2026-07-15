@@ -7,5 +7,6 @@ export const CONFIG_UI_METADATA = Object.freeze({
   "router.historyTtlSeconds": Object.freeze({ label: "応答履歴TTL秒", min: 60, max: 86400, default: 7200, advanced: true }),
   "router.historyMaxEntries": Object.freeze({ label: "応答履歴最大件数", min: 100, max: 100000, default: 2000, advanced: true }),
   "connectors.*.apiKey": Object.freeze({ label: "API key", secret: true }),
+  "connectors.*.maxTokens": Object.freeze({ label: "maxTokens", min: 1, max: 32768, default: 300, advanced: true }),
   "topics.sources.*.token": Object.freeze({ label: "Token", secret: true }),
 });

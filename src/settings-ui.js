@@ -749,6 +749,7 @@ export class SettingsUI {
         this.#mapField("apiKey", "connectors", id, "apiKey", { value: c.apiKey ?? "", placeholder: c.apiKeyConfigured && !c.apiKey ? "設定済み（変更する場合のみ入力）" : "", attrs: { spellcheck: "false", autocomplete: "off" } }),
         this.#mapField("baseUrl", "connectors", id, "baseUrl", { value: c.baseUrl ?? "", attrs: { spellcheck: "false" } }),
         this.#mapField("timeoutMs (ms)", "connectors", id, "timeoutMs", { type: "number", value: c.timeoutMs ?? "" }),
+        this.#mapField("maxTokens", "connectors", id, "maxTokens", { type: "number", value: c.maxTokens ?? "", attrs: { step: 1 } }),
       );
       cardBody.append(row1, row2);
       this._body.append(card);

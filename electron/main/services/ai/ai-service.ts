@@ -49,7 +49,7 @@ export class AiService {
     if (generation !== this.runtime.generation) throw new ServiceError("CANCELLED", "request generation is stale", { serviceId: input.connectorId, retryable: false });
     const handle = this.runtime.registry.create({ serviceId: input.connectorId, generation, ownerId: input.ownerId ?? "console", requestId: input.requestId, timeoutMs: config.timeoutMs });
     const options = {
-      maxTokens: boundedNumber(input.options?.maxTokens, 300, 1, 4096),
+      maxTokens: boundedNumber(input.options?.maxTokens, config.maxTokens, 1, 32768),
       ...(input.options?.temperature !== undefined ? { temperature: boundedNumber(input.options.temperature, 1, 0, 2) } : {}),
       stream: input.options?.stream === true,
       onToken: (text: string) => {

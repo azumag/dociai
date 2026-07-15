@@ -62,6 +62,9 @@ export function validateConfig(cfg) {
       if (c.timeoutMs != null && Number(c.timeoutMs) > 0 && Number(c.timeoutMs) < 1000) {
         warnings.push(`connectors.${id}.timeoutMs は${c.timeoutMs}(ミリ秒)です。秒のつもりの値だと即座にタイムアウトします (例: 30秒 → 30000)`);
       }
+      if (c.maxTokens != null && !(Number.isInteger(Number(c.maxTokens)) && Number(c.maxTokens) >= 1 && Number(c.maxTokens) <= 32768)) {
+        errors.push(`connectors.${id}.maxTokens は1〜32768の整数にしてください`);
+      }
       if (c.retries != null && !(Number(c.retries) >= 0)) {
         errors.push(`connectors.${id}.retries は0以上の数値にしてください`);
       }
