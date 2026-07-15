@@ -26,6 +26,23 @@ import { runProductionStreamEvent } from "../simulation/stream-event-simulator.j
 
 const COMMENT_READER_ID = "__comment_reader__";
 
+const nonNullEntries = (value) => Object.fromEntries(Object.entries(value ?? {}).filter(([, entry]) => entry != null));
+
+export function resolveCommentReaderVoice(commentReader = {}, shared = {}) {
+  const engine = commentReader.engine ?? "webspeech";
+  const legacy = engine === "webspeech"
+    ? { name: commentReader.name, rate: commentReader.rate, pitch: commentReader.pitch }
+    : engine === "voicevox"
+      ? { speaker: commentReader.speaker, speed: commentReader.rate, pitch: commentReader.pitch, intonation: commentReader.intonation, volume: commentReader.volume }
+      : { voice: commentReader.voice, speed: commentReader.speed, tone: commentReader.tone, volume: commentReader.volume };
+  const sharedVoice = engine === "voicevox"
+    ? { speaker: shared.voicevox?.defaultSpeaker, maxChars: shared.voicevox?.maxChars }
+    : engine === "bouyomi"
+      ? { voice: shared.bouyomi?.voice, speed: shared.bouyomi?.speed, tone: shared.bouyomi?.tone, volume: shared.bouyomi?.volume }
+      : {};
+  return { enabled: commentReader.enabled, engine, ...nonNullEntries(sharedVoice), ...nonNullEntries(legacy), ...nonNullEntries(commentReader[engine]) };
+}
+
 // Generic, DOM-free engine: turns a NormalizedConfig + platform deps into an unstarted
 // RuntimeBundle. `build` never calls start() on anything it creates — that is AppRuntime's
 // job, in the order components were define()'d.
@@ -256,7 +273,10 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       policy: config.speechQueue,
       strictOrdering: config.speechQueue?.strictOrdering,
       bouyomiCharsPerSecond: config.bouyomi?.charsPerSecond,
-      resolveVoice: (personaId, currentVoice) => personaId === COMMENT_READER_ID ? config.commentReader ?? currentVoice : config.personas?.find((persona) => persona.id === personaId)?.voice ?? currentVoice,
+      resolveVoice: (personaId, currentVoice) => personaId === COMMENT_READER_ID ? resolveCommentReaderVoice(config.commentReader, config) : config.personas?.find((persona) => persona.id === personaId)?.voice ?? currentVoice,
+      resolveFallbackVoice: (personaId, currentVoice, backendId) => personaId === COMMENT_READER_ID && backendId === "webspeech"
+        ? resolveCommentReaderVoice({ ...config.commentReader, engine: "webspeech" }, config)
+        : currentVoice,
       onHealth: ({ backend, status, error }) => deps.log(`音声backend[${backend}] ${status}${error ? `: ${error}` : ""}`, status === "error" ? "warn" : "info"),
     }),
     (instance) => ({
@@ -378,7 +398,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     const body = cr.skipEmotes && comment.emotes ? stripEmotes(comment.text, comment.emotes) : comment.text;
     if (!body.trim()) return;
     const text = cr.includeAuthor === false ? body : `${comment.author}: ${body}`;
-    speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice: cr, commentId: comment.id });
+    speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice: resolveCommentReaderVoice(cr, config), commentId: comment.id });
   });
 
   const addComment = expose("addComment", (raw) => {

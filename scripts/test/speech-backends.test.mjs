@@ -24,6 +24,26 @@ test("Web Speech classifies completion, cancellation, error, and stale callbacks
   assert.equal((await failed).state, "failed");
 });
 
+test("unavailable comment reader engines use its saved Web Speech voice on fallback", async () => {
+  for (const engine of ["voicevox", "bouyomi"]) {
+    FakeUtterance.items = [];
+    const synthesis = { speak() {}, cancel() {}, getVoices: () => [{ name: "Kyoko", lang: "ja-JP" }] };
+    const fallback = { enabled: true, engine: "webspeech", name: "Kyoko", rate: 0.8, pitch: 1.4 };
+    const queue = new SpeechQueue({
+      webSpeech: { synthesis, Utterance: FakeUtterance },
+      resolveFallbackVoice: (personaId, voice, backendId) => personaId === "__comment_reader__" && backendId === "webspeech" ? fallback : voice,
+    });
+    queue.enqueue({ personaId: "__comment_reader__", personaName: "コメント読み上げ", text: engine, voice: { engine, pitch: -0.05 } });
+    const utterance = FakeUtterance.items.at(-1);
+    assert.equal(utterance.voice?.name, "Kyoko");
+    assert.equal(utterance.rate, 0.8);
+    assert.equal(utterance.pitch, 1.4);
+    utterance.onend();
+    await Promise.resolve();
+    queue.dispose();
+  }
+});
+
 test("Bouyomi reports submitted and exposes remote clear", async () => {
   let cleared = 0;
   const backend = new BouyomiBackend({ talk: async () => ({ ok: true }), clear: async () => { cleared++; } }, { wait: async () => {} });

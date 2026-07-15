@@ -96,6 +96,13 @@ assert.equal(synthBody.pitchScale, -0.05);
 assert.equal(synthBody.intonationScale, 1.2);
 assert.equal(synthBody.volumeScale, 0.9);
 
+// 明示した0はVOICEVOXの既定値1へ書き換えず、そのまま送る。
+await client.synth("ゼロ指定", { speaker: 3, speed: 0, intonation: 0, volume: 0 });
+const zeroBody = JSON.parse(lastCall.init.body);
+assert.equal(zeroBody.speedScale, 1, "speed=0は従来どおりVOICEVOX既定値へ戻す");
+assert.equal(zeroBody.intonationScale, 0);
+assert.equal(zeroBody.volumeScale, 0);
+
 // speaker 不正
 await assert.rejects(() => client.synth("x", { speaker: "abc" }), VoiceVoxError);
 // 空テキスト

@@ -12,6 +12,8 @@ function localEndpoint(value: unknown, fallback: string): URL {
 }
 
 function endpointPath(endpoint: URL, pathname: string): URL { return new URL(`${endpoint.origin}${pathname}`); }
+function finiteOr(value: unknown, fallback: number): number { const number = Number(value); return value != null && Number.isFinite(number) ? number : fallback; }
+function positiveFiniteOr(value: unknown, fallback: number): number { const number = Number(value); return value != null && Number.isFinite(number) && number > 0 ? number : fallback; }
 export type VoiceVoxInput = { text: string; speaker: number; baseUrl?: string; timeoutMs?: number; pitch?: number; speed?: number; intonation?: number; volume?: number; requestId?: string; ownerId?: string; generation?: number };
 
 export class VoiceVoxService {
@@ -45,7 +47,7 @@ export class VoiceVoxService {
       if (!queryResponse.ok) throw new ServiceError("SERVER", `VOICEVOX audio_query returned HTTP ${queryResponse.status}`, { serviceId: "voicevox", status: queryResponse.status });
       const query = await queryResponse.json() as Record<string, unknown>;
       if (!Array.isArray(query.accent_phrases)) throw new ServiceError("SERVER", "VOICEVOX audio_query response is invalid", { serviceId: "voicevox", retryable: false });
-      query.pitchScale = Number(query.pitchScale ?? 0) + Number(input.pitch ?? 0); query.speedScale = Number(input.speed ?? query.speedScale ?? 1) || 1; query.intonationScale = Number(input.intonation ?? query.intonationScale ?? 1) || 1; query.volumeScale = Number(input.volume ?? query.volumeScale ?? 1) || 1;
+      query.pitchScale = finiteOr(query.pitchScale, 0) + finiteOr(input.pitch, 0); query.speedScale = positiveFiniteOr(input.speed, positiveFiniteOr(query.speedScale, 1)); query.intonationScale = finiteOr(input.intonation, finiteOr(query.intonationScale, 1)); query.volumeScale = finiteOr(input.volume, finiteOr(query.volumeScale, 1));
       const synthesisUrl = endpointPath(endpoint, "/synthesis"); synthesisUrl.searchParams.set("speaker", String(speaker));
       const synthesisResponse = await this.fetchFn(synthesisUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(query), signal: handle.context.signal });
       if (!synthesisResponse.ok) throw new ServiceError("SERVER", `VOICEVOX synthesis returned HTTP ${synthesisResponse.status}`, { serviceId: "voicevox", status: synthesisResponse.status });

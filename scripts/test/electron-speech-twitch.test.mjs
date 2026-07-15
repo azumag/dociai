@@ -15,7 +15,9 @@ test("Main speech services validate local endpoints and return safe results", as
   try {
     const calls = [];
     const fetchFn = async (url, init = {}) => { calls.push({ url: String(url), init }); if (String(url).includes("speakers")) return new Response(JSON.stringify([{ name: "Speaker", styles: [{ id: 3, name: "Normal" }] }]), { status: 200 }); if (String(url).includes("audio_query")) return new Response(JSON.stringify({ accent_phrases: [], pitchScale: 0 }), { status: 200 }); if (String(url).includes("synthesis")) return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "audio/wav" } }); return new Response("", { status: 200 }); };
-    const voicevox = new modules.VoiceVoxService(fetchFn); assert.equal((await voicevox.speakers()).speakers[0].label, "Speaker / Normal"); assert.equal((await voicevox.synthesize({ text: "hello", speaker: 3 })).audio.byteLength, 3); await assert.rejects(voicevox.synthesize({ text: "hello", speaker: 3, baseUrl: "https://example.com" }), /local HTTP URL/);
+    const voicevox = new modules.VoiceVoxService(fetchFn); assert.equal((await voicevox.speakers()).speakers[0].label, "Speaker / Normal"); assert.equal((await voicevox.synthesize({ text: "hello", speaker: 3, speed: 0, intonation: 0, volume: 0 })).audio.byteLength, 3); await assert.rejects(voicevox.synthesize({ text: "hello", speaker: 3, baseUrl: "https://example.com" }), /local HTTP URL/);
+    const synthesisBody = JSON.parse(calls.find(({ url }) => url.includes("/synthesis"))?.init.body);
+    assert.equal(synthesisBody.speedScale, 1); assert.equal(synthesisBody.intonationScale, 0); assert.equal(synthesisBody.volumeScale, 0);
     const bouyomi = new modules.BouyomiService(fetchFn); assert.equal((await bouyomi.talk({ text: "hello" })).submitted, true); assert.equal((await bouyomi.clear()).cleared, true); assert.ok(calls.every(({ url }) => new URL(url).hostname === "127.0.0.1"));
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
