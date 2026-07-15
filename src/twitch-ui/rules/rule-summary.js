@@ -54,7 +54,11 @@ export function summarizeBudget(rule) {
 export function summarizeActions(rule) {
   const actions = Array.isArray(rule?.actions) ? rule.actions : [];
   if (actions.length === 0) return "(actionなし)";
-  return actions.map((action) => (action.kind === "ai-response" ? `AI:${action.personaId || "(未選択)"}` : "テンプレ発話")).join(", ");
+  return actions.map((action) => {
+    if (action.kind === "ai-response") return `AI:${action.personaId || "(未選択)"}`;
+    if (action.kind === "overlay-cue") return `Overlay:${[action.cue?.visual && "画像", action.cue?.audio && "音声"].filter(Boolean).join("+") || "(未設定)"}`;
+    return "テンプレ発話";
+  }).join(", ");
 }
 
 /** `{ errors, warnings }` counts from a structured-issue list already filtered to this rule (see

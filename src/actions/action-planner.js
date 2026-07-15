@@ -4,6 +4,7 @@
 // re-checked immediately before execution per this issue's own "an event could be queued for a
 // while and go stale" requirement) — this module only builds the plan objects themselves.
 import { DEFAULT_ACTION_PRIORITY, buildActionPlanId, validateActionConfig } from "./action-schema.js";
+import { applyOverlayCueDefaults } from "../overlay/overlay-cue-defaults.js";
 
 /** Safety cap mirroring event-trigger-matcher.js's own `DEFAULT_MAX_MATCHES_PER_EVENT` — bounds how
  * many actions a single matched trigger may fan out into for one event, protecting against a
@@ -51,6 +52,9 @@ export function planActions({
       return;
     }
     const id = buildActionPlanId(event?.id, triggerId, actionIndex);
+    const plannedAction = action.kind === "overlay-cue"
+      ? Object.freeze({ id: action.id, kind: action.kind, ...(action.priority !== undefined ? { priority: action.priority } : {}), cue: applyOverlayCueDefaults(action.cue) })
+      : Object.freeze({ ...action });
     plans.push(
       Object.freeze({
         id,
@@ -58,7 +62,7 @@ export function planActions({
         triggerId: triggerId ?? null,
         actionIndex,
         kind: action.kind,
-        action: Object.freeze({ ...action }),
+        action: plannedAction,
         event,
         priority: typeof action.priority === "number" ? action.priority : priority,
         context,

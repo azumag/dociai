@@ -19,14 +19,12 @@
 // call is done with #91's REAL `validateEventTriggersConfig`/`validateEventTriggerConfig`
 // (src/triggers/trigger-validation.js) — never a reimplementation of its rules — plus this file's
 // own small extra checks for the fields #91 doesn't know about (`cooldown`/`rateLimit`/`aggregation`
-// — see this file's own header note in rule-editor.js for why those live at the rule level, and
-// `actions`, validated per-entry via #93's REAL `validateActionConfig`).
+// — see this file's own header note in rule-editor.js for why those live at the rule level).
 import { createEventTriggerConfig, issue } from "../../triggers/event-trigger-schema.js";
 import { validateEventTriggersConfig } from "../../triggers/trigger-validation.js";
 import { COOLDOWN_KEY_DIMENSIONS, isValidCooldownKeyBy } from "../../triggers/cooldown-key.js";
 import { COOLDOWN_CONSUME_POINTS } from "../../triggers/cooldown-tracker.js";
 import { OVERFLOW_POLICIES } from "../../actions/action-rate-limiter.js";
-import { validateActionConfig } from "../../actions/action-schema.js";
 import { SIMULATION_FIXTURE_KINDS, simulateStreamEvent } from "../../simulation/stream-event-simulator.js";
 import { navigateToIssue } from "../../settings/settings-navigation.js";
 import { movePriority, orderRules, renderRuleList } from "../rules/rule-list.js";
@@ -38,8 +36,9 @@ function isPositiveInteger(value) {
 
 /** This file's own small extension of #91/#93's real validators — covers the fields those modules
  * deliberately don't know about (`cooldown`/`rateLimit`/`aggregation` are UI/config-authoring
- * additions this issue introduces; `actions` is #93's own array, validated per-entry with its REAL
- * `validateActionConfig`). Returns the SAME structured-issue shape (`{path, code, message,
+ * additions this issue introduces). Action validation is already delegated by
+ * validateEventTriggersConfig(), so this extension only adds cross-section persona references.
+ * Returns the SAME structured-issue shape (`{path, code, message,
  * severity, meta}`) as trigger-validation.js, path-prefixed identically (`["eventTriggers", id,
  * ...]`) so both sources merge into one navigable list. */
 function validateExtraRuleFields(id, rule, { personaIds }) {
@@ -71,8 +70,6 @@ function validateExtraRuleFields(id, rule, { personaIds }) {
   }
   const actions = Array.isArray(rule.actions) ? rule.actions : [];
   actions.forEach((action, index) => {
-    const result = validateActionConfig(action);
-    for (const entry of result.issues) issues.push(issue([...prefix, "actions", index, ...entry.path], entry.code, entry.message, { severity: entry.severity, meta: entry.meta }));
     if (action.kind === "ai-response" && action.personaId && !personaIds.includes(action.personaId)) {
       issues.push(issue([...prefix, "actions", index, "personaId"], "reference.missing", `persona "${action.personaId}" が personas に存在しません`, { severity: "warning" }));
     }

@@ -25,6 +25,7 @@ import { createConnector } from "../connectors.js";
 import { checkAiResponseAvailability, runAiResponseAction } from "./ai-response-action.js";
 import { renderTemplateSpeech } from "./template-speech-action.js";
 import { buildFallbackSpeech } from "./action-fallback.js";
+import { OVERLAY_SKIP_REASON } from "../overlay/overlay-cue-contract.js";
 
 /** Short-window dedupe TTL — same family/order of magnitude as
  * electron/main/services/stream-events/event-id-dedupe.ts's `DEFAULT_EVENT_DEDUPE_TTL_MS`: enough
@@ -101,7 +102,7 @@ export class ActionRunner {
    * turned into an `"error"`/fallback result, matching src/app/response-coordinator.js's own
    * catch-and-dispatch stance).
    */
-  async execute(plan, { speak = true, notifyObs = true, mockAi = false } = {}) {
+  async execute(plan, { speak = true, notifyObs = true, mockAi = false, onStarted = () => {} } = {}) {
     const now = this.clock();
     const event = plan.event;
     const context = plan.context ?? "production";
@@ -117,11 +118,22 @@ export class ActionRunner {
     // have moved on (config reload / reconnect) while this plan sat queued.
     if (!this.runtime.isCurrent(plan.generation)) return this.#skip(plan, { reason: "stale-generation", context, display });
 
+    // The persisted/planned contract lands before the renderer runtime. Until that runtime is
+    // composed, overlay cues are an explicit no-side-effect skip. Unknown future kinds are also
+    // denied here instead of falling through to the AI path.
+    if (plan.kind === "overlay-cue") return this.#skip(plan, { reason: OVERLAY_SKIP_REASON.OVERLAY_UNAVAILABLE, context, display });
+    if (plan.kind !== "ai-response" && plan.kind !== "template-speech") return this.#skip(plan, { reason: "unsupported-action-kind", context, display });
+
     // 3) FRESH #92 GlobalActionBudget re-check (real module, re-consulted here — never trusted from
     // match time alone).
     let budgetReservation = null;
     if (this.globalActionBudget) {
-      const decision = this.globalActionBudget.reserve({ priority: plan.priority, now });
+      let decision;
+      try {
+        decision = this.globalActionBudget.reserve({ priority: plan.priority, now });
+      } catch (error) {
+        return this.#dependencyError(plan, { error, context, display });
+      }
       if (!decision.allowed) return this.#skip(plan, { reason: decision.reason, context, display });
       budgetReservation = decision.reservation;
     }
@@ -130,18 +142,30 @@ export class ActionRunner {
     // its own `rateLimit` tuple; real module, real key derivation scoped to trigger+action).
     if (this.rateLimiter && plan.action?.rateLimit) {
       const key = `stream-event-action:${plan.triggerId}:${plan.actionIndex}`;
-      const decision = this.rateLimiter.attempt(key, plan.action.rateLimit, now);
+      let decision;
+      try {
+        decision = this.rateLimiter.attempt(key, plan.action.rateLimit, now);
+      } catch (error) {
+        if (budgetReservation) { try { this.globalActionBudget.release(budgetReservation); } catch {} }
+        return this.#dependencyError(plan, { error, context, display });
+      }
       if (!decision.allowed) {
-        if (budgetReservation) this.globalActionBudget.release(budgetReservation);
+        if (budgetReservation) { try { this.globalActionBudget.release(budgetReservation); } catch {} }
         return this.#skip(plan, { reason: decision.reason ?? decision.decision, context, display });
       }
     }
 
     try {
-      if (plan.kind === "template-speech") return await this.#runTemplateSpeech(plan, { event, context, display, speak, notifyObs });
-      return await this.#runAiResponse(plan, { event, context, display, speak, notifyObs, mockAi });
+      onStarted({ plan, context, startedAt: this.clock() });
+      switch (plan.kind) {
+        case "template-speech": return await this.#runTemplateSpeech(plan, { event, context, display, speak, notifyObs });
+        case "ai-response": return await this.#runAiResponse(plan, { event, context, display, speak, notifyObs, mockAi });
+        default: return this.#skip(plan, { reason: "unsupported-action-kind", context, display });
+      }
+    } catch (error) {
+      return this.#dependencyError(plan, { error, context, display });
     } finally {
-      if (budgetReservation) this.globalActionBudget.complete(budgetReservation);
+      if (budgetReservation) { try { this.globalActionBudget.complete(budgetReservation); } catch {} }
     }
   }
 
@@ -219,10 +243,22 @@ export class ActionRunner {
   }
 
   #skip(plan, { reason, context, display }) {
-    this.dispatch({ type: "action-skipped", plan, reason, context, triggerId: plan.triggerId, contentLabel: display?.label ?? null });
+    this.#safeDispatch({ type: "action-skipped", plan, reason, context, triggerId: plan.triggerId, contentLabel: display?.label ?? null });
     const result = this.#result(plan, { status: "skipped", reason, context });
     this.#trace(result);
     return result;
+  }
+
+  #dependencyError(plan, { error, context, display }) {
+    const normalized = error instanceof Error ? error : new Error(String(error ?? "unknown dependency error"));
+    this.#safeDispatch({ type: "action-error", plan, error: normalized, context, triggerId: plan.triggerId, contentLabel: display?.label ?? null });
+    const result = this.#result(plan, { status: "error", reason: "dependency-error", context, error: normalized });
+    this.#trace(result);
+    return result;
+  }
+
+  #safeDispatch(event) {
+    try { this.dispatch(event); } catch {}
   }
 
   #speakAndNotify({ plan, persona, text, context, speak, notifyObs, source, voiceAvailable }) {
@@ -256,12 +292,12 @@ export class ActionRunner {
       personaId,
       usedFallback: status === "fallback",
       fallbackReason,
-      error: error ? { message: error.message, kind: error.kind ?? null } : null,
+      error: error ? { message: typeof error.message === "string" ? error.message : String(error), kind: error.kind ?? null } : null,
     });
   }
 
   #trace(result) {
-    this.trace?.record?.(result);
+    try { this.trace?.record?.(result); } catch {}
   }
 }
 

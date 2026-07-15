@@ -400,6 +400,33 @@ Todoist由来の話題は `topics.intro`/`topics.style` を使って読み上げ
 `news` と `topics` を分けて書いてください。これにより、実ニュース(rss/mock)とTodoist話題を
 別々の頻度・別々のペルソナで同時併走できます。
 
+## EventTriggerのoverlay-cue
+
+`eventTriggers.<id>.actions` では、発話Actionに加えて画像・音声を表す`overlay-cue`を保存できます。
+保存設定にはasset registryの安全な`assetId`だけを書き、URL、絶対path、CSS、JavaScript、
+`assetHandle`、`cueInstanceId`などのruntime値は書けません。未指定の表示・時間・transition・
+競合policyは、simulationとproductionで共有する同じdefault関数によって実行時に展開されます。
+
+```json
+{
+  "id": "reward-overlay",
+  "kind": "overlay-cue",
+  "priority": 10,
+  "cue": {
+    "visual": { "assetId": "reward-image", "x": 0.5, "y": 0.5, "fit": "contain" },
+    "audio": { "assetId": "reward-sound", "volume": 0.8 },
+    "timing": { "enterMs": 250, "holdMs": 2000, "exitMs": 250 },
+    "transition": { "enter": "fade", "exit": "fade", "easing": "ease" },
+    "policy": { "channel": "rewards", "mode": "queue", "maxQueue": 20 }
+  }
+}
+```
+
+`visual`と`audio`の少なくとも一方が必要です。保存形式と、asset metadata・opaque handle・
+plan/event/trigger IDを含む`ResolvedOverlayCue`は分離されています。このcontract対応前の古いbuildは
+`overlay-cue`を未知Actionとしてvalidation errorにし、そのActionだけを実行計画から除外します。
+現buildでもrenderer runtimeが利用可能になるまでは、安全に`overlay-unavailable`としてskipします。
+
 ## ニュース読み上げの参考: `azumag/soviet_now` 構造メモ (issue #10)
 
 `soviet_now` はshellベースの配信ラジオ実装で、`broadcast/radio_news.sh` (585行) に
