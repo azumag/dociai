@@ -154,10 +154,10 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
 メインプロセスからローカル HTTP API を呼び出せます。
 
 `speed` は棒読みちゃんの speed パラメータで 50〜200 程度のスケール (既定 -1 は
-棒読みちゃん本体の設定に従う) です。`personas[].voice.rate` / `commentReader.rate`
-(webspeech/voicevox 用、0.5〜2程度のスケール) とは互換性がないため、bouyomi の
-速度を変えたい場合は `bouyomi.speed` または `personas[].voice.speed` /
-`commentReader.speed` を個別に指定してください。
+棒読みちゃん本体の設定に従う) です。Web Speech の `commentReader.webspeech.rate`
+(0.5〜2)、VOICEVOX の `commentReader.voicevox.speed` (0.5〜2) とは互換性がありません。
+棒読みちゃんの速度を変えたい場合は `bouyomi.speed` または `personas[].voice.speed` /
+`commentReader.bouyomi.speed` を個別に指定してください。
 
 `/Talk` は投入した瞬間に応答が返る (実際の再生完了は通知されない) ため、`commentReader`
 と `personas[].voice` で異なるエンジンを組み合わせている場合 (例: コメント読み上げは
@@ -224,10 +224,9 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
   "commentReader": {
     "enabled": false,
     "engine": "webspeech",
-    "name": "default",
-    "rate": 1.0,
-    "pitch": 1.0,
-    "speed": -1,
+    "webspeech": { "name": "default", "rate": 1.0, "pitch": 1.0 },
+    "voicevox": { "speaker": 3, "speed": 1.0, "pitch": 0.0, "intonation": 1.0, "volume": 1.0 },
+    "bouyomi": { "voice": 0, "speed": -1, "tone": -1, "volume": -1 },
     "includeAuthor": true,
     "skipEmotes": false,
     "ignoreUsers": []
@@ -239,11 +238,9 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 |---|---|---|
 | `enabled` | false | コメント読み上げを有効化 |
 | `engine` | webspeech | `webspeech` / `voicevox` / `bouyomi` (personas の `voice.engine` と同じ選択肢) |
-| `name` | default | webspeech使用時の音声名。省略時は日本語音声を自動選択 |
-| `rate` / `pitch` | 1.0 / 1.0 | webspeech/voicevox使用時の読み上げ速度・音高 (0.5〜2程度のスケール) |
-| `speaker` | (voicevox.defaultSpeakerを使用) | voicevox使用時の話者ID。省略可 |
-| `voice` | 0 | bouyomi使用時の話者ID。0 は棒読みちゃん側の既定 |
-| `speed` | -1 | bouyomi使用時の読み上げ速度 (50〜200程度のスケール、`rate` とは別スケール)。-1 は棒読みちゃん本体の設定に従う。engine が bouyomi のとき、コメント読み上げの待機時間が長すぎる/短すぎる場合はここか `bouyomi.charsPerSecond` を調整する |
+| `webspeech` | `{ name: "default", rate: 1, pitch: 1 }` | Web Speech専用の音声名・速度・音高 |
+| `voicevox` | `{ speed: 1, pitch: 0, intonation: 1, volume: 1 }` | VOICEVOX専用の話者ID (`speaker`)・速度・音高・抑揚・音量。`speaker` 省略時は共通の `voicevox.defaultSpeaker` を使用 |
+| `bouyomi` | `{}` | 棒読みちゃん専用の話者・速度・音程・音量。省略した項目は共通の `bouyomi.voice` / `speed` / `tone` / `volume` を継承し、共通値の `-1` は本体設定に従う。待機時間が合わない場合は `speed` または `bouyomi.charsPerSecond` を調整する |
 | `includeAuthor` | true | falseにすると「author: 本文」ではなく本文のみ読み上げる |
 | `skipEmotes` | false | trueにするとTwitchのエモートを読み上げから除去する。Twitchが送るIRCの `emotes` タグ (エモートの正確な文字範囲) を使うため、手動入力コメントなど emotes 情報がないソースには影響しない |
 | `ignoreUsers` | `[]` | このユーザー名 (大文字小文字区別なし、前後空白は無視) からのコメントは読み上げをスキップする。AI応答のトリガー判定自体には影響しない |
@@ -253,6 +250,10 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 「コメント読み上げ」→「AI応答」の順で積まれるため、視聴者のコメントとAIの返答を
 両方音声で聞ける。読み上げに使うエンジンは `voicevox` / `webspeech` / `bouyomi`
 から選べます。
+
+3エンジンの音声設定は独立して保存されます。`engine`を切り替えても、別エンジンの
+速度や音高を上書きしません。旧形式のフラットな`name` / `rate` / `pitch` / `speed`
+なども読み込み時に対応するエンジン設定へ移されるため、既存configはそのまま利用できます。
 
 ## triggers
 

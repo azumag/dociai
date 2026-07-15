@@ -12,6 +12,14 @@
 // http://localhost:8080 からのリクエストはそのまま通る。
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:50021";
+const finiteOr = (value, fallback) => {
+  const number = Number(value);
+  return value != null && Number.isFinite(number) ? number : fallback;
+};
+const positiveFiniteOr = (value, fallback) => {
+  const number = Number(value);
+  return value != null && Number.isFinite(number) && number > 0 ? number : fallback;
+};
 const DEFAULT_MAX_CHARS = 200;
 import { cancelElectronSpeechRequest, hasElectronVoiceVoxService, speakersThroughElectron, synthesizeThroughElectron } from "./platform/electron-services.js";
 
@@ -105,10 +113,10 @@ export class VoiceVoxClient {
     if (!query || !Array.isArray(query.accent_phrases)) {
       throw new VoiceVoxError("audio_query の応答が想定外です", "server");
     }
-    query.pitchScale = (Number(query.pitchScale) || 0) + Number(pitch || 0);
-    query.speedScale = Number(speed ?? query.speedScale ?? 1.0) || 1.0;
-    query.intonationScale = Number(intonation ?? query.intonationScale ?? 1.0) || 1.0;
-    query.volumeScale = Number(volume ?? query.volumeScale ?? 1.0) || 1.0;
+    query.pitchScale = finiteOr(query.pitchScale, 0) + finiteOr(pitch, 0);
+    query.speedScale = positiveFiniteOr(speed, positiveFiniteOr(query.speedScale, 1.0));
+    query.intonationScale = finiteOr(intonation, finiteOr(query.intonationScale, 1.0));
+    query.volumeScale = finiteOr(volume, finiteOr(query.volumeScale, 1.0));
 
     const wav = await this.#fetch("/synthesis", {
       method: "POST",

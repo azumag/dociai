@@ -5,7 +5,7 @@
 import { registryIds } from "./config/config-registry.js";
 import { processConfigText } from "./config/config-adapters.js";
 import { processConfig } from "./config/config-pipeline.js";
-import { DEFAULT_COMMON_RULES } from "./config/config-defaults.js";
+import { DEFAULT_COMMON_RULES, commentReaderDefaults } from "./config/config-defaults.js";
 const KNOWN_PROVIDERS = registryIds("providers");
 const KNOWN_TRIGGER_TYPES = registryIds("triggerTypes");
 const KNOWN_NEWS_SOURCE_TYPES = registryIds("newsSourceTypes");
@@ -33,6 +33,42 @@ function splitNewsAndLegacyTopics(cfg) {
     newsSources: sources.filter((src) => src?.type !== "todoist"),
     legacyTopicSources: sources.filter((src) => src?.type === "todoist"),
   };
+}
+
+function validateNumber(value, label, errors, { min = -Infinity, max = Infinity, integer = false, allowMinusOne = false } = {}) {
+  if (value == null) return;
+  const number = Number(value);
+  const valid = Number.isFinite(number) && (!integer || Number.isInteger(number)) && ((allowMinusOne && number === -1) || (number >= min && number <= max));
+  if (!valid) errors.push(`${label} は${allowMinusOne ? "-1または" : ""}${min}〜${max}${integer ? "の整数" : "の数値"}にしてください`);
+}
+
+function validateCommentReaderVoices(commentReader, errors) {
+  const sections = ["webspeech", "voicevox", "bouyomi"];
+  for (const section of sections) {
+    const value = commentReader?.[section];
+    if (Object.prototype.hasOwnProperty.call(commentReader ?? {}, section) && (!value || typeof value !== "object" || Array.isArray(value))) errors.push(`commentReader.${section} はオブジェクトで指定してください`);
+  }
+  const webspeech = commentReader?.webspeech;
+  if (webspeech && typeof webspeech === "object" && !Array.isArray(webspeech)) {
+    if (webspeech.name != null && typeof webspeech.name !== "string") errors.push("commentReader.webspeech.name は文字列で指定してください");
+    validateNumber(webspeech.rate, "commentReader.webspeech.rate", errors, { min: 0.5, max: 2 });
+    validateNumber(webspeech.pitch, "commentReader.webspeech.pitch", errors, { min: 0, max: 2 });
+  }
+  const voicevox = commentReader?.voicevox;
+  if (voicevox && typeof voicevox === "object" && !Array.isArray(voicevox)) {
+    validateNumber(voicevox.speaker, "commentReader.voicevox.speaker", errors, { min: 0, max: Number.MAX_SAFE_INTEGER, integer: true });
+    validateNumber(voicevox.speed, "commentReader.voicevox.speed", errors, { min: 0.5, max: 2 });
+    validateNumber(voicevox.pitch, "commentReader.voicevox.pitch", errors, { min: -0.15, max: 0.15 });
+    validateNumber(voicevox.intonation, "commentReader.voicevox.intonation", errors, { min: 0, max: 2 });
+    validateNumber(voicevox.volume, "commentReader.voicevox.volume", errors, { min: 0, max: 2 });
+  }
+  const bouyomi = commentReader?.bouyomi;
+  if (bouyomi && typeof bouyomi === "object" && !Array.isArray(bouyomi)) {
+    validateNumber(bouyomi.voice, "commentReader.bouyomi.voice", errors, { min: 0, max: Number.MAX_SAFE_INTEGER, integer: true });
+    validateNumber(bouyomi.speed, "commentReader.bouyomi.speed", errors, { min: 50, max: 200, integer: true, allowMinusOne: true });
+    validateNumber(bouyomi.tone, "commentReader.bouyomi.tone", errors, { min: 50, max: 200, integer: true, allowMinusOne: true });
+    validateNumber(bouyomi.volume, "commentReader.bouyomi.volume", errors, { min: 0, max: 100, integer: true, allowMinusOne: true });
+  }
 }
 
 export function validateConfig(cfg) {
@@ -268,20 +304,21 @@ export function validateConfig(cfg) {
   }
 
   // commentReader (issue #31)
-  if (cfg.commentReader?.enabled) {
+  if (cfg.commentReader) {
     const cr = cfg.commentReader;
     if (cr.engine && !VOICE_ENGINES.includes(cr.engine)) {
       errors.push(`commentReader.engine "${cr.engine}" は未対応です (対応: webspeech, voicevox, bouyomi)`);
     }
-    if (cr.engine === "voicevox" && !cfg.voicevox?.enabled) {
+    if (cr.enabled && cr.engine === "voicevox" && !cfg.voicevox?.enabled) {
       warnings.push("commentReader.engine が voicevox ですが voicevox.enabled が true ではありません。Web Speech API にフォールバックします");
     }
-    if (cr.engine === "bouyomi" && !cfg.bouyomi?.enabled) {
+    if (cr.enabled && cr.engine === "bouyomi" && !cfg.bouyomi?.enabled) {
       warnings.push("commentReader.engine が bouyomi ですが bouyomi.enabled が true ではありません。Web Speech API にフォールバックします");
     }
     if (cr.ignoreUsers != null && !Array.isArray(cr.ignoreUsers)) {
       errors.push("commentReader.ignoreUsers は配列で指定してください");
     }
+    validateCommentReaderVoices(cr, errors);
   }
 
   // personas.voice.engine (issue #17)
@@ -384,18 +421,7 @@ export function applyDefaults(cfg) {
       silenceHoldMs: 800,
       ...(cfg.micMonitor ?? {}),
     },
-    commentReader: {
-      enabled: false,
-      engine: "webspeech",
-      name: "default",
-      rate: 1.0,
-      pitch: 1.0,
-      speed: -1,
-      includeAuthor: true,
-      skipEmotes: false,
-      ignoreUsers: [],
-      ...(cfg.commentReader ?? {}),
-    },
+    commentReader: commentReaderDefaults(cfg.commentReader),
     news: cfg.news
       ? {
           maxItems: 3,

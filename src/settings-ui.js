@@ -1052,15 +1052,24 @@ export class SettingsUI {
       const g = document.createElement("div");
       g.className = "card-grid";
       g.append(this.#pathSelect("engine", VOICE_ENGINES, "commentReader.engine", { value: cr.engine ?? "webspeech" }));
+      const webspeech = cr.webspeech ?? {};
+      const voicevox = cr.voicevox ?? {};
+      const bouyomi = cr.bouyomi ?? {};
       g.append(this.#withTestVoiceButton(
-        this.#pathSelect("name (webspeech音声名)", this.#voiceNameOptions(cr.name), "commentReader.name", { value: cr.name ?? "default" }),
-        () => ({ rate: this.draft.commentReader?.rate, pitch: this.draft.commentReader?.pitch }),
+        this.#pathSelect("Web Speech: 音声名", this.#voiceNameOptions(webspeech.name), "commentReader.webspeech.name", { value: webspeech.name ?? "default" }),
+        () => ({ rate: this.draft.commentReader?.webspeech?.rate, pitch: this.draft.commentReader?.webspeech?.pitch }),
       ));
-      g.append(this.#pathField("rate (webspeech/voicevox速度)", "commentReader.rate", { type: "number", value: cr.rate ?? 1.0, attrs: { step: "0.1" } }));
-      g.append(this.#pathField("pitch", "commentReader.pitch", { type: "number", value: cr.pitch ?? 1.0, attrs: { step: "0.1" } }));
-      g.append(this.#pathField("speaker (voicevox話者ID)", "commentReader.speaker", { type: "number", value: cr.speaker ?? "" }));
-      g.append(this.#pathField("voice (棒読みちゃん話者)", "commentReader.voice", { type: "number", value: cr.voice ?? this.draft.bouyomi?.voice ?? 0 }));
-      g.append(this.#pathField("speed (棒読みちゃん速度)", "commentReader.speed", { type: "number", value: cr.speed ?? -1 }));
+      g.append(this.#pathField("Web Speech: rate", "commentReader.webspeech.rate", { type: "number", value: webspeech.rate ?? 1.0, attrs: { min: 0.5, max: 2, step: 0.1 } }));
+      g.append(this.#pathField("Web Speech: pitch", "commentReader.webspeech.pitch", { type: "number", value: webspeech.pitch ?? 1.0, attrs: { min: 0, max: 2, step: 0.1 } }));
+      g.append(this.#pathField("VOICEVOX: 話者ID", "commentReader.voicevox.speaker", { type: "number", value: voicevox.speaker ?? "", attrs: { min: 0, step: 1 } }));
+      g.append(this.#pathField("VOICEVOX: speed", "commentReader.voicevox.speed", { type: "number", value: voicevox.speed ?? 1.0, attrs: { min: 0.5, max: 2, step: 0.1 } }));
+      g.append(this.#pathField("VOICEVOX: pitch", "commentReader.voicevox.pitch", { type: "number", value: voicevox.pitch ?? 0, attrs: { min: -0.15, max: 0.15, step: 0.01 } }));
+      g.append(this.#pathField("VOICEVOX: intonation", "commentReader.voicevox.intonation", { type: "number", value: voicevox.intonation ?? 1.0, attrs: { min: 0, max: 2, step: 0.1 } }));
+      g.append(this.#pathField("VOICEVOX: volume", "commentReader.voicevox.volume", { type: "number", value: voicevox.volume ?? 1.0, attrs: { min: 0, max: 2, step: 0.1 } }));
+      g.append(this.#pathField("棒読みちゃん: 話者", "commentReader.bouyomi.voice", { type: "number", value: bouyomi.voice ?? this.draft.bouyomi?.voice ?? 0, attrs: { min: 0, step: 1 } }));
+      g.append(this.#pathField("棒読みちゃん: speed", "commentReader.bouyomi.speed", { type: "number", value: bouyomi.speed ?? this.draft.bouyomi?.speed ?? -1, attrs: { min: -1, max: 200, step: 1 } }));
+      g.append(this.#pathField("棒読みちゃん: tone", "commentReader.bouyomi.tone", { type: "number", value: bouyomi.tone ?? this.draft.bouyomi?.tone ?? -1, attrs: { min: -1, max: 200, step: 1 } }));
+      g.append(this.#pathField("棒読みちゃん: volume", "commentReader.bouyomi.volume", { type: "number", value: bouyomi.volume ?? this.draft.bouyomi?.volume ?? -1, attrs: { min: -1, max: 100, step: 1 } }));
       cardBody.append(g);
       cardBody.append(this.#pathCheckbox("ユーザー名を読み上げる", "commentReader.includeAuthor", { value: cr.includeAuthor !== false }));
       cardBody.append(this.#pathCheckbox("エモートを読み上げない", "commentReader.skipEmotes", { value: !!cr.skipEmotes }));
@@ -1069,7 +1078,7 @@ export class SettingsUI {
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。エモート除去はTwitchの emotes タグ (正確な文字範囲) を使うため、Twitch経由のコメントのみ対象です。rate は webspeech/voicevox 用の速度 (0.5〜2程度)、speed は棒読みちゃん用の速度 (50〜200、既定 -1 は棒読みちゃん本体の設定に従う) で、スケールが異なるため別々に設定します。engine が bouyomi のときに待機時間が長すぎる/短すぎる場合は speed、または bouyomi タブの charsPerSecond を調整してください。";
+    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
     this._body.append(note);
   }
 

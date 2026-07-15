@@ -5,7 +5,7 @@ import { SpeechExecution } from "./speech/speech-execution.js";
 import { SpeechScheduler } from "./speech/speech-scheduler.js";
 
 export class SpeechQueue {
-  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {}, strictOrdering = false, onHealth = () => {}, webSpeech = {}, bouyomiCharsPerSecond, resolveVoice = null } = {}) {
+  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {}, strictOrdering = false, onHealth = () => {}, webSpeech = {}, bouyomiCharsPerSecond, resolveVoice = null, resolveFallbackVoice = null } = {}) {
     this.scheduler = new SpeechScheduler(policy);
     this.onUpdate = onUpdate;
     this.log = log;
@@ -15,6 +15,7 @@ export class SpeechQueue {
     this.voicevox = voicevox;
     this.bouyomi = bouyomi;
     this.resolveVoice = resolveVoice;
+    this.resolveFallbackVoice = resolveFallbackVoice;
     this.backends = new BackendRegistry({
       voicevox,
       bouyomi,
@@ -215,10 +216,13 @@ export class SpeechQueue {
     }
     const engine = item.voice?.engine ?? this.#defaultEngine();
     const backend = this.backends.resolve(engine);
+    const playbackItem = backend.id !== engine && this.resolveFallbackVoice
+      ? { ...item, voice: this.resolveFallbackVoice(item.personaId, item.voice, backend.id) ?? item.voice }
+      : item;
     const execution = new SpeechExecution(`speech-${++this.executionSequence}`, item, backend);
     this.activeExecution = execution;
     this.#notify(item);
-    backend.play(item, { executionId: execution.id, signal: execution.controller.signal }).then(
+    backend.play(playbackItem, { executionId: execution.id, signal: execution.controller.signal }).then(
       (result) => this.#finish(execution, result),
       (error) => this.#finish(execution, { state: "failed", error: error.message }),
     );

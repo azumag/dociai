@@ -9,6 +9,38 @@ export const DEFAULT_COMMON_RULES = [
   "配信者や視聴者を不快にさせる発言はしない。",
 ].join("\n");
 
+// commentReaderの旧フラットvoice設定を、engineごとの独立設定へ移す。
+// 明示済みのネスト設定を最優先し、旧configは読み込むだけで同じ値を引き継げる。
+export function commentReaderDefaults(input = {}) {
+  const {
+    name, rate, pitch, speaker, speed, intonation, volume, voice, tone,
+    webspeech, voicevox, bouyomi,
+    ...common
+  } = input ?? {};
+  const engine = common.engine ?? "webspeech";
+  const section = (value, defaults) => {
+    if (value === undefined) return defaults;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    return { ...defaults, ...value };
+  };
+  const legacyWebSpeech = engine === "webspeech" ? { ...(name != null ? { name } : {}), ...(rate != null ? { rate } : {}), ...(pitch != null ? { pitch } : {}) } : {};
+  const legacyVoiceVox = engine === "voicevox" ? { ...(speaker != null ? { speaker } : {}), ...(rate != null ? { speed: rate } : {}), ...(pitch != null ? { pitch } : {}), ...(intonation != null ? { intonation } : {}), ...(volume != null ? { volume } : {}) } : {};
+  const legacyBouyomi = engine === "bouyomi" ? { ...(voice != null ? { voice } : {}), ...(speed != null ? { speed } : {}), ...(tone != null ? { tone } : {}), ...(volume != null ? { volume } : {}) } : {};
+  return {
+    enabled: false,
+    engine,
+    includeAuthor: true,
+    skipEmotes: false,
+    ignoreUsers: [],
+    ...common,
+    webspeech: section(webspeech, { name: "default", rate: 1, pitch: 1, ...legacyWebSpeech }),
+    voicevox: section(voicevox, { speed: 1, pitch: 0, intonation: 1, volume: 1, ...legacyVoiceVox }),
+    // 未指定値はruntimeでbouyomi共通設定へフォールバックする。ここで0/-1を
+    // 埋めると、旧configが使っていたbouyomi.voice/tone/volumeを上書きしてしまう。
+    bouyomi: section(bouyomi, legacyBouyomi),
+  };
+}
+
 export function applyConfigDefaults(config) {
   const copy = structuredClone(config);
   copy.router = { defaultPersona: copy.personas?.[0]?.id, maxRepliesPerComment: 1, cooldownSeconds: 8, historyTtlSeconds: 7200, historyMaxEntries: 2000, ...(copy.router ?? {}) };
@@ -17,7 +49,7 @@ export function applyConfigDefaults(config) {
   copy.voicevox = { enabled: false, baseUrl: "http://127.0.0.1:50021", defaultSpeaker: 3, maxChars: 200, timeoutMs: 30000, retries: 1, ...(copy.voicevox ?? {}) };
   copy.bouyomi = { enabled: false, baseUrl: "http://127.0.0.1:50080", timeoutMs: 5000, voice: 0, volume: -1, speed: -1, tone: -1, charsPerSecond: 6, ...(copy.bouyomi ?? {}) };
   copy.micMonitor = { enabled: false, threshold: 0.05, minSpeechMs: 150, silenceHoldMs: 800, ...(copy.micMonitor ?? {}) };
-  copy.commentReader = { enabled: false, engine: "webspeech", name: "default", rate: 1, pitch: 1, speed: -1, includeAuthor: true, skipEmotes: false, ignoreUsers: [], ...(copy.commentReader ?? {}) };
+  copy.commentReader = commentReaderDefaults(copy.commentReader);
   copy.news = { enabled: false, mode: "topic", maxItems: 3, dedupe: true, sources: [], ...(copy.news ?? {}), retry: { maxAttempts: 3, initialDelaySeconds: 30, maxDelaySeconds: 900, ...(copy.news?.retry ?? {}) } };
   copy.topics = { enabled: false, maxItems: 3, dedupe: true, sources: [], intro: "上のお題について、あなたのキャラクターとして自由にコメントしてください。", style: "雑談のお題として、自然な自分の言葉で自由にコメントする", ...(copy.topics ?? {}), retry: { maxAttempts: 3, initialDelaySeconds: 30, maxDelaySeconds: 900, ...(copy.topics?.retry ?? {}) } };
   copy.commentSources = { ...(copy.commentSources ?? {}), twitch: { enabled: false, ...(copy.commentSources?.twitch ?? {}) } };

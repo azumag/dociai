@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { BouyomiClient, BouyomiError } from "../src/bouyomi.js";
 import { applyDefaults, validateConfig } from "../src/config-loader.js";
 import { SpeechQueue } from "../src/speech-queue.js";
+import { resolveCommentReaderVoice } from "../src/app/runtime-factory.js";
 
 let request;
 globalThis.fetch = async (url) => {
@@ -49,12 +50,14 @@ const cfg = applyDefaults({
   connectors: { mock: { provider: "mock" } },
   personas: [{ id: "p", name: "P", connector: "mock", voice: { engine: "bouyomi" } }],
   triggers: {},
-  bouyomi: { enabled: true },
+  router: { historyTtlSeconds: 7200, historyMaxEntries: 2000 },
+  bouyomi: { enabled: true, voice: 4, speed: 120, tone: 110, volume: 80 },
   commentReader: { enabled: true, engine: "bouyomi" },
 });
 assert.equal(cfg.bouyomi.baseUrl, "http://127.0.0.1:50080");
 assert.equal(cfg.bouyomi.charsPerSecond, 6);
-assert.equal(cfg.commentReader.speed, -1);
+assert.equal(cfg.commentReader.bouyomi.speed, undefined);
+assert.deepEqual(resolveCommentReaderVoice(cfg.commentReader, cfg), { enabled: true, engine: "bouyomi", voice: 4, speed: 120, tone: 110, volume: 80 });
 assert.deepEqual(validateConfig(cfg).errors, []);
 
 globalThis.fetch = async () => { throw new TypeError("offline"); };

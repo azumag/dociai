@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { RuntimeFactory, personaColorFor, selectPlatformAdapter, createDociaiRuntimeFactory } from "../../src/app/runtime-factory.js";
+import { RuntimeFactory, personaColorFor, resolveCommentReaderVoice, selectPlatformAdapter, createDociaiRuntimeFactory } from "../../src/app/runtime-factory.js";
 import { AppRuntime } from "../../src/app/app-runtime.js";
 import { CommentStore } from "../../src/comment-store.js";
 import { ManualCommentSource } from "../../src/comment-sources.js";
 import { BrowserRuntimeController } from "../../src/runtime/runtime-controller.js";
 import { processConfig } from "../../src/config/config-pipeline.js";
 import { CURRENT_SCHEMA_VERSION } from "../../src/stream-events/contract.js";
+import { SpeechQueue } from "../../src/speech-queue.js";
 
 test("RuntimeFactory.createCandidate rejects a non-integer generation and duplicate component names", async () => {
   const factory = new RuntimeFactory(({ define }) => { define("x", () => ({})); define("x", () => ({})); });
@@ -29,6 +30,36 @@ test("personaColorFor is deterministic per persona index and neutral for unknown
   assert.notEqual(personaColorFor(config, "a"), personaColorFor(config, "b"));
   assert.equal(personaColorFor(config, "missing"), "hsl(0 0% 70%)");
   assert.equal(personaColorFor(null, "a"), "hsl(0 0% 70%)");
+});
+
+test("comment reader resolves only the selected engine's independent voice settings", () => {
+  const config = {
+    enabled: true,
+    engine: "voicevox",
+    webspeech: { name: "Kyoko", rate: 0.8, pitch: 1.4 },
+    voicevox: { speaker: 7, speed: 1.2, pitch: -0.05 },
+    bouyomi: { voice: 3, speed: 150, tone: 90 },
+  };
+  const shared = { voicevox: { defaultSpeaker: 9, maxChars: 180 }, bouyomi: { voice: 4, speed: 120, tone: 110, volume: 80 } };
+  assert.deepEqual(resolveCommentReaderVoice(config, shared), { enabled: true, engine: "voicevox", speaker: 7, maxChars: 180, speed: 1.2, pitch: -0.05 });
+  assert.deepEqual(resolveCommentReaderVoice({ ...config, engine: "webspeech" }), { enabled: true, engine: "webspeech", name: "Kyoko", rate: 0.8, pitch: 1.4 });
+  assert.deepEqual(resolveCommentReaderVoice({ ...config, engine: "bouyomi" }, shared), { enabled: true, engine: "bouyomi", voice: 3, speed: 150, tone: 90, volume: 80 });
+  assert.deepEqual(resolveCommentReaderVoice({ enabled: true, engine: "voicevox", voicevox: {} }, shared), { enabled: true, engine: "voicevox", speaker: 9, maxChars: 180 });
+  assert.deepEqual(resolveCommentReaderVoice({ enabled: true, engine: "voicevox", voicevox: { speaker: null } }, shared), { enabled: true, engine: "voicevox", speaker: 9, maxChars: 180 });
+  assert.deepEqual(resolveCommentReaderVoice({ enabled: true, engine: "bouyomi", bouyomi: {} }, shared), { enabled: true, engine: "bouyomi", voice: 4, speed: 120, tone: 110, volume: 80 });
+});
+
+test("runtime reload re-resolves transferred comment reader items with the new engine settings", () => {
+  const commentReader = { enabled: true, engine: "bouyomi", bouyomi: { speed: 150 } };
+  const shared = { bouyomi: { voice: 4, speed: 120, tone: 110, volume: 80 } };
+  const queue = new SpeechQueue({ resolveVoice: (personaId, voice) => personaId === "__comment_reader__" ? resolveCommentReaderVoice(commentReader, shared) : voice });
+  queue.prepareForRuntimeRestore();
+  queue.restoreAfterRuntimeReload({
+    items: [{ id: "comment", personaId: "__comment_reader__", personaName: "コメント読み上げ", text: "引き継ぎ", voice: { engine: "webspeech", rate: 0.8, pitch: 1.4 } }],
+    holdReasons: ["operator"],
+  });
+  assert.deepEqual(queue.snapshot().pending[0].voice, { enabled: true, engine: "bouyomi", voice: 4, speed: 150, tone: 110, volume: 80 });
+  queue.dispose();
 });
 
 test("selectPlatformAdapter swaps between Browser and Electron implementations based on the injected global scope", () => {
