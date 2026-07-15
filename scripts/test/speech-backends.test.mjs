@@ -220,6 +220,31 @@ test("multiple hold reasons resume only after every reason is released", async (
   queue.dispose();
 });
 
+test("mic hold lets the currently playing item keep speaking, but withholds the next item until release", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
+  const current = queue.enqueue({ text: "current", voice: { engine: "webspeech" } });
+  const next = queue.enqueue({ text: "next", voice: { engine: "webspeech" } });
+  assert.equal(current.state, "speaking");
+  assert.equal(next.state, "waiting");
+
+  queue.hold("mic");
+  await Promise.resolve();
+  assert.equal(current.state, "speaking", "マイク発話中でも再生中の読み上げは中断しない");
+  assert.equal(FakeUtterance.items.length, 1, "読み直しは発生せず、新しいUtteranceは作られない");
+
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  assert.equal(current.state, "done", "中断されなかったので自然に完了する");
+  assert.equal(next.state, "waiting", "マイク保留中は次の項目が始まらない");
+  assert.equal(FakeUtterance.items.length, 1);
+
+  queue.release("mic");
+  assert.equal(next.state, "speaking", "保留解除で次の項目が始まる");
+  queue.dispose();
+});
+
 test("same-tick terminal races settle once and teardown cancels all work", async () => {
   FakeUtterance.items = [];
   const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
