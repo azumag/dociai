@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createEventTriggerConfig } from "../../src/triggers/event-trigger-schema.js";
+import { validateActionConfig } from "../../src/actions/action-schema.js";
 import { defaultLeaf, defaultValueForFieldOperator, fieldOptionsForEventTypes, renderConditionBuilder } from "../../src/twitch-ui/rules/condition-builder.js";
 import { describeRewardsError, isUnknownReward, renderRewardSelector } from "../../src/twitch-ui/rules/reward-selector.js";
 import { defaultAction, renderActionEditor, renderActionList } from "../../src/twitch-ui/rules/action-editor.js";
@@ -314,6 +315,48 @@ test("action-editor: kind switch shows the right fields (ai-response: persona, t
   assert.equal(action.speak, false);
 });
 
+test("action-editor: overlay-cue creates a valid default and edits visual/audio/timing/policy fields", () => {
+  const document = createFakeDocument();
+  const action = defaultAction("overlay-cue");
+  assert.equal(validateActionConfig(action).ok, true);
+  const root = document.createElement("div");
+  let structuralChanges = 0;
+  const render = () => renderActionEditor(root, action, { path: "eventTriggers.r1.actions.0", personaOptions: [], onStructuralChange: () => { structuralChanges += 1; render(); }, onRemove: () => {} }, document);
+  render();
+  const asset = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.visual.assetId"]');
+  assert.ok(asset);
+  asset.value = "reward-image";
+  asset.dispatch("input");
+  const hold = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.timing.holdMs"]');
+  assert.deepEqual([hold.min, hold.max, hold.step], ["0", "300000", "1"]);
+  hold.value = "3000";
+  hold.dispatch("input");
+  const channel = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.policy.channel"]');
+  channel.value = "rewards";
+  channel.dispatch("input");
+  const audioToggle = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.audio"]');
+  audioToggle.checked = true;
+  audioToggle.dispatch("change");
+  assert.ok(structuralChanges > 0);
+  assert.ok(root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.audio.assetId"]'));
+  const width = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.visual.width"]');
+  const opacity = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.visual.opacity"]');
+  const queue = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.policy.maxQueue"]');
+  assert.deepEqual([width.min, width.max, width.step], ["1", "3840", "1"]);
+  assert.deepEqual([opacity.min, opacity.max, opacity.step], ["0", "1", "0.01"]);
+  assert.deepEqual([queue.min, queue.max, queue.step], ["1", "100", "1"]);
+  assert.equal(action.cue.visual.assetId, "reward-image");
+  const visualToggle = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.visual"]');
+  visualToggle.checked = false;
+  visualToggle.dispatch("change");
+  assert.equal(action.cue.visual, undefined);
+  assert.ok(action.cue.audio, "audio-only cue remains valid");
+  assert.equal(action.cue.timing.holdMs, 3000);
+  assert.equal(action.cue.policy.channel, "rewards");
+  assert.equal(validateActionConfig(action).ok, true);
+  assert.equal(root.querySelector('[data-config-path="eventTriggers.r1.actions.0.template"]'), null);
+});
+
 test("action-editor: renderActionList add/remove", () => {
   const document = createFakeDocument();
   const actions = [];
@@ -325,8 +368,12 @@ test("action-editor: renderActionList add/remove", () => {
   assert.equal(actions[0].kind, "template-speech");
   root.findButtonByText("＋ AI応答actionを追加").click();
   assert.equal(actions.length, 2);
+  root.findButtonByText("＋ オーバーレイcueを追加").click();
+  assert.equal(actions.length, 3);
+  assert.equal(actions[2].kind, "overlay-cue");
+  assert.equal(validateActionConfig(actions[2]).ok, true);
   root.findAllByTag("button").find((button) => button.textContent === "actionを削除").click();
-  assert.equal(actions.length, 1);
+  assert.equal(actions.length, 2);
 });
 
 // -------------------------------------------------------------------------------------------
@@ -394,6 +441,7 @@ test("rule-summary: condition/budget/action summaries and validation counts", ()
   assert.equal(summarizeBudget({}), "-");
   assert.equal(summarizeBudget({ cooldown: { cooldownMs: 30000, keyBy: ["actor"] }, rateLimit: { windowMs: 60000, maxActions: 5, overflowPolicy: "drop" } }), "CD 30s/actor / RL 5/60s→drop");
   assert.equal(summarizeActions({ actions: [{ kind: "ai-response", personaId: "p1" }, { kind: "template-speech" }] }), "AI:p1, テンプレ発話");
+  assert.equal(summarizeActions({ actions: [{ kind: "overlay-cue", cue: { visual: { assetId: "a" }, audio: { assetId: "b" } } }] }), "Overlay:画像+音声");
   assert.deepEqual(summarizeValidation([{ severity: "error" }, { severity: "warning" }, { severity: "warning" }]), { errors: 1, warnings: 2 });
 });
 
@@ -432,6 +480,10 @@ test("collectRuleIssues: flags an unregistered field, a wrong-kind field, an ope
 
   const clean = { ok1: createEventTriggerConfig({ id: "ok1", eventTypes: ["cheer"], condition: { all: [{ field: "data.bits", operator: "gte", value: 100 }] } }) };
   assert.equal(hasBlockingIssues(collectRuleIssues(clean, { personaIds: [] })), false);
+
+  const oneBadAction = { bad: { ...createEventTriggerConfig({ id: "bad", eventTypes: ["cheer"], condition: { all: [] } }), actions: [{ id: "o1", kind: "overlay-cue", cue: {} }] } };
+  const duplicates = collectRuleIssues(oneBadAction).filter((entry) => entry.code === "cue.empty");
+  assert.equal(duplicates.length, 1, "action validation issues must not be duplicated by the UI extension");
 });
 
 // -------------------------------------------------------------------------------------------
@@ -533,6 +585,29 @@ test("EventRulesView: cooldown/rateLimit/aggregation/action round trip through s
   assert.deepEqual(view.draft["rule-1"].rateLimit, savedRule.rateLimit);
   assert.deepEqual(view.draft["rule-1"].aggregation, savedRule.aggregation);
   assert.deepEqual(view.draft["rule-1"].actions, savedRule.actions);
+});
+
+test("EventRulesView: visual+audio overlay-cue saves and reloads without expanding omitted defaults", async () => {
+  const document = createFakeDocument();
+  let config = makeConfig({ "rule-1": createEventTriggerConfig({ id: "rule-1", eventTypes: ["cheer"], condition: { all: [{ field: "data.bits", operator: "gte", value: 1 }] } }) });
+  const view = new EventRulesView({ document, getConfig: () => config, onApplyConfig: async (next) => { config = next; } });
+  const root = document.createElement("div");
+  view.render(root);
+  const persisted = {
+    id: "overlay-save", kind: "overlay-cue", priority: 9,
+    cue: {
+      visual: { assetId: "reward-image", x: 0, y: 1, width: 3840, height: 2160, opacity: 0, zIndex: 1000 },
+      audio: { assetId: "reward-audio", volume: 1, startDelayMs: 100 },
+      timing: { holdMs: 3000 }, transition: { enter: "scale" }, policy: { channel: "rewards", mode: "replace", maxQueue: 1 },
+    },
+  };
+  view.draft["rule-1"].actions = [structuredClone(persisted)];
+  await view.save();
+  assert.equal(view.saveStatus.kind, "saved");
+  assert.deepEqual(config.eventTriggers["rule-1"].actions[0], persisted);
+  view.resetDraft();
+  assert.deepEqual(view.draft["rule-1"].actions[0], persisted);
+  assert.equal("enterMs" in view.draft["rule-1"].actions[0].cue.timing, false, "save/reload must not expand omitted defaults");
 });
 
 test("EventRulesView: save is blocked by a blocking validation issue and never calls onApplyConfig", async () => {
