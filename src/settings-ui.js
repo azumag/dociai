@@ -1034,7 +1034,7 @@ export class SettingsUI {
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "配信者の発話を検知するとAI音声キューを保留し、無音に戻ると再開します (中断された発話は最初から読み上げ直されます)。スピーカー環境ではAI自身の声を誤検知することがあるため、ヘッドホンや仮想オーディオデバイスでの分離を推奨します (docs/obs-mode.md 参照)。deviceが「既定のデバイス」以外に一覧されない場合は、一度「監視開始」でマイク権限を許可してから設定を開き直してください。";
+    note.textContent = "配信者の発話を検知すると次のAI音声の開始を保留し、無音に戻ると再開します (再生中の読み上げは止めずに最後まで続きます)。スピーカー環境ではAI自身の声を誤検知することがあるため、ヘッドホンや仮想オーディオデバイスでの分離を推奨します (docs/obs-mode.md 参照)。deviceが「既定のデバイス」以外に一覧されない場合は、一度「監視開始」でマイク権限を許可してから設定を開き直してください。";
     this._body.append(note);
   }
 

@@ -26,8 +26,13 @@ export class SpeechQueue {
       bouyomiCharsPerSecond,
     });
     this.controls = new SpeechControls({
-      onFirstHold: () => {
+      // "mic" (マイク発話によるバージイン) は現在の読み上げを止めずに最後まで再生させる。
+      // ただし保留状態そのものは維持するため、#pump() が次のアイテムを勝手に始めることはない
+      // (発話が止んで release されるまで次の読み上げは始まらない)。
+      // それ以外の理由 (manual/runtime系) は従来通り中断→キュー先頭へ戻し最初から読み直す。
+      onFirstHold: (reason) => {
         this.scheduler.held = true;
+        if (reason === "mic") return;
         if (this.activeExecution || this.current) {
           this.cancelMode = "hold";
           this.#cancelActive();
@@ -112,12 +117,12 @@ export class SpeechQueue {
 
   hold(reason = "manual") {
     this.controls.hold(reason);
-    this.log("読み上げを停止しました (キュー保留)");
+    this.log(reason === "mic" ? "マイクの発話を検知しました (次の読み上げを保留)" : "読み上げを停止しました (キュー保留)");
   }
 
   release(reason = "manual") {
     if (!this.controls.release(reason)) return;
-    this.log("読み上げを再開しました");
+    this.log(reason === "mic" ? "マイクの発話が止みました (読み上げを再開)" : "読み上げを再開しました");
   }
 
   stop() { this.hold("manual"); }
