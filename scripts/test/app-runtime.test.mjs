@@ -134,6 +134,22 @@ test("a candidate creation failure never touches the old runtime", async () => {
   assert.deepEqual(order, ["start:1"]);
 });
 
+test("config reload transfers the speech queue to the new runtime after the candidate starts", async () => {
+  const events = [];
+  let build = 0;
+  const factory = new RuntimeFactory(({ define }) => {
+    const generation = ++build;
+    const queue = { exportForRuntimeReload: () => generation === 1 ? { items: [{ text: "keep me" }], holdReasons: [] } : { items: [], holdReasons: [] }, restoreAfterRuntimeReload: (transfer) => events.push([generation, transfer.items.map((item) => item.text)]) };
+    define("speechQueue", () => queue, () => ({ start: () => events.push([generation, "start"]), dispose: () => events.push([generation, "dispose"]) }));
+  });
+  const runtime = new AppRuntime({ runtimeController: new BrowserRuntimeController(), factory });
+
+  await runtime.applyConfig({ v: 1 });
+  await runtime.applyConfig({ v: 2 });
+
+  assert.deepEqual(events, [[1, "start"], [1, []], [1, "dispose"], [2, "start"], [2, ["keep me"]]]);
+});
+
 test("AppRuntime.stop() and dispose() are idempotent", async () => {
   const order = [];
   const runtime = new AppRuntime({ runtimeController: new BrowserRuntimeController(), factory: trackingFactory(order) });
