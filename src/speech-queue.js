@@ -5,7 +5,7 @@ import { SpeechExecution } from "./speech/speech-execution.js";
 import { SpeechScheduler } from "./speech/speech-scheduler.js";
 
 export class SpeechQueue {
-  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {}, strictOrdering = false, onHealth = () => {}, webSpeech = {}, bouyomiCharsPerSecond } = {}) {
+  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {}, strictOrdering = false, onHealth = () => {}, webSpeech = {}, bouyomiCharsPerSecond, resolveVoice = null } = {}) {
     this.scheduler = new SpeechScheduler(policy);
     this.onUpdate = onUpdate;
     this.log = log;
@@ -14,6 +14,7 @@ export class SpeechQueue {
     this.cancelMode = null;
     this.voicevox = voicevox;
     this.bouyomi = bouyomi;
+    this.resolveVoice = resolveVoice;
     this.backends = new BackendRegistry({
       voicevox,
       bouyomi,
@@ -26,8 +27,10 @@ export class SpeechQueue {
     this.controls = new SpeechControls({
       onFirstHold: () => {
         this.scheduler.held = true;
-        this.cancelMode = "hold";
-        this.#cancelActive();
+        if (this.activeExecution || this.current) {
+          this.cancelMode = "hold";
+          this.#cancelActive();
+        }
       },
       onAllReleased: () => {
         this.scheduler.held = false;
@@ -36,16 +39,66 @@ export class SpeechQueue {
       onChange: () => this.onUpdate(this.items, this),
     });
     this.remoteClear = { status: "idle", error: null };
+    this.runtimeTransfer = null;
   }
 
   get current() { return this.scheduler.current; }
   get paused() { return this.controls.held; }
   get holdReasons() { return this.controls.snapshot(); }
-  get items() { return [...this.scheduler.history.items, ...this.scheduler.pending, ...(this.current ? [this.current] : [])]; }
+  get items() { return [...this.scheduler.history.items, ...this.scheduler.pending, ...(this.scheduler.resumeNext ? [this.scheduler.resumeNext] : []), ...(this.current ? [this.current] : [])]; }
   snapshot() {
     return Object.freeze({ ...this.scheduler.snapshot(), holdReasons: this.holdReasons, activeExecution: this.activeExecution?.snapshot() ?? null, backendWarnings: Object.freeze([...this.backends.warnings]), remoteClear: Object.freeze({ ...this.remoteClear }) });
   }
   waitingCount() { return this.scheduler.pending.length; }
+
+  // Config reloads replace the runtime bundle, but must not discard speech that the
+  // user has already queued. The active item is restored as the first pending item
+  // because its backend belongs to the old bundle and cannot continue across reload.
+  exportForRuntimeReload() {
+    const currentWasExplicitlyCancelled = this.cancelMode === "skipped" || this.cancelMode === "cancelled";
+    this.controls.hold("runtime-reload");
+    const { current, pending } = this.scheduler.snapshot();
+    const keep = (item, isCurrent) => {
+      if (!item || (!isCurrent && item.state !== "waiting")) return null;
+      const { state: _state, ...rest } = item;
+      return isCurrent ? { ...rest, createdAt: Date.now(), deadlineAt: null, runtimeReloadCurrent: true } : rest;
+    };
+    const transferableCurrent = currentWasExplicitlyCancelled ? null : current;
+    const transfer = { items: [keep(transferableCurrent, true), ...pending.map((item) => keep(item, false))].filter(Boolean), holdReasons: this.holdReasons.filter((reason) => !["runtime", "runtime-restore", "runtime-reload", "mic"].includes(reason)) };
+    this.runtimeTransfer = transfer;
+    return transfer;
+  }
+
+  restoreAfterRuntimeReload(transfer = []) {
+    const items = Array.isArray(transfer) ? transfer : transfer.items ?? [];
+    const holdReasons = Array.isArray(transfer) ? [] : transfer.holdReasons ?? [];
+    this.controls.hold("runtime-restore");
+    const resolved = items.map((item) => ({ ...item, createdAt: item.runtimeReloadCurrent ? Date.now() : item.createdAt, deadlineAt: item.runtimeReloadCurrent ? null : item.deadlineAt, voice: this.resolveVoice?.(item.personaId, item.voice) ?? item.voice }));
+    this.backends.validateMix([...this.scheduler.pending, ...(this.scheduler.resumeNext ? [this.scheduler.resumeNext] : [])].map((item) => item.voice?.engine ?? this.#defaultEngine()).concat(resolved.map((item) => item.voice?.engine ?? this.#defaultEngine())));
+    const restored = this.scheduler.restorePending(resolved);
+    for (const reason of holdReasons) this.controls.hold(reason);
+    this.controls.release("runtime-restore");
+    this.runtimeTransfer = null;
+    this.onUpdate(this.items, this);
+    return restored;
+  }
+
+  prepareForRuntimeRestore(transfer = null) { this.runtimeTransfer = transfer; this.controls.hold("runtime-restore"); }
+
+  mergeIntoRuntimeTransfer() {
+    if (!this.runtimeTransfer) return 0;
+    const known = new Set(this.runtimeTransfer.items.map((item) => item.id));
+    const candidates = [this.scheduler.resumeNext, this.current, ...this.scheduler.pending].filter(Boolean);
+    let added = 0;
+    for (const item of candidates) {
+      if (known.has(item.id) || ["skipped", "cancelled", "done", "failed", "dropped", "submitted"].includes(item.state)) continue;
+      const { state: _state, ...transferable } = item;
+      this.runtimeTransfer.items.push(transferable);
+      known.add(item.id);
+      added++;
+    }
+    return added;
+  }
 
   enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt, commentId }) {
     const engines = [...this.scheduler.pending, ...(this.current ? [this.current] : [])].map((item) => item.voice?.engine ?? this.#defaultEngine());
@@ -70,13 +123,20 @@ export class SpeechQueue {
   resume() { this.release("manual"); }
 
   skip() {
-    if (!this.current) return;
+    this.#removeTransferCurrent();
+    if (!this.current) return this.scheduler.removeResumeNext("skipped");
     this.cancelMode = "skipped";
     this.#cancelActive();
   }
 
   cancelItem(itemId) {
+    this.#removeTransferItem(itemId);
     if (this.current?.id === itemId) { this.cancelMode = "cancelled"; return this.#cancelActive(); }
+    if (this.scheduler.resumeNext?.id === itemId) {
+      const removed = this.scheduler.removeResumeNext("cancelled");
+      this.onUpdate(this.items, this);
+      return removed;
+    }
     const item = this.scheduler.pending.find((entry) => entry.id === itemId);
     if (!item) return false;
     const removed = this.scheduler.removePending(item, "cancelled");
@@ -89,11 +149,14 @@ export class SpeechQueue {
   }
 
   clearPending() {
+    if (this.runtimeTransfer) this.runtimeTransfer.items = this.runtimeTransfer.items.filter((item) => item.runtimeReloadCurrent);
     for (const item of [...this.scheduler.pending]) this.scheduler.removePending(item, "skipped");
+    this.scheduler.removeResumeNext("skipped");
     this.onUpdate(this.items, this);
   }
 
   clearAll() {
+    if (this.runtimeTransfer) { this.runtimeTransfer.items = []; this.runtimeTransfer.holdReasons = []; }
     this.clearPending();
     if (this.current) {
       this.cancelMode = "skipped";
@@ -124,6 +187,14 @@ export class SpeechQueue {
   }
 
   #defaultEngine() { return this.voicevox ? "voicevox" : "webspeech"; }
+
+  #removeTransferCurrent() {
+    if (this.runtimeTransfer) this.runtimeTransfer.items = this.runtimeTransfer.items.filter((item) => !item.runtimeReloadCurrent);
+  }
+
+  #removeTransferItem(itemId) {
+    if (this.runtimeTransfer) this.runtimeTransfer.items = this.runtimeTransfer.items.filter((item) => item.id !== itemId);
+  }
 
   #cancelActive() {
     if (!this.activeExecution) return false;

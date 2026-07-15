@@ -223,3 +223,59 @@ test("remote clear failures are retained in diagnostics", async () => {
   await queue.clearAll();
   assert.deepEqual(queue.snapshot().remoteClear, { status: "failed", error: "offline" });
 });
+
+test("runtime reload releases its internal hold even when there is no queue transfer", () => {
+  const queue = new SpeechQueue();
+  queue.prepareForRuntimeRestore();
+  assert.equal(queue.paused, true);
+  assert.equal(queue.restoreAfterRuntimeReload({ items: [], holdReasons: [] }), 0);
+  assert.equal(queue.paused, false);
+  queue.dispose();
+});
+
+test("runtime reload never restores a current item cleared immediately before transfer", async () => {
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
+  queue.enqueue({ personaId: "p", personaName: "P", text: "must-clear", voice: { engine: "webspeech" } });
+  await queue.clearAll();
+  assert.deepEqual(queue.exportForRuntimeReload().items, []);
+  queue.dispose();
+});
+
+test("runtime reload resumes the interrupted current item before a higher-priority pending item", () => {
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
+  queue.prepareForRuntimeRestore();
+  queue.restoreAfterRuntimeReload({
+    items: [
+      { personaId: "p", personaName: "P", text: "current", voice: { engine: "webspeech" }, priority: 0, runtimeReloadCurrent: true },
+      { personaId: "p", personaName: "P", text: "pending-high", voice: { engine: "webspeech" }, priority: 10 },
+    ],
+    holdReasons: [],
+  });
+  assert.equal(queue.current?.text, "current");
+  queue.dispose();
+});
+
+test("runtime reload protects transferred items and drops only candidate-start overflow", () => {
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ policy: { maxPending: 1, maxPendingPerSource: 1 }, webSpeech: { synthesis, Utterance: FakeUtterance } });
+  const transfer = { items: [{ id: "old", personaId: "p", personaName: "P", text: "old", source: "same", voice: { engine: "webspeech" } }], holdReasons: [] };
+  queue.prepareForRuntimeRestore(transfer);
+  const fresh = queue.enqueue({ personaId: "p", personaName: "P", text: "fresh", source: "same", voice: { engine: "webspeech" } });
+  queue.restoreAfterRuntimeReload(transfer);
+  assert.equal(fresh.state, "dropped");
+  assert.equal(queue.current?.text, "old");
+  queue.dispose();
+});
+
+test("candidate-start items merge into the shared transfer before rollback", () => {
+  const transfer = { items: [{ id: "old", personaId: "p", personaName: "P", text: "old", voice: {} }], holdReasons: [] };
+  const queue = new SpeechQueue();
+  queue.prepareForRuntimeRestore(transfer);
+  const fresh = queue.enqueue({ personaId: "p", personaName: "P", text: "fresh", voice: {} });
+  assert.equal(queue.mergeIntoRuntimeTransfer(), 1);
+  assert.deepEqual(transfer.items.map((item) => item.id), ["old", fresh.id]);
+  assert.equal(queue.mergeIntoRuntimeTransfer(), 0, "merge is idempotent by item id");
+  queue.dispose();
+});
