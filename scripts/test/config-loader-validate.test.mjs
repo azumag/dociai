@@ -54,6 +54,22 @@ test("validateConfig accepts comment reader engine-specific voice boundaries", (
   assert.deepEqual(validateConfig(config).errors, []);
 });
 
+test("validateConfig accepts commentReader.intervalSeconds within 0-3600 and rejects out-of-range values", () => {
+  const base = {
+    connectors: { mock: { provider: "mock" } },
+    personas: [{ id: "p", name: "P", connector: "mock" }],
+    triggers: {},
+  };
+  for (const intervalSeconds of [0, 5, 3600]) {
+    const config = { ...base, commentReader: { enabled: false, intervalSeconds } };
+    assert.deepEqual(validateConfig(config).errors, [], String(intervalSeconds));
+  }
+  for (const intervalSeconds of [-1, 3601, "not-a-number"]) {
+    const config = { ...base, commentReader: { enabled: false, intervalSeconds } };
+    assert.ok(validateConfig(config).errors.some((error) => error.includes("commentReader.intervalSeconds")), String(intervalSeconds));
+  }
+});
+
 test("validateConfig rejects malformed or out-of-range comment reader voice settings even while disabled", () => {
   const base = {
     connectors: { mock: { provider: "mock" } },

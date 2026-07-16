@@ -231,7 +231,8 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
     "includeAuthor": true,
     "skipEmotes": false,
     "collapseConsecutiveEmoji": false,
-    "ignoreUsers": []
+    "ignoreUsers": [],
+    "intervalSeconds": 0
   }
 }
 ```
@@ -240,6 +241,7 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 |---|---|---|
 | `enabled` | false | コメント読み上げを有効化 |
 | `engine` | webspeech | `webspeech` / `voicevox` / `bouyomi` (personas の `voice.engine` と同じ選択肢) |
+| `intervalSeconds` | 0 | あるコメントの読み上げが終わってから次のコメントの読み上げを始めるまでの最短待機時間 (秒、0〜3600)。既定0では待機なしで次々読み上げる。コメント読み上げより後ろに積まれたAI応答も、この待機の間は自分の順番を待つ (同じ読み上げキューを使うため) |
 | `webspeech` | `{ name: "default", rate: 1, pitch: 1 }` | Web Speech専用の音声名・速度・音高 |
 | `voicevox` | `{ speed: 1, pitch: 0, intonation: 1, volume: 1 }` | VOICEVOX専用の話者ID (`speaker`)・速度・音高・抑揚・音量。`speaker` 省略時は共通の `voicevox.defaultSpeaker` を使用 |
 | `bouyomi` | `{}` | 棒読みちゃん専用の話者・速度・音程・音量。省略した項目は共通の `bouyomi.voice` / `speed` / `tone` / `volume` を継承し、共通値の `-1` は本体設定に従う。待機時間が合わない場合は `speed` または `bouyomi.charsPerSecond` を調整する |

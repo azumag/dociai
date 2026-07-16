@@ -5,7 +5,7 @@ import { SpeechExecution } from "./speech/speech-execution.js";
 import { SpeechScheduler } from "./speech/speech-scheduler.js";
 
 export class SpeechQueue {
-  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {}, strictOrdering = false, onHealth = () => {}, webSpeech = {}, bouyomiCharsPerSecond, resolveVoice = null, resolveFallbackVoice = null } = {}) {
+  constructor({ onUpdate = () => {}, log = () => {}, voicevox = null, bouyomi = null, policy = {}, strictOrdering = false, onHealth = () => {}, webSpeech = {}, bouyomiCharsPerSecond, resolveVoice = null, resolveFallbackVoice = null, commentReaderIntervalMs = 0, isCommentReaderItem = () => false } = {}) {
     this.scheduler = new SpeechScheduler(policy);
     this.onUpdate = onUpdate;
     this.log = log;
@@ -16,6 +16,13 @@ export class SpeechQueue {
     this.bouyomi = bouyomi;
     this.resolveVoice = resolveVoice;
     this.resolveFallbackVoice = resolveFallbackVoice;
+    // コメント読み上げの間隔設定 (issue: コメント読み上げの間隔時間を設定したい)。次の
+    // コメント読み上げアイテムをtake()する前に、前回コメントが読み終わってからこの
+    // ミリ秒数が経過するまで待つ。AI応答など他ペルソナのアイテムには影響しない。
+    this.commentReaderIntervalMs = Math.max(0, Number(commentReaderIntervalMs) || 0);
+    this.isCommentReaderItem = isCommentReaderItem;
+    this.lastCommentReaderFinishedAt = null;
+    this.pumpRetryTimer = null;
     this.backends = new BackendRegistry({
       voicevox,
       bouyomi,
@@ -178,12 +185,14 @@ export class SpeechQueue {
   }
 
   dispose() {
+    this.#clearPumpRetry();
     this.cancelMode = "cancelled";
     this.#cancelActive();
     this.backends.dispose();
   }
 
   teardown() {
+    this.#clearPumpRetry();
     for (const item of [...this.scheduler.pending]) this.scheduler.removePending(item, "cancelled");
     this.controls.hold("runtime");
     this.cancelMode = "cancelled";
@@ -193,6 +202,22 @@ export class SpeechQueue {
   }
 
   #defaultEngine() { return this.voicevox ? "voicevox" : "webspeech"; }
+
+  #commentReaderWaitMs(item) {
+    if (!this.commentReaderIntervalMs || this.lastCommentReaderFinishedAt == null || !this.isCommentReaderItem(item)) return 0;
+    return Math.max(0, this.commentReaderIntervalMs - (Date.now() - this.lastCommentReaderFinishedAt));
+  }
+
+  #scheduleRetry(waitMs) {
+    if (this.pumpRetryTimer) return;
+    this.pumpRetryTimer = setTimeout(() => { this.pumpRetryTimer = null; this.#pump(); }, waitMs);
+  }
+
+  #clearPumpRetry() {
+    if (!this.pumpRetryTimer) return;
+    clearTimeout(this.pumpRetryTimer);
+    this.pumpRetryTimer = null;
+  }
 
   #removeTransferCurrent() {
     if (this.runtimeTransfer) this.runtimeTransfer.items = this.runtimeTransfer.items.filter((item) => !item.runtimeReloadCurrent);
@@ -211,6 +236,10 @@ export class SpeechQueue {
 
   #pump() {
     if (this.current || this.paused) return;
+    const next = this.scheduler.peekNext();
+    if (!next) return;
+    const waitMs = this.#commentReaderWaitMs(next);
+    if (waitMs > 0) { this.#scheduleRetry(waitMs); return; }
     const item = this.scheduler.take();
     if (!item) return;
     if (item.voice?.enabled === false) {
@@ -244,6 +273,9 @@ export class SpeechQueue {
       if (this.cancelMode === "skipped") state = "skipped";
       else if (this.cancelMode === "cancelled") state = "cancelled";
       this.scheduler.complete(execution.item, state, { error: result.error });
+      // "hold" (マイク以外の理由で中断→キュー先頭へ戻す) はまだ読み終わっていないため、
+      // 間隔のカウントには含めない。
+      if (this.isCommentReaderItem(execution.item)) this.lastCommentReaderFinishedAt = Date.now();
     }
     this.cancelMode = null;
     if (result.warning) this.log(result.warning);

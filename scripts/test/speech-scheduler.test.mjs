@@ -48,6 +48,22 @@ test("overflow policies support drop-new, replace-latest, and aggregate hooks", 
   assert.equal(target.text, "one+two");
 });
 
+test("peekNext looks at the next item without dequeuing it", () => {
+  const scheduler = new SpeechScheduler();
+  assert.equal(scheduler.peekNext(), null);
+  const first = scheduler.enqueue({ text: "first" });
+  scheduler.enqueue({ text: "second" });
+  assert.equal(scheduler.peekNext(), first);
+  assert.equal(scheduler.peekNext(), first, "peeking twice does not consume the item");
+  assert.equal(scheduler.pending.length, 2);
+  assert.equal(scheduler.take(), first);
+
+  const resumed = new SpeechScheduler();
+  resumed.enqueue({ text: "pending" });
+  resumed.restorePending([{ text: "resumed", createdAt: 0, runtimeReloadCurrent: true }]);
+  assert.equal(resumed.peekNext()?.text, "resumed", "resumeNext takes priority over pending");
+});
+
 test("expiry policy handles deadlines, max age, and held queues", () => {
   let now = 1_000;
   const scheduler = new SpeechScheduler({ maxAgeMs: 1_000, expireWhileHeld: false }, { now: () => now });

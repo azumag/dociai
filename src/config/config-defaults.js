@@ -33,6 +33,7 @@ export function commentReaderDefaults(input = {}) {
     skipEmotes: false,
     collapseConsecutiveEmoji: false,
     ignoreUsers: [],
+    intervalSeconds: 0,
     ...common,
     webspeech: section(webspeech, { name: "default", rate: 1, pitch: 1, ...legacyWebSpeech }),
     voicevox: section(voicevox, { speed: 1, pitch: 0, intonation: 1, volume: 1, ...legacyVoiceVox }),
