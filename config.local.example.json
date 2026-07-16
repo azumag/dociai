@@ -42,6 +42,11 @@
       "maxTokens": 768
     }
   },
+  "research": {
+    "enabled": false,
+    "connector": "minimax_main",
+    "maxResults": 5
+  },
   "voicevox": {
     "enabled": false,
     "baseUrl": "http://127.0.0.1:50021",

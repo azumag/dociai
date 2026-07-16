@@ -1,6 +1,6 @@
 export class ResponseCoordinator {
-  constructor({ runtime, getGeneration, getConnector, personaRouter, contextBuilder, speechQueue, dispatch = () => {}, publish = () => {}, onError = () => {} }) {
-    Object.assign(this, { runtime, getGeneration, getConnector, personaRouter, contextBuilder, speechQueue, dispatch, publish, onError }); this.disposed = false;
+  constructor({ runtime, getGeneration, getConnector, personaRouter, contextBuilder, webResearcher = null, speechQueue, dispatch = () => {}, publish = () => {}, onError = () => {} }) {
+    Object.assign(this, { runtime, getGeneration, getConnector, personaRouter, contextBuilder, webResearcher, speechQueue, dispatch, publish, onError }); this.disposed = false;
   }
   handleTrigger(triggerId, { comment = null, personaId = null, manual = false, task = null } = {}) {
     if (this.disposed) return [];
@@ -22,9 +22,21 @@ export class ResponseCoordinator {
     if (admitted === false) { this.dispatch({ type: "response-skipped", persona, triggerId, reason: "1コメント最大応答に到達" }); return null; }
     const request = this.runtime.createRequest({ generation, ownerId: `connector:${generation}:${persona.connector}`, kind: "ai-chat" });
     this.dispatch({ type: "response-started", persona, triggerId });
-    const { messages, debugText } = this.contextBuilder.build({ persona, comment, task });
-    this.dispatch({ type: "response-debug", persona, debugText });
     try {
+      let research = null;
+      if (this.webResearcher?.enabled) {
+        this.dispatch({ type: "research-started", persona, triggerId });
+        try {
+          research = await this.webResearcher.research({ comment, task, signal: request.context.signal, requestId: request.context.requestId, generation });
+          this.runtime.guard(request.context);
+          this.dispatch({ type: "research-completed", persona, triggerId, resultCount: research?.results?.length ?? 0 });
+        } catch (error) {
+          if (error?.kind === "cancelled" || error?.name === "AbortError" || request.context.signal.aborted) throw error;
+          this.dispatch({ type: "research-error", persona, triggerId, error });
+        }
+      }
+      const { messages, debugText } = this.contextBuilder.build({ persona, comment, task, research });
+      this.dispatch({ type: "response-debug", persona, debugText });
       const result = await connector.chat(messages, { signal: request.context.signal, requestId: request.context.requestId, generation });
       this.runtime.guard(request.context);
       this.dispatch({ type: "response-final", persona, triggerId, text: result.text });

@@ -6,6 +6,7 @@ export const CHANNELS = Object.freeze({
   SECRET_SET: "secrets:set",
   SECRET_REMOVE: "secrets:remove",
   AI_CHAT: "ai:chat",
+  AI_WEB_SEARCH: "ai:web-search",
   AI_CANCEL: "ai:cancel",
   FEED_FETCH: "feed:fetch",
   FEED_CANCEL: "feed:cancel",

@@ -1,6 +1,6 @@
 import type { PlatformInfo } from "./platform";
 import type { PublicError } from "./errors";
-import type { AiChatInput, AiChatResponse } from "./services/ai-contract";
+import type { AiChatInput, AiChatResponse, AiWebSearchInput, AiWebSearchResponse } from "./services/ai-contract";
 import type { FeedFetchInput, FeedFetchResponse } from "./services/feed-contract";
 import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./services/topic-contract";
 import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
@@ -34,6 +34,7 @@ export type DociaiApi = {
   };
   ai: {
     chat(input: AiChatInput): Promise<Result<AiChatResponse>>;
+    search(input: AiWebSearchInput): Promise<Result<AiWebSearchResponse>>;
     cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
   };
   feeds: {

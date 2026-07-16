@@ -14,6 +14,7 @@ import { TriggerEngine } from "../trigger-engine.js";
 import { ResponseCoordinator } from "./response-coordinator.js";
 import { AutomationCoordinator } from "./automation-coordinator.js";
 import { SourceCoordinator } from "./source-coordinator.js";
+import { WebResearcher } from "./web-researcher.js";
 import { TwitchChatSource, stripEmotes } from "../comment-sources.js";
 import { ElectronTwitchSource, subscribeStreamEventsThroughElectron } from "../platform/electron-services.js";
 import { listCaptureSources, selectCaptureSource } from "../platform/capture-adapter.js";
@@ -317,6 +318,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       )
     : expose("micMonitor", null);
 
+  const webResearcher = define("webResearcher", () => new WebResearcher({ config, getConnector: (id) => connectors.get(id) }));
   const contextBuilder = define("contextBuilder", () => new ContextBuilder({ commentStore: deps.commentStore, screenContext, config }));
 
   const responseCoordinator = define(
@@ -327,6 +329,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       getConnector: (id) => connectors.get(id),
       personaRouter,
       contextBuilder,
+      webResearcher,
       speechQueue,
       publish: (type, payload) => deps.broadcast(type, { ...payload, color: payload.personaId ? personaColorFor(config, payload.personaId) : payload.color }),
       dispatch: deps.dispatch,

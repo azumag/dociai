@@ -26,6 +26,7 @@ import { createTabsController } from "./settings/a11y/tabs-controller.js";
 import { createLiveAnnouncer } from "./settings/a11y/live-region.js";
 import { deferFocus, restoreFocus } from "./settings/a11y/focus-controller.js";
 import { fieldIds } from "./settings/a11y/field-a11y.js";
+import { isMiniMaxSearchConnector } from "./config/minimax-search-config.js";
 
 const PROVIDERS = registryOptions("providers");
 const TRIGGER_TYPES = registryOptions("triggerTypes");
@@ -576,6 +577,7 @@ export class SettingsUI {
       if (this.draft.context?.screenCapture?.connector === oldKey) {
         this.draft.context.screenCapture.connector = newKey;
       }
+      if (this.draft.research?.connector === oldKey) this.draft.research.connector = newKey;
     }
     if (mapName === "triggers") {
       for (const p of this.draft.personas ?? []) {
@@ -738,6 +740,7 @@ export class SettingsUI {
             if (p.connector === id) p.connector = "";
           }
           if (this.draft.context?.screenCapture?.connector === id) this.draft.context.screenCapture.connector = "";
+          if (this.draft.research?.connector === id) this.draft.research.connector = "";
           this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
           this._announcer?.announce(`コネクタ ${id} を削除しました`);
@@ -923,6 +926,9 @@ export class SettingsUI {
     const connectorIds = Object.keys(this.draft.connectors ?? {});
     const sc = this.draft.context?.screenCapture ?? {};
     const ctx = this.draft.context ?? {};
+    const research = this.draft.research ?? { enabled: false, connector: "", maxResults: 5 };
+    const researchConnectorIds = connectorIds.filter((id) => isMiniMaxSearchConnector(this.draft.connectors?.[id]));
+    if (!this.draft.research) this.draft.research = research;
 
     // screenCapture
     const scTitle = document.createElement("div");
@@ -941,6 +947,22 @@ export class SettingsUI {
     scGrid.append(this.#pathField("maxPromptChars", "context.maxPromptChars", { type: "number", value: ctx.maxPromptChars ?? 4000 }));
     scBody.append(scGrid);
     this._body.append(scCard);
+
+    const researchTitle = document.createElement("div");
+    researchTitle.className = "card-title";
+    researchTitle.textContent = "Web調査 prepass (MiniMax)";
+    const { card: researchCard, body: researchBody } = this.#card([researchTitle]);
+    const researchGrid = document.createElement("div");
+    researchGrid.className = "card-grid";
+    researchGrid.append(this.#pathCheckbox("有効", "research.enabled", { value: research.enabled }));
+    researchGrid.append(this.#pathSelect("検索担当connector", ["", ...researchConnectorIds], "research.connector", { value: research.connector ?? "" }));
+    researchGrid.append(this.#pathField("最大検索結果数", "research.maxResults", { type: "number", value: research.maxResults ?? 5, attrs: { min: 1, max: 10, step: 1 } }));
+    researchBody.append(researchGrid);
+    const researchHelp = document.createElement("p");
+    researchHelp.className = "muted";
+    researchHelp.textContent = "コメントまたは手動依頼への返答前にMiniMax Web検索を行います。Token Planの利用料金が発生する場合があります。検索失敗時は通常回答へフォールバックします。";
+    researchBody.append(researchHelp);
+    this._body.append(researchCard);
 
     // commonRules — 全ペルソナのsystemPromptの後ろに共通で付加される指示文 (issue: ハードコード
     // されていたものをconfig化)。空にすると何も付加されない (persona.systemPromptのみになる)。

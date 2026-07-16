@@ -33,6 +33,7 @@ const api: DociaiApi = {
   },
   ai: {
     chat: (input) => invoke(CHANNELS.AI_CHAT, input),
+    search: (input) => invoke(CHANNELS.AI_WEB_SEARCH, input),
     cancel: (requestId) => invoke(CHANNELS.AI_CANCEL, requestId),
   },
   feeds: {
