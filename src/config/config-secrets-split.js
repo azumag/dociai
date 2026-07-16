@@ -49,3 +49,26 @@ export function splitConnectorSecrets(config) {
   splitSourceTokens(publicConfig, "news", secretEntries);
   return { publicConfig, secretEntries, invalidIds };
 }
+
+function sourceRefs(config, sectionName) {
+  const sources = Array.isArray(object(config[sectionName]).sources) ? object(config[sectionName]).sources : [];
+  return sources.filter((source) => object(source).tokenConfigured && typeof object(source).tokenSecretRef === "string").map((source) => ({
+    key: source.tokenSecretRef,
+    label: `${sectionName}.${source.name || "source"}.token`,
+    clear: () => { source.tokenConfigured = false; },
+  }));
+}
+
+// `apiKeyConfigured`/`tokenConfigured` は保存時にsecretが実際に永続化できたかとは無関係に立つ
+// (SafeStorageSecretStoreはOSキーチェーン/キーリングが使えないと平文保存を避けてメモリのみへ
+// 落ちるため、次回起動でsecretは消えてもこのフラグだけ残る)。呼び出し側がsecrets.status()で
+// 生死を確認し、消えていたエントリだけ `clear()` でconfiguredフラグを戻せるよう参照を集める。
+export function collectConfiguredSecretRefs(config) {
+  const connectors = object(config.connectors);
+  const connectorRefs = Object.entries(connectors).filter(([, value]) => object(value).apiKeyConfigured && typeof object(value).apiKeySecretRef === "string").map(([id, value]) => ({
+    key: value.apiKeySecretRef,
+    label: `connectors.${id}.apiKey`,
+    clear: () => { value.apiKeyConfigured = false; },
+  }));
+  return [...connectorRefs, ...sourceRefs(config, "topics"), ...sourceRefs(config, "news")];
+}

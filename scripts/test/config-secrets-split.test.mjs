@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { splitConnectorSecrets } from "../../src/config/config-secrets-split.js";
+import { splitConnectorSecrets, collectConfiguredSecretRefs } from "../../src/config/config-secrets-split.js";
 
 test("splitConnectorSecrets moves connectors.*.apiKey and topics.sources[].token out, without mutating input", () => {
   const input = {
@@ -79,4 +79,23 @@ test("splitConnectorSecrets treats a whitespace-only token as unset rather than 
   const result = splitConnectorSecrets(input);
   assert.deepEqual(result.secretEntries, []);
   assert.equal(result.publicConfig.topics.sources[0].tokenConfigured, undefined);
+});
+
+test("collectConfiguredSecretRefs finds every secret ref marked configured and clear() flips only that flag in place", () => {
+  const config = {
+    connectors: { mock: { provider: "mock", apiKeyConfigured: true, apiKeySecretRef: "connectors.mock.apiKey" }, bare: { provider: "ollama" } },
+    topics: { sources: [{ name: "配信ネタ", tokenConfigured: true, tokenSecretRef: "topics.sources.0.token" }, { name: "no-token" }] },
+    news: { sources: [{ name: "news src", tokenConfigured: true, tokenSecretRef: "news.sources.0.token" }] },
+  };
+  const refs = collectConfiguredSecretRefs(config);
+  assert.deepEqual(refs.map((r) => r.key).sort(), ["connectors.mock.apiKey", "news.sources.0.token", "topics.sources.0.token"].sort());
+  const topicRef = refs.find((r) => r.key === "topics.sources.0.token");
+  topicRef.clear();
+  assert.equal(config.topics.sources[0].tokenConfigured, false);
+  assert.equal(config.connectors.mock.apiKeyConfigured, true, "clearing one ref does not touch unrelated refs");
+});
+
+test("collectConfiguredSecretRefs ignores entries without both the configured flag and the secret ref", () => {
+  const config = { connectors: { half: { provider: "mock", apiKeyConfigured: true } }, topics: { sources: [{ tokenSecretRef: "topics.sources.0.token" }] } };
+  assert.deepEqual(collectConfiguredSecretRefs(config), []);
 });

@@ -21,8 +21,8 @@ import { deriveSimulationStatus } from "../twitch-ui/history/history-store.js";
 import { AppRuntime } from "./app-runtime.js";
 import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } from "./runtime-factory.js";
 import { createAppActions } from "./app-actions.js";
-import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron } from "../platform/electron-services.js";
-import { splitConnectorSecrets } from "../config/config-secrets-split.js";
+import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron, secretsStatusThroughElectron } from "../platform/electron-services.js";
+import { splitConnectorSecrets, collectConfiguredSecretRefs } from "../config/config-secrets-split.js";
 import { personaTriggerIdsForDisplay } from "../ui/persona-trigger-display.js";
 
 const $ = (sel) => document.querySelector(sel);
@@ -138,6 +138,26 @@ function reportConfigError(e) {
   renderConfigStatus();
 }
 
+// tokenConfigured/apiKeyConfigured はsecretが実際に永続化できたかとは無関係に立つフラグなので
+// (SafeStorageSecretStoreはOSキーチェーン/キーリングが使えないと平文保存を避けてメモリのみへ
+// 落ちる。この場合アプリ再起動でsecretは消えるがフラグだけconfig.jsonに残り、設定画面は
+// 「設定済み」のプレースホルダーを表示し続けてしまう)、読込のたびsecrets.status()で生死を
+// 確認し、消えていたエントリのフラグを戻して警告を返す。
+async function reconcileSecretPersistence(config) {
+  const refs = collectConfiguredSecretRefs(config);
+  if (!refs.length) return [];
+  const result = await secretsStatusThroughElectron(refs.map((ref) => ref.key));
+  if (!result?.ok) return [];
+  const statusByKey = new Map(result.value.map((status) => [status.key, status]));
+  const warnings = [];
+  for (const ref of refs) {
+    if (statusByKey.get(ref.key)?.configured) continue;
+    ref.clear();
+    warnings.push(`${ref.label} が見つかりません。OSのキーチェーン/キーリングが利用できず前回保存時にメモリ上にしか保持されなかった可能性があります。設定画面で再入力してください`);
+  }
+  return warnings;
+}
+
 // Electron版はconfig.local.json(read-only)ではなく、Main側のconfig.json + safeStorage secretsを
 // window.dociai.config/secrets 経由で読み書きする (#405 fix)。戻り値の形は parseAndValidate() と
 // 揃えてあり、そのまま applyLoadedConfig()/reportConfigError() に渡せる。
@@ -151,10 +171,11 @@ async function loadFromElectronConfig() {
     err.validationErrors = errors;
     throw err;
   }
+  const secretWarnings = await reconcileSecretPersistence(config);
   // revisionはvalidateConfigを通過した (=applyLoadedConfigへ渡る) 場合にのみ更新する。失敗した
   // 読込のrevisionを反映すると、次の保存がCONFIG_CONFLICTチェックなしでそのrevisionを使ってしまう。
   state.configRevision = revision;
-  return { config, warnings: [...mainWarnings, ...warnings], source: "Electron設定ストア (config.json)", migration: { steps: [], secretCandidates: [], revision } };
+  return { config, warnings: [...mainWarnings, ...warnings, ...secretWarnings], source: "Electron設定ストア (config.json)", migration: { steps: [], secretCandidates: [], revision } };
 }
 
 function loadCurrentConfig() {
@@ -615,6 +636,7 @@ async function saveToElectronConfig(processedConfig) {
   for (const entry of secretEntries) {
     const secretResult = await setSecretThroughElectron(entry.key, entry.value);
     if (!secretResult?.ok) logEvent(`シークレットの保存に失敗しました (${entry.key}): ${scrub(secretResult?.error?.message ?? "unknown error")}`, "error");
+    else if (secretResult.value?.persistent === false) logEvent(`シークレット (${entry.key}) はOSのキーチェーン/キーリングが利用できないため、今回の起動セッション中のみ保持されます。アプリを再起動すると失われるため、その後は設定画面で再入力してください`, "warn");
   }
   return publicConfig;
 }

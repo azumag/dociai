@@ -86,6 +86,7 @@ export async function saveConfigThroughElectron(config, expectedRevision) {
   return globalThis.dociai.config.save({ config, ...(expectedRevision !== undefined ? { expectedRevision } : {}) });
 }
 export async function setSecretThroughElectron(key, value) { return globalThis.dociai.secrets.set({ key, value }); }
+export async function secretsStatusThroughElectron(keys) { return globalThis.dociai.secrets.status(keys); }
 
 export class ElectronTwitchSource {
   id = "twitch"; label = "Twitch";
