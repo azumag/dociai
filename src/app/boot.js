@@ -514,6 +514,7 @@ function renderTopicPanel() {
   const failures = $("#topic-failures");
   const topicReader = appRuntime.getComponent("topicReader");
   $("#btn-topic-read").disabled = !topicReader?.enabled || topicReader?.busy;
+  $("#topic-busy").hidden = !topicReader?.busy;
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
     failures.replaceChildren();
@@ -714,6 +715,7 @@ appRuntime = new AppRuntime({
     isMicBargeInEnabled: () => state.micBargeInEnabled !== false,
     onResponseError: (error, persona) => logEvent(`「${persona?.name ?? "不明"}」応答失敗: ${scrub(error.message)}`, "error"),
     onAutomationError: (kind, error) => logEvent(`${kind === "news" ? "ニュース" : "話題"}読み上げ失敗: ${scrub(error.message)}`, "error"),
+    onAutomationStart: (kind) => (kind === "news" ? renderNewsPanel() : renderTopicPanel()),
     onAutomationComplete: (kind) => (kind === "news" ? renderNewsPanel() : renderTopicPanel()),
     onNewsRead: ({ persona, item, text, debugText }) => {
       state.lastDebug = { personaName: `${persona.name} (ニュース)`, debugText, at: new Date() };

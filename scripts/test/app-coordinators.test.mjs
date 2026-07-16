@@ -124,6 +124,24 @@ test("AutomationCoordinator suppresses duplicate runs and ObsBridge is bounded a
   bridge.dispose(); assert.equal(bridge.publish("comment", {}), false);
 });
 
+test("AutomationCoordinator notifies onStart after the reader run begins, once per run", async () => {
+  let resolve;
+  const pending = new Promise((done) => { resolve = done; });
+  const events = [];
+  const reader = { busy: false, run() { this.busy = true; return pending.then(() => { this.busy = false; }); } };
+  const automation = new AutomationCoordinator({
+    runtime,
+    getGeneration: () => 1,
+    onStart: (kind) => events.push(`start:${kind}:${reader.busy ? "busy" : "idle"}`),
+    onComplete: (kind) => events.push(`complete:${kind}`),
+  });
+  const first = automation.run("topics", reader);
+  automation.run("topics", reader); // 重複runはonStartを発火しない
+  assert.deepEqual(events, ["start:topics:busy"], "onStartはreader.busyが立った後に1回だけ呼ばれる");
+  resolve(); await first;
+  assert.deepEqual(events, ["start:topics:busy", "complete:topics"]);
+});
+
 test("ObsBridge replies to client snapshot requests and heartbeats", () => {
   const messages = [];
   const bridge = new ObsBridge({ transport: { postMessage: (message) => messages.push(message) }, getGeneration: () => 2 });

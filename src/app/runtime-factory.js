@@ -359,6 +359,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       runtime: deps.runtimeController,
       getGeneration: () => generation,
       onError: (kind, error) => deps.onAutomationError(kind, error),
+      onStart: (kind) => deps.onAutomationStart?.(kind),
       onComplete: (kind) => deps.onAutomationComplete(kind),
     }),
     (instance) => ({ dispose: () => instance.dispose() }),
