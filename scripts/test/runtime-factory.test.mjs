@@ -127,7 +127,11 @@ function minimalConfig(extra = {}) {
 }
 
 test("buildDociaiRuntime wires a candidate bundle in dependency order without starting anything", async () => {
-  const config = minimalConfig({ news: { enabled: true, trigger: "newsTrigger", sources: [] } });
+  const config = minimalConfig({
+    personas: [{ id: "p1", name: "P1", connector: "mock", triggers: ["newsTrigger"] }],
+    news: { enabled: true, trigger: "newsTrigger", sources: [] },
+    topics: { enabled: true, trigger: "newsTrigger", sources: [] },
+  });
   const { deps, calls } = fakeDeps();
   const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
 
@@ -144,12 +148,17 @@ test("buildDociaiRuntime wires a candidate bundle in dependency order without st
 
   const automationCoordinator = bundle.get("automationCoordinator");
   const newsReader = bundle.get("newsReader");
+  const topicReader = bundle.get("topicReader");
+  const responseCoordinator = bundle.get("responseCoordinator");
   const runCalls = [];
-  automationCoordinator.run = (kind, reader) => { runCalls.push([kind, reader === newsReader]); return Promise.resolve(); };
+  let responseCalls = 0;
+  automationCoordinator.run = (kind, reader) => { runCalls.push([kind, reader]); return Promise.resolve(); };
+  responseCoordinator.handleTrigger = () => { responseCalls += 1; return ["unexpected-response"]; };
 
   const handleTrigger = bundle.get("handleTrigger");
   assert.deepEqual(handleTrigger("newsTrigger"), []);
-  assert.deepEqual(runCalls, [["news", true]]);
+  assert.deepEqual(runCalls, [["news", newsReader], ["topics", topicReader]], "one shared trigger must start every matching automation");
+  assert.equal(responseCalls, 0, "an automation trigger must not also dispatch a persona response");
 });
 
 test("micMonitor only interrupts AI speech (speechQueue.hold(\"mic\")) while deps.isMicBargeInEnabled() is true; toggling it off releases an existing hold", async () => {

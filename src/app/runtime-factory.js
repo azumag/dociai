@@ -380,8 +380,16 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   }));
 
   const handleTrigger = expose("handleTrigger", (triggerId, options = {}) => {
-    if (newsReader.enabled && config.news.trigger === triggerId) { automationCoordinator.run("news", newsReader); return []; }
-    if (topicReader.enabled && config.topics.trigger === triggerId) { automationCoordinator.run("topics", topicReader); return []; }
+    let automationMatched = false;
+    if (newsReader.enabled && config.news.trigger === triggerId) {
+      automationCoordinator.run("news", newsReader);
+      automationMatched = true;
+    }
+    if (topicReader.enabled && config.topics.trigger === triggerId) {
+      automationCoordinator.run("topics", topicReader);
+      automationMatched = true;
+    }
+    if (automationMatched) return [];
     return responseCoordinator.handleTrigger(triggerId, options);
   });
 
