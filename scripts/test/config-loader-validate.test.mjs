@@ -29,6 +29,23 @@ test("validateConfig errors on a missing Todoist topics.sources token unless tok
   assert.ok(!configuredErrors.some((e) => e.includes("token がありません")));
 });
 
+test("validateConfig errors on unknown topics.personas ids and warns when randomPersona has no candidates", () => {
+  const base = { connectors: { mock: { provider: "mock" } }, personas: [{ id: "p", name: "P", connector: "mock" }], triggers: {} };
+
+  const unknownId = { ...base, topics: { enabled: true, sources: [{ type: "todoist", projectId: "1", name: "x", tokenConfigured: true }], personas: ["missing"] } };
+  const { errors } = validateConfig(unknownId);
+  assert.ok(errors.some((e) => e.includes(`topics.personas の "missing" が personas に存在しません`)));
+
+  const emptyPool = { ...base, topics: { enabled: true, sources: [{ type: "todoist", projectId: "1", name: "x", tokenConfigured: true }], randomPersona: true, personas: [] } };
+  const { warnings } = validateConfig(emptyPool);
+  assert.ok(warnings.some((w) => w.includes("topics.randomPersona が true ですが topics.personas が空です")));
+
+  const valid = { ...base, topics: { enabled: true, sources: [{ type: "todoist", projectId: "1", name: "x", tokenConfigured: true }], randomPersona: true, personas: ["p"] } };
+  const { errors: validErrors, warnings: validWarnings } = validateConfig(valid);
+  assert.deepEqual(validErrors, []);
+  assert.ok(!validWarnings.some((w) => w.includes("topics.randomPersona")));
+});
+
 test("validateConfig errors on a missing legacy news.sources Todoist token unless tokenConfigured is set", () => {
   const withoutToken = { connectors: {}, personas: [], triggers: {}, news: { enabled: true, sources: [{ type: "todoist", projectId: "1", name: "x" }] } };
   const { errors: withoutTokenErrors } = validateConfig(withoutToken);
@@ -79,6 +96,22 @@ test("validateConfig accepts comment reader engine-specific voice boundaries", (
     },
   };
   assert.deepEqual(validateConfig(config).errors, []);
+});
+
+test("validateConfig accepts commentReader.intervalSeconds within 0-3600 and rejects out-of-range values", () => {
+  const base = {
+    connectors: { mock: { provider: "mock" } },
+    personas: [{ id: "p", name: "P", connector: "mock" }],
+    triggers: {},
+  };
+  for (const intervalSeconds of [0, 5, 3600]) {
+    const config = { ...base, commentReader: { enabled: false, intervalSeconds } };
+    assert.deepEqual(validateConfig(config).errors, [], String(intervalSeconds));
+  }
+  for (const intervalSeconds of [-1, 3601, "not-a-number"]) {
+    const config = { ...base, commentReader: { enabled: false, intervalSeconds } };
+    assert.ok(validateConfig(config).errors.some((error) => error.includes("commentReader.intervalSeconds")), String(intervalSeconds));
+  }
 });
 
 test("validateConfig rejects malformed or out-of-range comment reader voice settings even while disabled", () => {
