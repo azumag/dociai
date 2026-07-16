@@ -6,7 +6,7 @@ import { MemoryItemProcessingStore } from "./readers/item-processing-store.js";
 import { createNewsPipelineCoordinator } from "./news/news-pipeline-coordinator.js";
 
 export class NewsReader {
-  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), historyStore = undefined, clock = () => Date.now(), pipeline = null }) {
+  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), historyStore = undefined, clock = () => Date.now(), pipeline = null, isRuntimeEnabled = () => true }) {
     this.config = config;
     this.getConnector = getConnector;
     this.personaRouter = personaRouter;
@@ -16,6 +16,7 @@ export class NewsReader {
     this.onRead = onRead;
     this.store = store;
     this.clock = clock;
+    this.isRuntimeEnabled = isRuntimeEnabled;
     // pipelineが注入されない場合 (直接構築されるテスト/簡易利用) は、自分自身の`fetchAll`へ
     // 委譲するacquire stageを持つcoordinatorを内部構築する。これにより `reader.fetchAll = ...`
     // による差し替えが、run() 経由でも引き続き効く。historyStoreを渡さない場合は
@@ -40,12 +41,18 @@ export class NewsReader {
     return new Set(this.store.list({ states: "read" }).map((record) => record.guid ?? record.key));
   }
 
+  // config.news.enabled (設定保存が必要) と、操作卓のトグル (即時・セッション限りの一時停止)
+  // の両方が立っているときだけ有効。
   get enabled() {
-    return !!this.config.news?.enabled;
+    return !!this.config.news?.enabled && this.isRuntimeEnabled();
   }
 
   // トリガー (interval/manual) から呼ばれるエントリポイント
   async run(context = {}) {
+    if (!this.isRuntimeEnabled()) {
+      this.log("ニュース機能は操作卓のトグルで一時停止中です");
+      return;
+    }
     return this.pipeline.run(context);
   }
 
