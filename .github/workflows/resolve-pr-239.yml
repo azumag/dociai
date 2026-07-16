@@ -6,7 +6,8 @@ on:
       - claude/github-issue-186-l1m80x
 
 permissions:
-  contents: write
+  contents: read
+  issues: write
 
 jobs:
   inspect-conflicts:
@@ -15,8 +16,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Inspect merge conflicts
+      - name: Inspect merge conflicts and report
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -25,14 +28,14 @@ jobs:
           git merge --no-commit --no-ff origin/main
           merge_status=$?
           set -e
-          echo "MERGE_STATUS=${merge_status}"
-          echo "--- git status --short ---"
-          git status --short
-          echo "--- unresolved files ---"
-          git diff --name-only --diff-filter=U
+          conflicts="$(git diff --name-only --diff-filter=U)"
+          status_short="$(git status --short)"
+          git merge --abort || true
+
           if [ "${merge_status}" -eq 0 ]; then
-            git merge --abort || true
-            echo "No conflicts detected"
-            exit 0
+            body="<!-- pr239-conflict-inspection -->\nTemporary conflict inspection result: no merge conflicts detected against current main."
+          else
+            body="<!-- pr239-conflict-inspection -->\nTemporary conflict inspection result against current main.\n\nUnresolved files:\n\`\`\`\n${conflicts}\n\`\`\`\n\nGit status:\n\`\`\`\n${status_short}\n\`\`\`"
           fi
-          exit 1
+
+          gh api "repos/${GITHUB_REPOSITORY}/issues/239/comments" -f body="${body}"
