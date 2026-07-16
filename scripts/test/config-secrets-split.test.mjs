@@ -61,3 +61,22 @@ test("splitConnectorSecrets flags a key that exceeds Main's parseSecretKey 128-c
   const result = splitConnectorSecrets(input);
   assert.deepEqual(result.invalidIds, [{ path: `connectors.${longId}`, reason: "invalid-secret-key-id" }]);
 });
+
+test("splitConnectorSecrets trims accidental whitespace/newlines pasted around apiKey/token values", () => {
+  const input = {
+    connectors: { mock: { provider: "mock", apiKey: "  sk-secret\n" } },
+    topics: { sources: [{ type: "todoist", token: "\ttodo-secret \n", projectId: "1" }] },
+  };
+  const result = splitConnectorSecrets(input);
+  assert.deepEqual(result.secretEntries, [
+    { key: "connectors.mock.apiKey", value: "sk-secret" },
+    { key: "topics.sources.0.token", value: "todo-secret" },
+  ]);
+});
+
+test("splitConnectorSecrets treats a whitespace-only token as unset rather than a configured secret", () => {
+  const input = { connectors: {}, topics: { sources: [{ type: "todoist", token: "   ", projectId: "1" }] } };
+  const result = splitConnectorSecrets(input);
+  assert.deepEqual(result.secretEntries, []);
+  assert.equal(result.publicConfig.topics.sources[0].tokenConfigured, undefined);
+});

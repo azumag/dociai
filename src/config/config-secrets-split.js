@@ -15,9 +15,9 @@ function splitSourceTokens(publicConfig, sectionName, secretEntries) {
   const sources = Array.isArray(section.sources) ? section.sources : [];
   section.sources = sources.map((value, index) => {
     const source = object(value);
-    if (typeof source.token === "string" && source.token) {
+    if (typeof source.token === "string" && source.token.trim()) {
       const key = `${sectionName}.sources.${index}.token`;
-      secretEntries.push({ key, value: source.token });
+      secretEntries.push({ key, value: source.token.trim() });
       delete source.token;
       source.tokenConfigured = true;
       source.tokenSecretRef = key;
@@ -34,10 +34,10 @@ export function splitConnectorSecrets(config) {
   const invalidIds = [];
   for (const [id, value] of Object.entries(connectors)) {
     const connector = object(value);
-    if (typeof connector.apiKey === "string" && connector.apiKey) {
+    if (typeof connector.apiKey === "string" && connector.apiKey.trim()) {
       const key = `connectors.${id}.apiKey`;
       if (!SECRET_KEY_PATTERN.test(key)) invalidIds.push({ path: `connectors.${id}`, reason: "invalid-secret-key-id" });
-      secretEntries.push({ key, value: connector.apiKey });
+      secretEntries.push({ key, value: connector.apiKey.trim() });
       delete connector.apiKey;
       connector.apiKeyConfigured = true;
       connector.apiKeySecretRef = key;
