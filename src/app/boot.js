@@ -3,6 +3,7 @@
 
 import { loadFromServer, loadFromFile, saveToServer, validateConfig } from "../config-loader.js";
 import { CommentStore } from "../comment-store.js";
+import { MemoryNewsHistoryStore } from "../news/selection/memory-news-history-store.js";
 import { ManualCommentSource } from "../comment-sources.js";
 import { scrubSecrets, checkSecretStorage } from "../security.js";
 import { SettingsUI } from "../settings-ui.js";
@@ -29,6 +30,10 @@ const $ = (sel) => document.querySelector(sel);
 
 const platform = selectPlatformAdapter();
 const commentStore = new CommentStore({ limit: 80 });
+// issue #189: constructed once (like commentStore above) so news dedupe/spam/diversity history
+// survives config reload — buildDociaiRuntime() rebuilds the whole component graph per
+// generation, but this must not reset "already delivered" memory each time.
+const newsHistoryStore = new MemoryNewsHistoryStore();
 const manualSource = new ManualCommentSource();
 const runtimeController = new BrowserRuntimeController();
 
@@ -720,6 +725,7 @@ appRuntime = new AppRuntime({
   deps: {
     runtimeController,
     commentStore,
+    newsHistoryStore,
     manualSource,
     platform,
     log: (message, level = "info") => logEvent(message, level),

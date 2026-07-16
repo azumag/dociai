@@ -14,6 +14,7 @@ import { AiService } from "../services/ai/ai-service";
 import type { AiChatInput, AiMessage } from "../../shared/services/ai-contract";
 import { FeedService } from "../services/feeds/feed-service";
 import { TopicService } from "../services/topics/topic-service";
+import type { NewsSourceService } from "../services/news/news-source-service";
 import type { FeedFetchInput } from "../../shared/services/feed-contract";
 import type { SpeechBackendService } from "../services/speech/speech-backend-service";
 import type { TwitchChatService } from "../services/twitch/twitch-chat-service";
@@ -27,7 +28,7 @@ import type { TwitchComposition } from "../services/twitch/twitch-composition";
 import type { UpdateService } from "../services/update/update-service";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; newsSourceService: NewsSourceService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -59,6 +60,20 @@ function parseOptionalFeatures(input: unknown): string[] | undefined {
 function sourceIndex(payload: Record<string, unknown>): number {
   if (typeof payload.sourceIndex !== "number" || !Number.isSafeInteger(payload.sourceIndex) || payload.sourceIndex < 0 || payload.sourceIndex > 1_000) throw new PublicIpcError("INVALID_INPUT", "sourceIndexが不正です");
   return payload.sourceIndex;
+}
+
+// 記事URLはRSS配信元によってhttpのままの場合もあるため、expectExternalHttpsUrl (外部URLを
+// 直接開く用、https限定) は使わない。実際のSSRF/private-IP/redirect安全性は
+// NewsSourceService -> SafeHttpClient側が担保する — ここではIPC入力の形だけを検査する。
+function articleUrl(payload: Record<string, unknown>): string {
+  const value = expectString(payload.url, "url", 2_048);
+  try {
+    const url = new URL(value);
+    if (!/^https?:$/.test(url.protocol)) throw new Error("unsupported protocol");
+  } catch {
+    throw new PublicIpcError("INVALID_INPUT", "urlが不正です");
+  }
+  return value;
 }
 
 function parseModelLicense(value: unknown): ModelLicense {
@@ -171,6 +186,11 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     return options.feedService.fetch({ sourceIndex: sourceIndex(payload), ...requestMetadata(payload) });
   }, options);
   register(CHANNELS.FEED_CANCEL, (event, input) => ({ cancelled: options.feedService.cancel(expectString(input, "requestId", 256)) }), options);
+  register(CHANNELS.NEWS_ARTICLE_FETCH, (event, input) => {
+    const payload = expectRecord(input, "news article request");
+    return options.newsSourceService.fetchArticle({ sourceIndex: sourceIndex(payload), url: articleUrl(payload), ...requestMetadata(payload) });
+  }, options);
+  register(CHANNELS.NEWS_ARTICLE_CANCEL, (event, input) => ({ cancelled: options.newsSourceService.cancel(expectString(input, "requestId", 256)) }), options);
   register(CHANNELS.TOPIC_FETCH, (event, input) => {
     const payload = expectRecord(input, "topic request");
     return options.topicService.fetchTopics({ sourceIndex: sourceIndex(payload), ...requestMetadata(payload) });

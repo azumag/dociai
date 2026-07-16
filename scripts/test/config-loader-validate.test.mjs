@@ -56,6 +56,33 @@ test("validateConfig errors on a missing legacy news.sources Todoist token unles
   assert.ok(!configuredErrors.some((e) => e.includes("token がありません")));
 });
 
+test("validateConfig (issue #188) accepts google-news sources and validates articleFetch/allowedHosts/license", () => {
+  const valid = {
+    connectors: { main: { provider: "mock" } }, personas: [{ id: "p", name: "P", connector: "main" }], triggers: {},
+    news: {
+      enabled: true,
+      sources: [{
+        type: "google-news", name: "gn", url: "https://news.google.com/rss/search?q=x",
+        articleFetch: "auto", allowedHosts: ["news.google.com", "example.com"],
+        license: { name: "CC BY", url: "https://example.com/license", attributionRequired: true },
+      }],
+    },
+  };
+  assert.deepEqual(validateConfig(valid).errors, []);
+
+  const missingUrl = { connectors: {}, personas: [], triggers: {}, news: { enabled: true, sources: [{ type: "google-news", name: "gn" }] } };
+  assert.ok(validateConfig(missingUrl).errors.some((e) => e.includes(".url がありません")));
+
+  const badArticleFetch = { connectors: {}, personas: [], triggers: {}, news: { enabled: true, sources: [{ type: "rss", name: "r", url: "https://example.com/rss", articleFetch: "always" }] } };
+  assert.ok(validateConfig(badArticleFetch).errors.some((e) => e.includes('articleFetch "always"')));
+
+  const badAllowedHosts = { connectors: {}, personas: [], triggers: {}, news: { enabled: true, sources: [{ type: "rss", name: "r", url: "https://example.com/rss", allowedHosts: "example.com" }] } };
+  assert.ok(validateConfig(badAllowedHosts).errors.some((e) => e.includes("allowedHosts は文字列の配列")));
+
+  const badLicense = { connectors: {}, personas: [], triggers: {}, news: { enabled: true, sources: [{ type: "rss", name: "r", url: "https://example.com/rss", license: { attributionRequired: true } }] } };
+  assert.ok(validateConfig(badLicense).errors.some((e) => e.includes("license.name がありません")));
+});
+
 test("validateConfig accepts comment reader engine-specific voice boundaries", () => {
   const config = {
     connectors: { mock: { provider: "mock" } },

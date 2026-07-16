@@ -9,6 +9,7 @@ import { ScreenContext } from "../screen-capture.js";
 import { MicMonitor } from "../mic-monitor.js";
 import { ContextBuilder } from "../context-builder.js";
 import { NewsReader } from "../news-reader.js";
+import { createNewsPipelineCoordinator } from "../news/news-pipeline-coordinator.js";
 import { TopicReader } from "../topic-reader.js";
 import { TriggerEngine } from "../trigger-engine.js";
 import { ResponseCoordinator } from "./response-coordinator.js";
@@ -365,6 +366,28 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     (instance) => ({ dispose: () => instance.dispose() }),
   );
 
+  // Issue #187: `newsPipeline` is the composition root's own handle on NewsPipelineCoordinator,
+  // defined as a first-class runtime component so later child issues (#188-#194) can swap
+  // individual stages here without ever touching NewsReader itself. NewsReader (below) still
+  // owns the public reader API (status/retryNow/skip/restore/run) and simply delegates run()
+  // to this pipeline instance.
+  //
+  // Issue #189: `deps.newsHistoryStore`, when supplied, is a MemoryNewsHistoryStore constructed
+  // ONCE at boot.js module scope (same pattern as `deps.commentStore`) so persistent
+  // dedupe/spam/diversity history survives config reload — a fresh generation's runtime
+  // component graph must not reset "have we already delivered this article" memory. Falls back
+  // to createNewsPipelineCoordinator's own bounded default when a caller (tests) doesn't supply one.
+  const newsPipeline = define("newsPipeline", () => createNewsPipelineCoordinator({
+    getConfig: () => config,
+    getConnector: (id) => connectors.get(id),
+    personaRouter,
+    contextBuilder,
+    speechQueue,
+    log: deps.log,
+    onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText }); },
+    ...(deps.newsHistoryStore ? { historyStore: deps.newsHistoryStore } : {}),
+  }));
+
   const newsReader = define("newsReader", () => new NewsReader({
     config,
     getConnector: (id) => connectors.get(id),
@@ -374,6 +397,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     log: deps.log,
     onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText }); },
     isRuntimeEnabled: deps.isNewsRuntimeEnabled,
+    pipeline: newsPipeline,
   }));
 
   const topicReader = define("topicReader", () => new TopicReader({

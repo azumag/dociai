@@ -67,6 +67,36 @@ test("SafeHttpClient blocks SSRF and clears authorization on cross-host redirect
     assert.equal(fetched, false);
     const oversized = new modules.SafeHttpClient(async () => new Response(rss, { status: 200, headers: { "Content-Type": "application/xml", "Content-Length": "999" } }), publicResolver);
     await assert.rejects(oversized.request("https://feed.example/rss", { signal: new AbortController().signal, acceptedContentTypes: ["xml"], maxBytes: 10 }), (error) => error.code === "BAD_REQUEST");
+
+    // issue #188: https->httpへredirectで格下げする侵害/中間者経路を拒否する。
+    const downgrading = new modules.SafeHttpClient(async () => new Response(null, { status: 302, headers: { Location: "http://second.example/feed.xml" } }), publicResolver);
+    await assert.rejects(downgrading.request("https://first.example/feed.xml", { signal: new AbortController().signal, acceptedContentTypes: ["xml"] }), (error) => error.code === "BAD_REQUEST");
+
+    // issue #188: allowedHosts (source単位のhost allowlist) はredirect先にも適用される。
+    let allowlistFetched = false;
+    const allowlisted = new modules.SafeHttpClient(async () => { allowlistFetched = true; return new Response(rss, { status: 200, headers: { "Content-Type": "application/xml" } }); }, publicResolver);
+    await assert.rejects(allowlisted.request("https://not-allowed.example/rss", { signal: new AbortController().signal, acceptedContentTypes: ["xml"], allowedHosts: ["allowed.example"] }), (error) => error.code === "BAD_REQUEST");
+    assert.equal(allowlistFetched, false);
+    const allowedResponse = await allowlisted.request("https://sub.allowed.example/rss", { signal: new AbortController().signal, acceptedContentTypes: ["xml"], allowedHosts: ["allowed.example"] });
+    assert.match(allowedResponse.body, /RSS item/);
+
+    // issue #188: CGNAT (100.64.0.0/10) もprivate同様に拒否する。
+    let cgnatFetched = false;
+    const cgnatClient = new modules.SafeHttpClient(async () => { cgnatFetched = true; return new Response(rss); }, async () => ["100.64.0.1"]);
+    await assert.rejects(cgnatClient.request("https://cgnat.example/feed", { signal: new AbortController().signal, acceptedContentTypes: ["xml"] }), (error) => error.code === "BAD_REQUEST");
+    assert.equal(cgnatFetched, false);
+
+    // IPv4-mapped IPv6 (::ffff:a.b.c.d) はdotted-quad部分を見て同じprivate/CGNAT判定にかける
+    // — 剥がさないとDNS応答がmapped形式でloopback/metadataを返す経路をすり抜けてしまう。
+    let mappedFetched = false;
+    const mappedLoopback = new modules.SafeHttpClient(async () => { mappedFetched = true; return new Response(rss); }, async () => ["::ffff:127.0.0.1"]);
+    await assert.rejects(mappedLoopback.request("https://mapped.example/feed", { signal: new AbortController().signal, acceptedContentTypes: ["xml"] }), (error) => error.code === "BAD_REQUEST");
+    assert.equal(mappedFetched, false);
+    const mappedMetadata = new modules.SafeHttpClient(async () => new Response(rss), async () => ["::ffff:169.254.169.254"]);
+    await assert.rejects(mappedMetadata.request("https://mapped-metadata.example/feed", { signal: new AbortController().signal, acceptedContentTypes: ["xml"] }), (error) => error.code === "BAD_REQUEST");
+    const mappedPublic = new modules.SafeHttpClient(async () => new Response(rss, { status: 200, headers: { "Content-Type": "application/xml" } }), async () => ["::ffff:93.184.216.34"]);
+    const mappedPublicResponse = await mappedPublic.request("https://mapped-public.example/feed", { signal: new AbortController().signal, acceptedContentTypes: ["xml"] });
+    assert.match(mappedPublicResponse.body, /RSS item/);
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 

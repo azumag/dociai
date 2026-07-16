@@ -8,6 +8,7 @@ import { SafeStorageSecretStore } from "./secrets/safe-storage-secret-store";
 import { parseSecretKey } from "./secrets/secret-keys";
 import { AiService } from "./services/ai/ai-service";
 import { FeedService } from "./services/feeds/feed-service";
+import { NewsSourceService } from "./services/news/news-source-service";
 import { TopicService } from "./services/topics/topic-service";
 import { installCspPolicy, securityHeaders } from "./security/csp";
 import { installPermissionPolicy } from "./security/permissions";
@@ -166,6 +167,7 @@ if (!hasLock) {
     controller = createWindowController({ appPath, preloadPath: path.join(appPath, "preload.cjs"), paths, devServerUrl, isPackaged: app.isPackaged });
     const aiService = new AiService(configRepository, secretStore, fetch, (event) => controller?.emitToConsole("ai:token", event));
     const feedService = new FeedService(configRepository);
+    const newsSourceService = new NewsSourceService(configRepository);
     const topicService = new TopicService(configRepository, secretStore);
     const speechService = new SpeechBackendService(fetch);
     const TwitchWebSocket = require("ws") as new (url: string) => { readyState?: number; send(data: string): void; close(): void; on(event: string, listener: (...args: any[]) => void): void };
@@ -285,10 +287,11 @@ if (!hasLock) {
       log: (message, fields) => console.error(`[dociai:twitch-composition] ${message}`, fields ?? {}),
     });
     await twitchComposition.initialize();
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, streamEventBus, updateService, buildInfo, devServerUrl });
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, newsSourceService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, streamEventBus, updateService, buildInfo, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
     app.once("before-quit", () => feedService.dispose());
+    app.once("before-quit", () => newsSourceService.dispose());
     app.once("before-quit", () => topicService.dispose());
     app.once("before-quit", () => speechService.dispose());
     app.once("before-quit", () => twitchService.dispose());

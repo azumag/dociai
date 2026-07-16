@@ -10,6 +10,8 @@ export const CHANNELS = Object.freeze({
   AI_CANCEL: "ai:cancel",
   FEED_FETCH: "feed:fetch",
   FEED_CANCEL: "feed:cancel",
+  NEWS_ARTICLE_FETCH: "news-article:fetch",
+  NEWS_ARTICLE_CANCEL: "news-article:cancel",
   TOPIC_FETCH: "topic:fetch",
   TOPIC_COMPLETE: "topic:complete",
   TOPIC_CANCEL: "topic:cancel",
