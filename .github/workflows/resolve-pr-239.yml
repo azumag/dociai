@@ -6,8 +6,7 @@ on:
       - claude/github-issue-186-l1m80x
 
 permissions:
-  contents: read
-  issues: write
+  contents: write
 
 jobs:
   inspect-conflicts:
@@ -16,10 +15,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Inspect merge conflicts and report
+      - name: Inspect merge conflicts and persist result
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -32,10 +29,14 @@ jobs:
           status_short="$(git status --short)"
           git merge --abort || true
 
-          if [ "${merge_status}" -eq 0 ]; then
-            body="<!-- pr239-conflict-inspection -->\nTemporary conflict inspection result: no merge conflicts detected against current main."
-          else
-            body="<!-- pr239-conflict-inspection -->\nTemporary conflict inspection result against current main.\n\nUnresolved files:\n\`\`\`\n${conflicts}\n\`\`\`\n\nGit status:\n\`\`\`\n${status_short}\n\`\`\`"
-          fi
+          {
+            echo "MERGE_STATUS=${merge_status}"
+            echo "--- unresolved files ---"
+            printf '%s\n' "${conflicts}"
+            echo "--- git status --short ---"
+            printf '%s\n' "${status_short}"
+          } > .github/pr239-conflicts.txt
 
-          gh api "repos/${GITHUB_REPOSITORY}/issues/239/comments" -f body="${body}"
+          git add .github/pr239-conflicts.txt
+          git commit -m "ci: record PR 239 merge conflicts"
+          git push origin HEAD:claude/github-issue-186-l1m80x
