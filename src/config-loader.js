@@ -11,6 +11,7 @@ const KNOWN_TRIGGER_TYPES = registryIds("triggerTypes");
 const KNOWN_NEWS_SOURCE_TYPES = registryIds("newsSourceTypes");
 const KNOWN_TOPIC_SOURCE_TYPES = registryIds("topicSourceTypes");
 const KNOWN_NEWS_MODES = registryIds("newsModes");
+const KNOWN_NEWS_ARTICLE_FETCH_MODES = registryIds("newsArticleFetchModes");
 const VOICE_ENGINES = registryIds("voiceEngines");
 const DEFAULT_TOPIC_INTRO = "上のお題について、あなたのキャラクターとして自由にコメントしてください。";
 const DEFAULT_TOPIC_STYLE = "雑談のお題として、自然な自分の言葉で自由にコメントする";
@@ -184,7 +185,18 @@ export function validateConfig(cfg) {
         } else if (!KNOWN_NEWS_SOURCE_TYPES.includes(src.type)) {
           errors.push(`${label}.type "${src.type}" は未対応です (対応: ${KNOWN_NEWS_SOURCE_TYPES.join(", ")})`);
         }
-        if (src.type === "rss" && !src.url) errors.push(`${label}.url がありません`);
+        if ((src.type === "rss" || src.type === "google-news") && !src.url) errors.push(`${label}.url がありません`);
+        if (src.articleFetch !== undefined && !KNOWN_NEWS_ARTICLE_FETCH_MODES.includes(src.articleFetch)) {
+          errors.push(`${label}.articleFetch "${src.articleFetch}" は未対応です (対応: ${KNOWN_NEWS_ARTICLE_FETCH_MODES.join(", ")})`);
+        }
+        if (src.allowedHosts !== undefined && (!Array.isArray(src.allowedHosts) || src.allowedHosts.some((host) => typeof host !== "string" || !host))) {
+          errors.push(`${label}.allowedHosts は文字列の配列で指定してください`);
+        }
+        if (src.license !== undefined) {
+          if (!src.license || typeof src.license !== "object" || !src.license.name) errors.push(`${label}.license.name がありません`);
+          if (src.license?.url !== undefined && typeof src.license.url !== "string") errors.push(`${label}.license.url は文字列で指定してください`);
+          if (src.license?.attributionRequired !== undefined && typeof src.license.attributionRequired !== "boolean") errors.push(`${label}.license.attributionRequired は真偽値で指定してください`);
+        }
       });
     }
     if (cfg.news.mode && !KNOWN_NEWS_MODES.includes(cfg.news.mode)) {

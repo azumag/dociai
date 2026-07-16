@@ -2,6 +2,7 @@ import type { PlatformInfo } from "./platform";
 import type { PublicError } from "./errors";
 import type { AiChatInput, AiChatResponse, AiWebSearchInput, AiWebSearchResponse } from "./services/ai-contract";
 import type { FeedFetchInput, FeedFetchResponse } from "./services/feed-contract";
+import type { ArticleFetchInput, ArticleFetchResponse } from "./services/news-source-contract";
 import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./services/topic-contract";
 import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
 import type { StreamEventListInput, StreamEventListResult } from "./services/stream-event-ipc-contract";
@@ -39,6 +40,10 @@ export type DociaiApi = {
   };
   feeds: {
     fetch(input: FeedFetchInput): Promise<Result<FeedFetchResponse>>;
+    cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
+  };
+  newsArticles: {
+    fetch(input: ArticleFetchInput): Promise<Result<ArticleFetchResponse>>;
     cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
   };
   topics: {

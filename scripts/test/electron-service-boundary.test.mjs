@@ -19,9 +19,13 @@ test("Electron renderer adapters route every external service through Main IPC",
   // #405 fix: 設定保存は window.dociai.config/secrets IPC (Main の config.json + safeStorage) を
   // 経由する。config.local.json への直接PUTは405になるread-only プロトコルなので使わない。
   assert.match(platform, /globalThis\.dociai\.config\.get/); assert.match(platform, /globalThis\.dociai\.config\.save/); assert.match(platform, /globalThis\.dociai\.secrets\.set/);
+  // issue #188: article本文取得はElectron Main限定 (SafeHttpClient経由)。Rendererが任意URLへ
+  // 直接fetchしないことをここでも固定する。
+  assert.match(platform, /hasElectronNewsArticleService\(\)/); assert.match(platform, /globalThis\.dociai\.newsArticles\.fetch/);
   assert.match(boot, /hasElectronConfigService\(\)/);
-  for (const channel of ["SPEECH_VOICEVOX_SPEAKERS", "SPEECH_VOICEVOX_SYNTHESIZE", "SPEECH_BOUYOMI_TALK", "SPEECH_BOUYOMI_CLEAR", "TWITCH_START", "TWITCH_STOP", "TWITCH_RECONNECT", "SHORTCUT_STATUS", "CAPTURE_LIST_SOURCES", "CAPTURE_SELECT_SOURCE", "CAPTURE_STATUS", "UPDATE_CHECK", "UPDATE_DOWNLOAD", "UPDATE_QUIT_AND_INSTALL", "CONFIG_GET", "CONFIG_SAVE", "SECRET_SET"]) { assert.match(preload, new RegExp(`CHANNELS\\.${channel}`)); assert.match(ipc, new RegExp(`CHANNELS\\.${channel}`)); }
+  for (const channel of ["SPEECH_VOICEVOX_SPEAKERS", "SPEECH_VOICEVOX_SYNTHESIZE", "SPEECH_BOUYOMI_TALK", "SPEECH_BOUYOMI_CLEAR", "TWITCH_START", "TWITCH_STOP", "TWITCH_RECONNECT", "SHORTCUT_STATUS", "CAPTURE_LIST_SOURCES", "CAPTURE_SELECT_SOURCE", "CAPTURE_STATUS", "UPDATE_CHECK", "UPDATE_DOWNLOAD", "UPDATE_QUIT_AND_INSTALL", "CONFIG_GET", "CONFIG_SAVE", "SECRET_SET", "NEWS_ARTICLE_FETCH", "NEWS_ARTICLE_CANCEL"]) { assert.match(preload, new RegExp(`CHANNELS\\.${channel}`)); assert.match(ipc, new RegExp(`CHANNELS\\.${channel}`)); }
   assert.match(main, /new SpeechBackendService/); assert.match(main, /new TwitchChatService/);
+  assert.match(main, /new NewsSourceService/);
   assert.match(main, /new ShortcutService/);
   assert.match(main, /new CaptureService/); assert.match(main, /installDisplayMediaHandler/);
   // Auto-update (macOS + Windows — see update-service.ts's header comment): must never be

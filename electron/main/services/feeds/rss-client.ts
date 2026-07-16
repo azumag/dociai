@@ -3,13 +3,25 @@ import { ServiceError, errorFromHttpStatus } from "../service-error";
 
 export type SafeHttpResponse = { url: string; status: number; headers: Headers; body: string };
 type Resolver = (host: string) => Promise<string[]>;
-type SafeHttpOptions = { method?: "GET" | "POST"; headers?: Record<string, string>; signal: AbortSignal; maxBytes?: number; acceptedContentTypes: string[]; maxRedirects?: number };
+// issue #188: allowedHosts (source単位のhost allowlist) を追加。redirect各hopで
+// isPrivateAddressと同じloopで再検査するため、初期URLだけでなくredirect先にも及ぶ。
+type SafeHttpOptions = { method?: "GET" | "POST"; headers?: Record<string, string>; signal: AbortSignal; maxBytes?: number; acceptedContentTypes: string[]; maxRedirects?: number; allowedHosts?: string[] };
 
 function isPrivateAddress(address: string): boolean {
   const normalized = address.toLowerCase();
   if (normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:" ) || normalized === "0.0.0.0") return true;
   const parts = normalized.split(".").map(Number);
-  return parts.length === 4 && (parts[0] === 10 || parts[0] === 127 || parts[0] === 0 || (parts[0] === 169 && parts[1] === 254) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168));
+  if (parts.length !== 4) return false;
+  const [a, b] = parts;
+  // 169.254.0.0/16 はリンクローカル (169.254.169.254のクラウドmetadataエンドポイントを含む)。
+  // 100.64.0.0/10 はCGNAT (RFC 6598) — キャリア内部網でprivateと同様に扱う。
+  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+}
+
+function isAllowedHost(hostname: string, allowedHosts?: string[]): boolean {
+  if (!allowedHosts?.length) return true;
+  const normalized = hostname.toLowerCase();
+  return allowedHosts.some((allowed) => normalized === allowed.toLowerCase() || normalized.endsWith(`.${allowed.toLowerCase()}`));
 }
 
 async function defaultResolver(host: string): Promise<string[]> { return (await lookup(host, { all: true })).map((entry) => entry.address); }
@@ -47,9 +59,13 @@ export class SafeHttpClient {
     const maxRedirects = options.maxRedirects ?? 3;
     let url: URL;
     try { url = new URL(rawUrl); } catch { throw new ServiceError("BAD_REQUEST", "source URL is invalid", { serviceId: "http", retryable: false }); }
+    const initialWasHttps = url.protocol === "https:";
     let headers = { ...(options.headers ?? {}) };
     for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
       if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw new ServiceError("BAD_REQUEST", "source URL is not allowed", { serviceId: "http", retryable: false });
+      // 侵害された/中間者の redirect先がhttpへ格下げしてTLS保護を外すのを防ぐ。
+      if (initialWasHttps && url.protocol !== "https:") throw new ServiceError("BAD_REQUEST", "source redirect downgraded from https to http", { serviceId: "http", retryable: false });
+      if (!isAllowedHost(url.hostname, options.allowedHosts)) throw new ServiceError("BAD_REQUEST", "source URL host is not allowed", { serviceId: "http", retryable: false });
       const addresses = await this.resolveHost(url.hostname);
       if (!addresses.length || addresses.some(isPrivateAddress)) throw new ServiceError("BAD_REQUEST", "source URL resolves to a private address", { serviceId: "http", retryable: false });
       let response: Response;

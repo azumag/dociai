@@ -27,6 +27,20 @@ export async function cancelElectronFeedRequest(requestId) {
   return globalThis.dociai.feeds.cancel(requestId);
 }
 
+// issue #188: 記事本文取得はElectron Main process限定 (SSRF対策済みSafeHttpClient経由)。
+// Browser版はこのcapability判定でarticle fetchをcapability-gateし、feed summaryへdegradeする。
+export function hasElectronNewsArticleService() {
+  return typeof globalThis.dociai?.newsArticles?.fetch === "function";
+}
+
+export async function fetchNewsArticleThroughElectron(input) {
+  return globalThis.dociai.newsArticles.fetch(input);
+}
+
+export async function cancelElectronNewsArticleRequest(requestId) {
+  return globalThis.dociai.newsArticles.cancel(requestId);
+}
+
 export function hasElectronTopicService() {
   return typeof globalThis.dociai?.topics?.fetch === "function";
 }

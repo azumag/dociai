@@ -40,6 +40,10 @@ const api: DociaiApi = {
     fetch: (input) => invoke(CHANNELS.FEED_FETCH, input),
     cancel: (requestId) => invoke(CHANNELS.FEED_CANCEL, requestId),
   },
+  newsArticles: {
+    fetch: (input) => invoke(CHANNELS.NEWS_ARTICLE_FETCH, input),
+    cancel: (requestId) => invoke(CHANNELS.NEWS_ARTICLE_CANCEL, requestId),
+  },
   topics: {
     fetch: (input) => invoke(CHANNELS.TOPIC_FETCH, input),
     complete: (input) => invoke(CHANNELS.TOPIC_COMPLETE, input),
