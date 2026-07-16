@@ -1,4 +1,4 @@
-// ニュースリーダー (issue #10, #187)
+// ニュースリーダー (issue #10, #187, #238)
 // 互換facade: 実処理は src/news/news-pipeline-coordinator.js (NewsPipelineCoordinator) へ
 // 委譲する。外部から見えるAPI (constructor引数・run/fetchAll/refineItems/status/retryNow/
 // skip/restore/readGuids/enabled) は変更しない — 既読はProcessingStoreが唯一の正本。
