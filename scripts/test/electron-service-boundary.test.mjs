@@ -8,7 +8,9 @@ async function source(relative) { return fs.readFile(path.join(root, relative), 
 
 test("Electron renderer adapters route every external service through Main IPC", async () => {
   const [connectors, news, topics, voicevox, bouyomi, runtimeFactory, platform, captureAdapter, preload, ipc, main, boot] = await Promise.all([
-    source("src/connectors.js"), source("src/news-reader.js"), source("src/topic-reader.js"), source("src/voicevox.js"), source("src/bouyomi.js"), source("src/app/runtime-factory.js"), source("src/platform/electron-services.js"), source("src/platform/capture-adapter.js"), source("electron/preload/index.ts"), source("electron/main/ipc/register.ts"), source("electron/main/index.ts"), source("src/app/boot.js"),
+    // issue #187: feed-fetch IPC gating moved from src/news-reader.js (now a compatibility
+    // facade delegating to NewsPipelineCoordinator) into the legacy adapter it wraps.
+    source("src/connectors.js"), source("src/news/adapters/legacy-news-adapter.js"), source("src/topic-reader.js"), source("src/voicevox.js"), source("src/bouyomi.js"), source("src/app/runtime-factory.js"), source("src/platform/electron-services.js"), source("src/platform/capture-adapter.js"), source("electron/preload/index.ts"), source("electron/main/ipc/register.ts"), source("electron/main/index.ts"), source("src/app/boot.js"),
   ]);
   assert.match(connectors, /hasElectronAiService\(\)/); assert.match(news, /hasElectronFeedService\(\)/); assert.match(topics, /hasElectronTopicService\(\)/);
   assert.match(voicevox, /hasElectronVoiceVoxService\(\)/); assert.match(bouyomi, /window\?\.dociai\?\.(?:bouyomi|speech)/); assert.match(runtimeFactory, /dociai\?\.twitch\?\.start/);

@@ -1,3 +1,7 @@
+// 排他責務はここ (kind単位) だけが持つ: `this.active` が同じkindの2本目のrunを弾く。
+// NewsPipelineCoordinator (src/news/news-pipeline-coordinator.js) 自身の `busy` は同一
+// instanceへの再入だけを防ぐreentrancy guardであり、意図的にkind単位排他とは二重化しない
+// (issue #187)。
 export class AutomationCoordinator {
   constructor({ runtime, getGeneration, onError = () => {}, onComplete = () => {} }) { this.runtime = runtime; this.getGeneration = getGeneration; this.onError = onError; this.onComplete = onComplete; this.active = new Map(); this.timers = new Set(); this.disposed = false; }
   run(kind, reader) {
