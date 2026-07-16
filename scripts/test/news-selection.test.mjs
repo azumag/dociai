@@ -186,3 +186,16 @@ test("createSelectStage wires acquisition -> ItemProcessingStore -> dedupe/spam/
   assert.deepEqual(result.picks.map((p) => p.processingKey), ["news:1"]);
   assert.equal(result.stats.spam, 1);
 });
+
+test("createSelectStage exposes keysByProcessingKey computed with the same sourceSuffixPatterns used for dedupe, so the coordinator can commit history without re-deriving a different key", async () => {
+  const now = { value: 1000 };
+  const store = new MemoryItemProcessingStore({ clock: () => now.value });
+  const historyStore = new MemoryNewsHistoryStore({ clock: () => now.value });
+  const sourceSuffixPatterns = [/\s*-\s*Reuters$/i];
+  const stage = createSelectStage({ store, clock: () => now.value, historyStore, sourceSuffixPatterns });
+  const item = { title: "速報タイトル - Reuters", link: "https://example.com/1", sourceName: "s", publishedAt: "2026-07-16T00:00:00Z", guid: "1", processingKey: "news:1" };
+  const result = await stage.run({ items: [item], generation: 1, maxItems: 3 }, {});
+  assert.deepEqual(result.picks.map((p) => p.processingKey), ["news:1"]);
+  const keys = result.keysByProcessingKey.get("news:1");
+  assert.equal(keys.titleKey, normalizeTitleKey("速報タイトル - Reuters", { sourceSuffixPatterns }), "the exposed key must match what filterCandidates used for dedupe, not a plain (no-patterns) re-derivation");
+});

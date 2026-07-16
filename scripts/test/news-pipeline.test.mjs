@@ -8,6 +8,8 @@ import { canTransition, assertTransition, isTerminalState } from "../../src/news
 import { normalizeStageError } from "../../src/news/contracts.js";
 import { MemoryItemProcessingStore } from "../../src/readers/item-processing-store.js";
 import { RequestCancelledError, isCancellation } from "../../src/runtime/request-registry.js";
+import { MemoryNewsHistoryStore } from "../../src/news/selection/memory-news-history-store.js";
+import { normalizeTitleKey } from "../../src/news/selection/normalize-news-key.js";
 
 const defaultPersona = { id: "p", name: "P", connector: "mock", enabled: true, voice: {} };
 
@@ -18,9 +20,9 @@ function baseConfig(overrides = {}) {
 // Builds a NewsPipelineCoordinator whose six stages are recording stubs (default behavior:
 // acquire returns [], select runs the real select-stage against `store`, everything else
 // trivially succeeds), so each test only needs to override the stage(s) it cares about.
-function makeHarness({ config = baseConfig(), store = new MemoryItemProcessingStore({ clock: () => 1000 }), clock = () => 1000, persona = defaultPersona, connector = { chat: async () => ({ text: "ok" }) }, canDeliver = () => true, impls = {}, maxRewrites = 1, log = () => {}, onRead = () => {} } = {}) {
+function makeHarness({ config = baseConfig(), store = new MemoryItemProcessingStore({ clock: () => 1000 }), clock = () => 1000, persona = defaultPersona, connector = { chat: async () => ({ text: "ok" }) }, canDeliver = () => true, impls = {}, maxRewrites = 1, log = () => {}, onRead = () => {}, historyStore, sourceSuffixPatterns } = {}) {
   const calls = [];
-  const realSelect = createSelectStage({ store, clock });
+  const realSelect = createSelectStage({ store, clock, ...(historyStore ? { historyStore } : {}), ...(sourceSuffixPatterns ? { sourceSuffixPatterns } : {}) });
   const wrap = (id, impl) => ({ id, run: async (input, context) => { calls.push(id); return impl(input, context); } });
   const stages = {
     acquire: wrap("acquire", impls.acquire ?? (async () => [])),
@@ -31,7 +33,7 @@ function makeHarness({ config = baseConfig(), store = new MemoryItemProcessingSt
     deliver: wrap("deliver", impls.deliver ?? (async () => ({ queued: { state: "waiting" } }))),
   };
   const adapter = { resolvePersona: () => persona, resolveConnector: () => connector, canDeliver };
-  const coordinator = new NewsPipelineCoordinator({ getConfig: () => config, adapter, stages, store, clock, log, onRead, maxRewrites });
+  const coordinator = new NewsPipelineCoordinator({ getConfig: () => config, adapter, stages, store, clock, log, onRead, maxRewrites, ...(historyStore ? { historyStore } : {}) });
   return { coordinator, calls, store };
 }
 
@@ -41,6 +43,24 @@ test("NewsPipelineCoordinator runs stages in acquire -> select -> research -> ge
   const result = await coordinator.run({ generation: 1 });
   assert.equal(result.status, "delivered");
   assert.deepEqual(calls, ["acquire", "select", "research", "generate", "quality", "deliver"]);
+});
+
+test("history commit reuses the select stage's sourceSuffixPatterns-derived key instead of re-deriving a plain one", async () => {
+  const item = { guid: "g1", title: "速報タイトル - Reuters", processingKey: "news:g1", sourceName: "s" };
+  const now = { value: 1000 };
+  const store = new MemoryItemProcessingStore({ clock: () => now.value });
+  const historyStore = new MemoryNewsHistoryStore({ clock: () => now.value });
+  const sourceSuffixPatterns = [/\s*-\s*Reuters$/i];
+  const { coordinator } = makeHarness({ store, clock: () => now.value, historyStore, sourceSuffixPatterns, impls: { acquire: async () => [item] } });
+
+  const result = await coordinator.run({ generation: 1 });
+  assert.equal(result.status, "delivered");
+
+  const suffixStrippedKey = normalizeTitleKey(item.title, { sourceSuffixPatterns });
+  const plainKey = normalizeTitleKey(item.title);
+  assert.notEqual(suffixStrippedKey, plainKey, "the test fixture must actually exercise suffix stripping");
+  assert.equal(historyStore.hasDeliveredTitle(suffixStrippedKey), true, "history must be keyed the same way select-stage deduped it");
+  assert.equal(historyStore.hasDeliveredTitle(plainKey), false, "a re-derived key without sourceSuffixPatterns must not silently diverge from the dedupe key");
 });
 
 test("NewsPipelineCoordinator short-circuits with no_candidate when nothing is eligible", async () => {

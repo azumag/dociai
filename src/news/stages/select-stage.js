@@ -30,8 +30,12 @@ export function createSelectStage({
       const { eligible, stats } = await filterCandidates({ items, candidateKeys, historyStore, spamGate, now, topicCooldownMs, sourceSuffixPatterns });
       const { picks: scoredPicks, warnings } = selectionPolicy.select(eligible, { maxItems, historyStore, now });
       const picks = scoredPicks.map((p) => p.item);
+      // このstageが(sourceSuffixPatterns込みで)導出したidentity keysをcoordinatorへ渡す。
+      // ここで捨てて呼び出し側にderiveIdentityKeys(item)を再計算させると、
+      // sourceSuffixPatterns設定時にcommit時のkeyとずれ、永続dedupeが静かに効かなくなる。
+      const keysByProcessingKey = new Map(scoredPicks.map((p) => [p.item.processingKey, p.keys]));
 
-      return { picks, eligibleCount: eligible.length, stats, warnings };
+      return { picks, eligibleCount: eligible.length, stats, warnings, keysByProcessingKey };
     },
   };
 }

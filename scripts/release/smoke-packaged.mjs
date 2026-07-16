@@ -103,7 +103,7 @@ try {
   assert.equal(checks.platform.ok, true, JSON.stringify(checks.platform));
   assert.equal(checks.platform.value.runtime, "electron");
   assert.equal(checks.platform.value.isPackaged, true, "smoke-packaged must run against a packaged app (isPackaged=true)");
-  assert.deepEqual(checks.keys, ["ai", "bouyomi", "capture", "config", "events", "feeds", "localLlm", "obs", "platform", "secrets", "shortcuts", "speech", "streamEvents", "system", "topics", "twitch", "update", "windows"]);
+  assert.deepEqual(checks.keys, ["ai", "bouyomi", "capture", "config", "events", "feeds", "localLlm", "newsArticles", "obs", "platform", "secrets", "shortcuts", "speech", "streamEvents", "system", "topics", "twitch", "update", "windows"]);
   assert.match(checks.csp ?? "", /object-src 'none'/);
   assert.doesNotMatch(checks.rendererConfig, /sk-\.\.\.|or-\.\.\.|smoke-secret/);
   assert.deepEqual(checks.browserGlobals, { require: "undefined", process: "undefined", ipcRenderer: "undefined" });

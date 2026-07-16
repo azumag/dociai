@@ -69,7 +69,7 @@ export class NewsPipelineCoordinator {
       const items = await this.stages.acquire.run(null, context);
       diagnostics.candidateCounts.acquired = items.length;
 
-      const { picks, eligibleCount, stats: filterStats } = await this.stages.select.run({ items, generation: this.generation, maxItems: news.maxItems ?? 3 }, context);
+      const { picks, eligibleCount, stats: filterStats, keysByProcessingKey } = await this.stages.select.run({ items, generation: this.generation, maxItems: news.maxItems ?? 3 }, context);
       diagnostics.candidateCounts.filtered = eligibleCount;
       diagnostics.candidateCounts.eligible = picks.length;
       diagnostics.filterStats = filterStats ?? null;
@@ -130,7 +130,10 @@ export class NewsPipelineCoordinator {
           diagnostics.sourceIds.push(item.sourceName ?? "unknown");
           // commit(markRead)成功後にだけ永続historyへ記録する — begin()だけでクラッシュした
           // itemは記録されず、次回runで再候補になる (issue #189)。
-          const deliveredKeys = deriveIdentityKeys(item);
+          // select stageが (sourceSuffixPatterns込みで) 導出したkeysをそのまま再利用する。
+          // ここでderiveIdentityKeys(item)を素で呼び直すと、selectでの判定keyとcommit時の
+          // keyがsourceSuffixPatterns設定時にずれ、永続dedupeが静かに効かなくなる。
+          const deliveredKeys = keysByProcessingKey?.get(item.processingKey) ?? deriveIdentityKeys(item);
           this.historyStore.recordDelivered({ candidateId: item.processingKey, titleKey: deliveredKeys.titleKey, topicKey: deliveredKeys.topicKey, urlHash: deliveredKeys.urlHash, sourceId: item.sourceName ?? "unknown" }, this.clock());
         } catch (e) {
           if (isCancellation(e)) {
@@ -148,7 +151,7 @@ export class NewsPipelineCoordinator {
           if (decision.action === "retry") this.lastRunResult.retryScheduled++;
           else {
             this.lastRunResult.failed++;
-            const failedKeys = deriveIdentityKeys(item);
+            const failedKeys = keysByProcessingKey?.get(item.processingKey) ?? deriveIdentityKeys(item);
             this.historyStore.recordFailedPermanent({ candidateId: item.processingKey, titleKey: failedKeys.titleKey, topicKey: failedKeys.topicKey, sourceId: item.sourceName ?? "unknown" }, this.clock());
           }
           this.log(`ニュース1件の読み上げ失敗 [${item.title}]: ${e.message}`, "error");

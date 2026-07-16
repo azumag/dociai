@@ -8,7 +8,11 @@ type Resolver = (host: string) => Promise<string[]>;
 type SafeHttpOptions = { method?: "GET" | "POST"; headers?: Record<string, string>; signal: AbortSignal; maxBytes?: number; acceptedContentTypes: string[]; maxRedirects?: number; allowedHosts?: string[] };
 
 function isPrivateAddress(address: string): boolean {
-  const normalized = address.toLowerCase();
+  // ::ffff:a.b.c.d (IPv4-mapped IPv6) はdotted-quad部分だけを見て同じIPv4判定にかける。
+  // これを剥がさないと、悪意あるDNS応答がmapped形式でloopback/metadataアドレスを返した
+  // ときにprivate判定をすり抜けてしまう。
+  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i.exec(address.trim());
+  const normalized = (mapped ? mapped[1] : address).toLowerCase();
   if (normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:" ) || normalized === "0.0.0.0") return true;
   const parts = normalized.split(".").map(Number);
   if (parts.length !== 4) return false;
