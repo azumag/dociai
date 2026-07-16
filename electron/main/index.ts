@@ -77,15 +77,19 @@ async function seedAiConnectorConfig(configRepository: ConfigRepository, secretS
   const missingNews = !("news" in current.config);
   const missingTopics = !("topics" in current.config);
   const missingPersonas = !Array.isArray(current.config.personas) || !current.config.personas.length;
-  if (isFreshInstall || missingNews || missingTopics || missingPersonas) {
-    const personasBackfill = missingPersonas && migrated.publicConfig.personas !== undefined ? migrated.publicConfig.personas : undefined;
-    // isFreshInstallでなければtriggers全体は上書きしない (#405: ユーザーが設定UIで全トリガーを
-    // 意図的に削除した状態を保つため) が、personasBackfillだけが起きると「古いtrigger参照を
-    // 持つpersonaだけ復活し、参照先のtriggerは無い」という不整合になる。参照されているIDに
-    // 限定してlegacy configから補完する。
-    const triggersBackfill = isFreshInstall && migrated.publicConfig.triggers !== undefined
-      ? migrated.publicConfig.triggers
-      : backfillReferencedTriggers(current.config.triggers, personasBackfill, migrated.publicConfig.triggers);
+  const personasBackfill = missingPersonas && migrated.publicConfig.personas !== undefined ? migrated.publicConfig.personas : undefined;
+  // isFreshInstallでなければtriggers全体は上書きしない (#405: ユーザーが設定UIで全トリガーを
+  // 意図的に削除した状態を保つため) が、personaが「存在しないtrigger IDへの参照」を持つと
+  // 起動のたびに設定警告になる。今回backfillするpersonasだけでなく、保存済みのpersonasも
+  // 対象にするのは、trigger補完なしでpersonasだけをbackfillしていた旧バージョンが
+  // 「personas[doci].triggers の mention_ai が triggers に存在しません」型の不整合を
+  // config.jsonへ焼き込んでいるため — 参照されているIDに限定してlegacy configから補完する。
+  // 設定UIはトリガー削除時にpersona側の参照も一緒に消すので、ユーザーが意図して削除した
+  // トリガーがここで復活することはない (宙に浮いた参照はバグ残滓の場合だけ)。
+  const triggersBackfill = isFreshInstall && migrated.publicConfig.triggers !== undefined
+    ? migrated.publicConfig.triggers
+    : backfillReferencedTriggers(current.config.triggers, personasBackfill ?? current.config.personas, migrated.publicConfig.triggers);
+  if (isFreshInstall || missingNews || missingTopics || missingPersonas || triggersBackfill !== null) {
     const config = {
       ...current.config,
       schemaVersion: raw.schemaVersion ?? 1,

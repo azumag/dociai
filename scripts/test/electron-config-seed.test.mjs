@@ -48,6 +48,25 @@ test("backfillReferencedTriggers does not touch triggers that already exist", as
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test("backfillReferencedTriggers heals dangling references left in already-persisted personas", async () => {
+  // 旧バージョンのseedがtrigger補完なしでpersonasだけをconfig.jsonへ保存してしまった状態。
+  // personasはbackfill対象でなくても、宙に浮いた参照はlegacy configから毎起動で修復される。
+  const { modules, directory } = await loadModule();
+  try {
+    const persistedPersonas = [
+      { id: "doci", triggers: ["mention_ai", "hotkey_partner", "manual"] },
+      { id: "meriken", triggers: ["random_comment"] },
+    ];
+    const legacy = {
+      mention_ai: { type: "keyword", keywords: ["AIさん"] },
+      hotkey_partner: { type: "hotkey", keys: "Alt+1" },
+      random_comment: { type: "random", probability: 0.2 },
+    };
+    const result = modules.backfillReferencedTriggers({}, persistedPersonas, legacy);
+    assert.deepEqual(result, legacy);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("backfillReferencedTriggers returns null when no personas were backfilled", async () => {
   const { modules, directory } = await loadModule();
   try {
