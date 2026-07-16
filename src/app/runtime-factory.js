@@ -378,6 +378,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     personaRouter,
     contextBuilder,
     speechQueue,
+    webResearcher,
     log: deps.log,
     onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },
   }));

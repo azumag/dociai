@@ -157,6 +157,40 @@ test("TopicReader applies the same retry lifecycle and stops permanent-error loo
   assert.equal(reader.restore(failure.key), true);
 });
 
+test("TopicReader runs Web research before chat and includes grounded results", async () => {
+  const now = { value: 1_000 };
+  const order = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({
+      now,
+      connector: { chat: async (messages) => { order.push("chat"); assert.equal(messages[0].content, "grounded"); return { text: "topic comment" }; } },
+    }),
+    contextBuilder: { build: (input) => { order.push("context"); assert.equal(input.research.results[0].title, "result"); return { messages: [{ role: "user", content: "grounded" }], debugText: "research debug" }; } },
+    webResearcher: { enabled: true, research: async ({ task }) => { order.push("research"); assert.equal(task, "topic title\nnote"); return { query: task, results: [{ title: "result", link: "https://example.com", snippet: "facts" }] }; } },
+  });
+  reader.fetchAll = async () => reader.refineItems([{ guid: "topic", title: "topic title", description: "note", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(order, ["research", "context", "chat"]);
+  assert.equal(reader.status().counts.read, 1);
+});
+
+test("TopicReader fails open when Web research fails", async () => {
+  const now = { value: 1_000 };
+  const warnings = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "fallback comment" }) } }),
+    contextBuilder: { build: ({ research }) => { assert.equal(research, null); return { messages: [{ role: "user", content: "no research" }], debugText: "no research" }; } },
+    webResearcher: { enabled: true, research: async () => { throw new Error("search unavailable"); } },
+    log: (message, level) => { if (level === "warn") warnings.push(message); },
+  });
+  reader.fetchAll = async () => reader.refineItems([{ guid: "topic", title: "topic title", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  assert.equal(reader.status().counts.read, 1, "research failure falls back to the normal response instead of blocking readout");
+  assert.ok(warnings.some((message) => /Web調査prepass/.test(message)));
+});
+
 test("AI-backed readers warn about output limits before handing text to speech", async () => {
   for (const { Reader, key, source } of [
     { Reader: NewsReader, key: "news", source: "source" },

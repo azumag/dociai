@@ -22,12 +22,13 @@ function parseDate(value) {
 }
 
 export class TopicReader {
-  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now() }) {
+  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, webResearcher = null, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now() }) {
     this.config = config;
     this.getConnector = getConnector;
     this.personaRouter = personaRouter;
     this.contextBuilder = contextBuilder;
     this.speechQueue = speechQueue;
+    this.webResearcher = webResearcher;
     this.log = log;
     this.onRead = onRead;
     this.store = store;
@@ -90,7 +91,8 @@ export class TopicReader {
         if (!record) continue;
         this.lastRunResult.processed++;
         try {
-          const { messages, debugText } = this.contextBuilder.build({ persona, topic: item, includeScreen: "never" });
+          const research = await this.#research(item, context);
+          const { messages, debugText } = this.contextBuilder.build({ persona, topic: item, research, includeScreen: "never" });
           const result = await connector.chat(messages, { signal: context.signal, requestId: `${context.requestId ?? "topics"}:summary:${item.guid}`, generation: context.generation });
           const { text } = result;
           if (!String(text ?? "").trim()) throw Object.assign(new Error("話題コメントが空です"), { kind: "empty" });
@@ -244,6 +246,22 @@ export class TopicReader {
 
   restore(key) {
     return this.store.restore(key, this.generation, this.clock());
+  }
+
+  // 話題読み上げの依頼文（タイトル+メモ）をクエリにWeb調査prepassを実行する。ResponseCoordinatorと
+  // 同じ「検索失敗時は検索なしの通常回答へフォールバック」方針で、cancellationだけ再送出する。
+  async #research(item, context) {
+    if (!this.webResearcher?.enabled) return null;
+    const task = [item.title, item.description].filter(Boolean).join("\n");
+    try {
+      const research = await this.webResearcher.research({ task, signal: context.signal, requestId: `${context.requestId ?? "topics"}:research:${item.guid}`, generation: context.generation });
+      this.#guard(context);
+      return research;
+    } catch (error) {
+      if (isCancellation(error) || context.signal?.aborted) throw error;
+      this.log(`話題のWeb調査prepassに失敗しました [${item.title}]: ${error.message}`, "warn");
+      return null;
+    }
   }
 
   #getConnector(persona) {
