@@ -29,13 +29,13 @@
 | `model` | モデルID。`mock` では省略可 |
 | `baseUrl` | 省略可。ローカルLLM やOpenAI互換サーバーを指す。`ollama` の既定は `http://localhost:11434/v1` |
 | `timeoutMs` | 省略可。既定 30000 (ミリ秒。秒ではない点に注意) |
-| `maxTokens` | 省略可。通常応答の最大出力トークン数。既定 300、範囲 1〜32768 |
+| `maxTokens` | 省略可。通常応答の最大出力トークン数。既定 2048、範囲 1〜32768 |
 | `retries` | 省略可。既定 1。タイムアウトした場合のみ即座に再試行する回数 (認証エラー等はリトライしない) |
 
 `mock` はAPIキーなしで応答・画面認識・ニュース要約の動作確認ができるモックです。
 
 Ollama を使う場合は、Ollama を起動してモデルを pull したうえで `provider: "ollama"` を指定します。発話用ペルソナ、ニュース要約、`context.screenCapture.connector` の vision_model 参照先として同じように選べます。
-Ollama の OpenAI 互換APIには `reasoning_effort: "none"` を自動指定し、thinking対応モデルでも内部思考ではなく最終回答に出力予算を使わせます。内部思考は応答や読み上げには使用しません。モデル側がthinking無効化に対応しておらず回答が途中で切れる場合は、設定画面の `maxTokens` を増やしてください。
+Ollama の OpenAI 互換APIには `reasoning_effort: "none"` を自動指定し、thinking対応モデルでも内部思考ではなく最終回答に出力予算を使わせます。内部思考は応答や読み上げには使用しません。プロバイダが出力上限による終了を通知した場合は、システムログに「読み上げ処理による切断ではない」ことと `maxTokens` の確認案内を表示します。モデル側がthinking無効化に対応していない場合や、2048トークンを超える長文が必要な場合は設定画面の `maxTokens` を増やしてください。
 
 ```json
 {
@@ -230,6 +230,7 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
     "bouyomi": { "voice": 0, "speed": -1, "tone": -1, "volume": -1 },
     "includeAuthor": true,
     "skipEmotes": false,
+    "collapseConsecutiveEmoji": false,
     "ignoreUsers": []
   }
 }
@@ -244,6 +245,7 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 | `bouyomi` | `{}` | 棒読みちゃん専用の話者・速度・音程・音量。省略した項目は共通の `bouyomi.voice` / `speed` / `tone` / `volume` を継承し、共通値の `-1` は本体設定に従う。待機時間が合わない場合は `speed` または `bouyomi.charsPerSecond` を調整する |
 | `includeAuthor` | true | falseにすると「author: 本文」ではなく本文のみ読み上げる |
 | `skipEmotes` | false | trueにするとTwitchのエモートを読み上げから除去する。Twitchが送るIRCの `emotes` タグ (エモートの正確な文字範囲) を使うため、手動入力コメントなど emotes 情報がないソースには影響しない |
+| `collapseConsecutiveEmoji` | false | trueにすると連続するUnicode絵文字を先頭1つへまとめる。単独の絵文字は残し、絵文字間が空白だけの場合も連続として扱う。Twitchエモートの除去は `skipEmotes` で別に設定する |
 | `ignoreUsers` | `[]` | このユーザー名 (大文字小文字区別なし、前後空白は無視) からのコメントは読み上げをスキップする。AI応答のトリガー判定自体には影響しない |
 
 コメントは `AIConnector` を経由せずそのまま読み上げキューに積まれるため、APIキーなし

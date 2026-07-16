@@ -26,6 +26,7 @@ import { checkAiResponseAvailability, runAiResponseAction } from "./ai-response-
 import { renderTemplateSpeech } from "./template-speech-action.js";
 import { buildFallbackSpeech } from "./action-fallback.js";
 import { OVERLAY_SKIP_REASON } from "../overlay/overlay-cue-contract.js";
+import { buildOutputLimitWarning, isOutputLimitFinishReason } from "../ai-finish-reason.js";
 
 /** Short-window dedupe TTL — same family/order of magnitude as
  * electron/main/services/stream-events/event-id-dedupe.ts's `DEFAULT_EVENT_DEDUPE_TTL_MS`: enough
@@ -197,6 +198,17 @@ export class ActionRunner {
     this.dispatch({ type: "action-debug", plan, persona, debugText: outcome.debugText, context, triggerId: plan.triggerId });
 
     if (outcome.ok) {
+      if (isOutputLimitFinishReason(outcome.finishReason)) {
+        this.dispatch({
+          type: "action-warning",
+          plan,
+          persona,
+          context,
+          triggerId: plan.triggerId,
+          finishReason: outcome.finishReason,
+          message: buildOutputLimitWarning(outcome.finishReason, connector.id ?? action.connectorId ?? persona?.connector ?? "unknown"),
+        });
+      }
       this.dispatch({ type: "action-final", plan, persona, text: outcome.text, context, triggerId: plan.triggerId, contentLabel: event?.kind ?? null, contentTitle: display?.summary ?? null });
       this.#speakAndNotify({ plan, persona, text: outcome.text, context, speak, notifyObs, source: "ai-response", voiceAvailable: availability.voiceAvailable });
       const result = this.#result(plan, { status: "executed", text: outcome.text, context, personaId: persona?.id ?? null });

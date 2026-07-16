@@ -43,14 +43,14 @@ test("AiService resolves secrets in Main, normalizes OpenAI response, and never 
     const { configRepository, secretStore } = dependencies({ openrouter: { provider: "openrouter", model: "model", apiKeySecretRef: "connectors.openrouter.apiKey", retries: 0 } }, { "connectors.openrouter.apiKey": "test-secret" });
     const service = new modules.AiService(configRepository, secretStore, async (url, init) => {
       seen.push({ url, headers: init.headers, body: JSON.parse(init.body) });
-      return new Response(JSON.stringify({ choices: [{ message: { content: " answer " } }], usage: { total_tokens: 3 } }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: " answer " }, finish_reason: "stop" }], usage: { total_tokens: 3 } }), { status: 200 });
     });
     const result = await service.chat(input("openrouter"));
-    assert.deepEqual(result, { text: "answer", usage: { total_tokens: 3 }, requestId: "openrouter-request" });
+    assert.deepEqual(result, { text: "answer", usage: { total_tokens: 3 }, finishReason: "stop", requestId: "openrouter-request" });
     assert.equal(seen[0].url, "https://openrouter.ai/api/v1/chat/completions");
     assert.equal(seen[0].headers.Authorization, "Bearer test-secret");
     assert.equal(seen[0].headers["HTTP-Referer"], "https://dociai.local");
-    assert.equal(seen[0].body.max_tokens, 300);
+    assert.equal(seen[0].body.max_tokens, 2048);
     assert.doesNotMatch(JSON.stringify(result), /test-secret/);
     assert.doesNotMatch(JSON.stringify(seen[0].body), /test-secret/);
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
@@ -100,10 +100,12 @@ test("browser connector applies Ollama-only reasoning controls without exposing 
   try {
     globalThis.fetch = async (_url, init) => {
       bodies.push(JSON.parse(init.body));
-      return new Response(JSON.stringify({ choices: [{ message: { reasoning: "private", content: bodies.length === 1 ? " answer " : "" } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { reasoning: "private", content: bodies.length === 1 ? " answer " : "" }, finish_reason: "length" }] }), { status: 200 });
     };
     const ollama = createConnector("local", { provider: "ollama", model: "gemma4:12b", maxTokens: 2048, retries: 0 });
-    assert.equal((await ollama.chat([{ role: "user", content: "hello" }])).text, "answer");
+    const answer = await ollama.chat([{ role: "user", content: "hello" }]);
+    assert.equal(answer.text, "answer");
+    assert.equal(answer.finishReason, "length");
     assert.equal(bodies[0].reasoning_effort, "none");
     assert.equal(bodies[0].max_tokens, 2048);
 
@@ -121,17 +123,44 @@ test("browser MiniMax connector honors configured maxTokens and per-call overrid
   try {
     globalThis.fetch = async (_url, init) => {
       bodies.push(JSON.parse(init.body));
-      return new Response(JSON.stringify({ content: [{ type: "text", text: "answer" }] }), { status: 200 });
+      return new Response(JSON.stringify({ content: [{ type: "text", text: "answer" }], stop_reason: "end_turn" }), { status: 200 });
     };
     const configured = createConnector("mini", { provider: "minimax", model: "MiniMax-M3", apiKey: "test", maxTokens: 4096, retries: 0 });
     await configured.chat([{ role: "user", content: "hello" }]);
     await configured.chat([{ role: "user", content: "hello" }], { maxTokens: 1024 });
     const defaulted = createConnector("mini-default", { provider: "minimax", model: "MiniMax-M3", apiKey: "test", retries: 0 });
     await defaulted.chat([{ role: "user", content: "hello" }]);
-    assert.deepEqual(bodies.map((body) => body.max_tokens), [4096, 1024, 300]);
+    assert.deepEqual(bodies.map((body) => body.max_tokens), [4096, 1024, 2048]);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("browser connectors preserve finish reasons from OpenAI and MiniMax streams", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const bodies = [];
+  const tokens = [];
+  try {
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(init.body);
+      bodies.push(body);
+      const payload = body.model === "openai-model"
+        ? 'data: {"choices":[{"delta":{"content":"open"}}]}\n\ndata: {"choices":[{"delta":{"content":" ai"},"finish_reason":"length"}],"usage":{"output_tokens":2}}\n\ndata: [DONE]\n\n'
+        : 'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"mini"}}\n\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":" max"}}\n\ndata: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":2}}';
+      return new Response(new ReadableStream({ start(controller) { controller.enqueue(encoder.encode(payload)); controller.close(); } }));
+    };
+    const openai = createConnector("openai-stream", { provider: "openai-compatible", model: "openai-model", apiKey: "test", retries: 0 });
+    const openAiResult = await openai.chat([{ role: "user", content: "hello" }], { stream: true, onToken: (token) => tokens.push(token) });
+    assert.deepEqual(openAiResult, { text: "open ai", usage: { output_tokens: 2 }, finishReason: "length" });
+    const minimax = createConnector("minimax-stream", { provider: "minimax", model: "MiniMax-M3", apiKey: "test", retries: 0 });
+    const miniMaxResult = await minimax.chat([{ role: "user", content: "hello" }], { stream: true, onToken: (token) => tokens.push(token) });
+    assert.deepEqual(miniMaxResult, { text: "mini max", usage: { output_tokens: 2 }, finishReason: "max_tokens" });
+    assert.deepEqual(tokens, ["open", " ai", "mini", " max"]);
+    assert.equal(bodies[0].stream, true);
+    assert.deepEqual(bodies[0].stream_options, { include_usage: true });
+    assert.equal(bodies[1].stream, true);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("MiniMax Web search uses the official endpoint in Browser and Electron without exposing the key", async () => {
@@ -202,7 +231,7 @@ test("AiService delivers SSE tokens with request/generation and rejects empty st
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'));
-        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":" world"}}],"usage":{"total_tokens":2}}\n\n'));
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":" world"},"finish_reason":"length"}],"usage":{"total_tokens":2}}\n\n'));
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
       },
@@ -211,12 +240,13 @@ test("AiService delivers SSE tokens with request/generation and rejects empty st
     const result = await service.chat(input("stream", { stream: true }));
     assert.equal(result.text, "hello world");
     assert.equal(result.usage.total_tokens, 2);
+    assert.equal(result.finishReason, "length");
     assert.deepEqual(tokens.map((event) => event.text), ["hello", " world"]);
     assert.ok(tokens.every((event) => event.requestId === "stream-request" && event.generation === 0));
 
     const miniMaxStream = new ReadableStream({
       start(controller) {
-        controller.enqueue(encoder.encode('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"mini"}}\n\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":" max"}}\n\ndata: {"type":"message_delta","usage":{"output_tokens":2}}\n\n'));
+        controller.enqueue(encoder.encode('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"mini"}}\n\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":" max"}}\n\ndata: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":2}}\n\n'));
         controller.close();
       },
     });
@@ -226,6 +256,7 @@ test("AiService delivers SSE tokens with request/generation and rejects empty st
     const miniMaxResult = await miniMaxService.chat(input("minimax", { stream: true }));
     assert.equal(miniMaxResult.text, "mini max");
     assert.equal(miniMaxResult.usage.output_tokens, 2);
+    assert.equal(miniMaxResult.finishReason, "max_tokens");
     assert.deepEqual(miniMaxTokens, ["mini", " max"]);
 
     const empty = new modules.AiService(configRepository, secretStore, async () => new Response("data: [DONE]\n\n", { status: 200 }));

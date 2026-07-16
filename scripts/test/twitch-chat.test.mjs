@@ -22,7 +22,7 @@ class FakeSocket {
 async function loadModules() {
   const result = await build({
     stdin: {
-      contents: `export { decodeIrcTag, parseIrcFrame, parseIrcTags } from "./src/twitch-chat/twitch-irc-parser.js"; export { TwitchChatSession } from "./src/twitch-chat/twitch-chat-session.js"; export { ReconnectPolicy } from "./src/twitch-chat/reconnect-policy.js"; export { TwitchChatSource, parseTwitchIrcLine } from "./src/comment-sources.js";`,
+      contents: `export { decodeIrcTag, parseIrcFrame, parseIrcTags } from "./src/twitch-chat/twitch-irc-parser.js"; export { TwitchChatSession } from "./src/twitch-chat/twitch-chat-session.js"; export { ReconnectPolicy } from "./src/twitch-chat/reconnect-policy.js"; export { TwitchChatSource, collapseConsecutiveEmojiRuns, parseTwitchIrcLine } from "./src/comment-sources.js";`,
       resolveDir: path.resolve(new URL("../..", import.meta.url).pathname),
       sourcefile: "twitch-chat-test.js",
       loader: "js",
@@ -51,6 +51,18 @@ test("IRCv3 parser handles escaped tags, multiline frames, and nonfatal unknown 
     assert.equal(events[5].type, "reconnect");
     assert.equal(events[6].type, "unknown");
     assert.deepEqual(modules.parseTwitchIrcLine("PING :tmi.twitch.tv"), { type: "ping", payload: ":tmi.twitch.tv" });
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("comment reader emoji normalization keeps one emoji per consecutive run", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    assert.equal(modules.collapseConsecutiveEmojiRuns("いいね😂😂😂"), "いいね😂");
+    assert.equal(modules.collapseConsecutiveEmojiRuns("😂  😂\t😂 ありがとう"), "😂 ありがとう");
+    assert.equal(modules.collapseConsecutiveEmojiRuns("家族👨‍👩‍👧‍👦👨‍👩‍👧‍👦と旗🇯🇵🇺🇸、番号1️⃣2️⃣"), "家族👨‍👩‍👧‍👦と旗🇯🇵、番号1️⃣");
+    assert.equal(modules.collapseConsecutiveEmojiRuns("肌色🏽🏽🏽"), "肌色🏽");
+    assert.equal(modules.collapseConsecutiveEmojiRuns("😂、😂"), "😂、😂", "句読点を挟む絵文字は別の読み上げとして残す");
+    assert.equal(modules.collapseConsecutiveEmojiRuns("絵文字なし"), "絵文字なし");
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 

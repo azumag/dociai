@@ -318,6 +318,9 @@ export function validateConfig(cfg) {
     if (cr.ignoreUsers != null && !Array.isArray(cr.ignoreUsers)) {
       errors.push("commentReader.ignoreUsers は配列で指定してください");
     }
+    for (const key of ["includeAuthor", "skipEmotes", "collapseConsecutiveEmoji"]) {
+      if (cr[key] != null && typeof cr[key] !== "boolean") errors.push(`commentReader.${key} はbooleanで指定してください`);
+    }
     validateCommentReaderVoices(cr, errors);
   }
 

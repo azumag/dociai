@@ -7,6 +7,7 @@ import { RequestCancelledError, isCancellation } from "./runtime/request-registr
 import { MemoryItemProcessingStore } from "./readers/item-processing-store.js";
 import { createReaderItemKey, readerStatus, retryOptions } from "./readers/reader-runner.js";
 import { retryDecision } from "./readers/retry-policy.js";
+import { buildOutputLimitWarning, isOutputLimitFinishReason } from "./ai-finish-reason.js";
 
 const MOCK_NEWS = [
   { title: "ローカルPoCが初起動", description: "配信AIコンパニオンのローカルPoCが初めて起動し、コメントへの音声応答に成功した。", guid: "mock-1", publishedAt: "2026-07-01T09:00:00+09:00", sourceName: "mock" },
@@ -106,9 +107,11 @@ export class NewsReader {
         this.lastRunResult.processed++;
         try {
           const { messages, debugText } = this.contextBuilder.build({ persona, news: item, includeScreen: "never" });
-          const { text } = await connector.chat(messages, { signal: context.signal, requestId: `${context.requestId ?? "news"}:summary:${item.guid}`, generation: context.generation });
+          const result = await connector.chat(messages, { signal: context.signal, requestId: `${context.requestId ?? "news"}:summary:${item.guid}`, generation: context.generation });
+          const { text } = result;
           if (!String(text ?? "").trim()) throw Object.assign(new Error("ニュース要約が空です"), { kind: "empty" });
           this.#guard(context);
+          if (isOutputLimitFinishReason(result.finishReason)) this.log(buildOutputLimitWarning(result.finishReason, persona.connector), "warn");
           this.onRead({ persona, item, text, debugText });
           this.#guard(context);
           const queued = this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "news" });

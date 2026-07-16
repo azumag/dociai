@@ -62,6 +62,19 @@ test("runtime reload re-resolves transferred comment reader items with the new e
   queue.dispose();
 });
 
+test("comment reader applies the configured consecutive emoji collapse before enqueue", async () => {
+  const config = minimalConfig({
+    commentReader: { enabled: true, includeAuthor: false, collapseConsecutiveEmoji: true },
+  });
+  const { deps } = fakeDeps();
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+  const queue = bundle.get("speechQueue");
+  queue.hold("test");
+  bundle.get("addComment")({ author: "Viewer", text: "最高😂 😂😂! 次も🎉🎉", source: "manual" });
+  assert.equal(queue.snapshot().pending[0].text, "最高😂! 次も🎉");
+  for (const component of [...bundle.components].reverse()) if (component.dispose) await component.dispose();
+});
+
 test("selectPlatformAdapter swaps between Browser and Electron implementations based on the injected global scope", () => {
   const browser = selectPlatformAdapter({});
   assert.equal(browser.kind, "browser");

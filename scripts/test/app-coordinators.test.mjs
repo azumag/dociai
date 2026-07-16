@@ -19,6 +19,27 @@ test("ResponseCoordinator delivers final text once to store, OBS, and speech", a
   assert.equal(coordinator.dispose(), true); assert.equal(coordinator.dispose(), false);
 });
 
+test("ResponseCoordinator identifies provider token-limit truncation before speech", async () => {
+  const actions = [], spoken = [];
+  const persona = { id: "p", name: "P", connector: "limited", voice: {} };
+  const coordinator = new ResponseCoordinator({
+    runtime,
+    getGeneration: () => 1,
+    getConnector: () => ({ chat: async () => ({ text: "途中まで", finishReason: "length" }) }),
+    personaRouter: { recordReply() {} },
+    contextBuilder: { build: () => ({ messages: [], debugText: "debug" }) },
+    speechQueue: { enqueue: (item) => spoken.push(item) },
+    dispatch: (action) => actions.push(action),
+  });
+  assert.equal(await coordinator.respond(persona), "途中まで");
+  const warning = actions.find((action) => action.type === "response-warning");
+  assert.equal(warning.finishReason, "length");
+  assert.match(warning.message, /読み上げ処理による切断ではありません/);
+  assert.match(warning.message, /maxTokens/);
+  assert.equal(spoken.length, 1, "診断は生成結果を読み上げキューへ渡す前に確定する");
+  assert.ok(actions.indexOf(warning) < actions.findIndex((action) => action.type === "response-final"));
+});
+
 test("ResponseCoordinator runs Web research before chat and includes grounded results", async () => {
   const actions = [], order = [];
   const persona = { id: "p", name: "P", connector: "answer", voice: {} };

@@ -156,3 +156,28 @@ test("TopicReader applies the same retry lifecycle and stops permanent-error loo
   assert.equal(reader.skip(failure.key), true);
   assert.equal(reader.restore(failure.key), true);
 });
+
+test("AI-backed readers warn about output limits before handing text to speech", async () => {
+  for (const { Reader, key, source } of [
+    { Reader: NewsReader, key: "news", source: "source" },
+    { Reader: TopicReader, key: "topics", source: "todoist" },
+  ]) {
+    const now = { value: 1_000 };
+    const events = [];
+    const dependencies = readerDependencies({ now, connector: { chat: async () => ({ text: "途中まで", finishReason: "length" }) } });
+    const reader = new Reader({
+      config: { [key]: { enabled: true, maxItems: 1 } },
+      ...dependencies,
+      log: (message, level) => events.push({ type: "log", message, level }),
+      speechQueue: { enqueue: () => { events.push({ type: "speech" }); return { state: "waiting" }; } },
+    });
+    reader.fetchAll = async () => reader.refineItems([{ guid: key, title: key, sourceName: source }]);
+
+    await reader.run({ generation: 1 });
+
+    const warningIndex = events.findIndex((event) => event.type === "log" && event.level === "warn" && /読み上げ処理による切断ではありません/.test(event.message));
+    const speechIndex = events.findIndex((event) => event.type === "speech");
+    assert.ok(warningIndex >= 0, `${key} reader must report the AI output limit`);
+    assert.ok(warningIndex < speechIndex, `${key} reader must diagnose the limit before speech`);
+  }
+});

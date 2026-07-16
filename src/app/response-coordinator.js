@@ -1,3 +1,5 @@
+import { buildOutputLimitWarning, isOutputLimitFinishReason } from "../ai-finish-reason.js";
+
 export class ResponseCoordinator {
   constructor({ runtime, getGeneration, getConnector, personaRouter, contextBuilder, webResearcher = null, speechQueue, dispatch = () => {}, publish = () => {}, onError = () => {} }) {
     Object.assign(this, { runtime, getGeneration, getConnector, personaRouter, contextBuilder, webResearcher, speechQueue, dispatch, publish, onError }); this.disposed = false;
@@ -39,6 +41,15 @@ export class ResponseCoordinator {
       this.dispatch({ type: "response-debug", persona, debugText });
       const result = await connector.chat(messages, { signal: request.context.signal, requestId: request.context.requestId, generation });
       this.runtime.guard(request.context);
+      if (isOutputLimitFinishReason(result.finishReason)) {
+        this.dispatch({
+          type: "response-warning",
+          persona,
+          triggerId,
+          finishReason: result.finishReason,
+          message: buildOutputLimitWarning(result.finishReason, persona.connector),
+        });
+      }
       this.dispatch({ type: "response-final", persona, triggerId, text: result.text });
       this.publish("reply", { personaId: persona.id, personaName: persona.name, text: result.text, time: Date.now() });
       this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text: result.text, voice: persona.voice });

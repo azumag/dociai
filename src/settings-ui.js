@@ -752,11 +752,15 @@ export class SettingsUI {
         this.#mapField("apiKey", "connectors", id, "apiKey", { value: c.apiKey ?? "", placeholder: c.apiKeyConfigured && !c.apiKey ? "設定済み（変更する場合のみ入力）" : "", attrs: { spellcheck: "false", autocomplete: "off" } }),
         this.#mapField("baseUrl", "connectors", id, "baseUrl", { value: c.baseUrl ?? "", attrs: { spellcheck: "false" } }),
         this.#mapField("timeoutMs (ms)", "connectors", id, "timeoutMs", { type: "number", value: c.timeoutMs ?? "" }),
-        this.#mapField("maxTokens", "connectors", id, "maxTokens", { type: "number", value: c.maxTokens ?? "", attrs: { step: 1 } }),
+        this.#mapField("maxTokens", "connectors", id, "maxTokens", { type: "number", value: c.maxTokens ?? "", placeholder: "既定: 2048", attrs: { step: 1 } }),
       );
       cardBody.append(row1, row2);
       this._body.append(card);
     }
+    const note = document.createElement("p");
+    note.className = "muted settings-note";
+    note.textContent = "AIの長い返答が文の途中で終わる場合は、読み上げではなく生成側のmaxTokens上限に達している可能性があります。未指定時は2048です。システムログに出力上限の警告が出る場合は、この値を増やしてください。";
+    body.append(note);
   }
 
   // ---- personas ----
@@ -1095,12 +1099,13 @@ export class SettingsUI {
       cardBody.append(g);
       cardBody.append(this.#pathCheckbox("ユーザー名を読み上げる", "commentReader.includeAuthor", { value: cr.includeAuthor !== false }));
       cardBody.append(this.#pathCheckbox("エモートを読み上げない", "commentReader.skipEmotes", { value: !!cr.skipEmotes }));
+      cardBody.append(this.#pathCheckbox("連続する絵文字を1つにまとめる", "commentReader.collapseConsecutiveEmoji", { value: !!cr.collapseConsecutiveEmoji }));
       cardBody.append(this.#pathField("読み上げを無視するユーザー (カンマ区切り)", "commentReader.ignoreUsers", { value: asArray(cr.ignoreUsers).join(", "), csv: true, attrs: { spellcheck: "false" } }));
     }
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
+    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。「連続する絵文字を1つにまとめる」は、単独の絵文字は残し、空白を挟んだ絵文字の連投も先頭1つだけ読み上げます。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
     this._body.append(note);
   }
 

@@ -62,7 +62,7 @@ export function checkAiResponseAvailability({ action, resolvePersona, getConnect
  * final output text before returning it — "final textだけSpeechQueueへ" starts here: this function
  * NEVER returns a partial/streaming chunk, only the connector's one resolved `{text}}`.
  *
- * Returns `{ ok, text, debugText }` on success, or `{ ok: false, cancelled, error, debugText }` on
+ * Returns `{ ok, text, debugText, finishReason }` on success, or `{ ok: false, cancelled, error, debugText }` on
  * failure/cancellation. Never throws.
  */
 export async function runAiResponseAction({
@@ -94,7 +94,7 @@ export async function runAiResponseAction({
     runtime.guard(request.context);
     const text = sanitizeInlineText(response?.text ?? "", { maxChars: maxOutputChars });
     if (!text) throw Object.assign(new Error("AI応答が空でした"), { kind: "empty" });
-    return { ok: true, text, debugText };
+    return { ok: true, text, debugText, finishReason: response?.finishReason ?? null };
   } catch (error) {
     if (isCancellation(error)) return { ok: false, cancelled: true, error, debugText };
     return { ok: false, cancelled: false, error, debugText };

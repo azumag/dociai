@@ -171,15 +171,18 @@ try {
     webspeech: !!document.querySelector('[data-config-path="commentReader.webspeech.rate"]'),
     voicevox: !!document.querySelector('[data-config-path="commentReader.voicevox.speed"]'),
     bouyomi: !!document.querySelector('[data-config-path="commentReader.bouyomi.speed"]'),
+    collapseEmoji: !!document.querySelector('[data-config-path="commentReader.collapseConsecutiveEmoji"]'),
     legacyRate: !!document.querySelector('[data-config-path="commentReader.rate"]'),
   }));
-  check("コメント読み上げの音声設定が3エンジン別に表示される", commentVoiceFields.webspeech && commentVoiceFields.voicevox && commentVoiceFields.bouyomi && !commentVoiceFields.legacyRate, JSON.stringify(commentVoiceFields));
+  check("コメント読み上げの音声設定と絵文字連投抑制が表示される", commentVoiceFields.webspeech && commentVoiceFields.voicevox && commentVoiceFields.bouyomi && commentVoiceFields.collapseEmoji && !commentVoiceFields.legacyRate, JSON.stringify(commentVoiceFields));
   await page.evaluate(() => {
     for (const [path, value] of [["commentReader.webspeech.rate", "0.8"], ["commentReader.voicevox.speed", "1.3"], ["commentReader.bouyomi.speed", "140"]]) {
       const input = document.querySelector(`[data-config-path="${path}"]`);
       input.value = value;
       input.dispatchEvent(new Event("input", { bubbles: true }));
     }
+    const collapseEmoji = document.querySelector('[data-config-path="commentReader.collapseConsecutiveEmoji"]');
+    collapseEmoji.click();
   });
 
   // 8. コネクタタブに戻して新規コネクタを追加
@@ -225,6 +228,7 @@ try {
   check("config.local.json に new_persona_1 が書き込まれる", (diskConfig.personas ?? []).some((p) => p.id === "new_persona_1"));
   check("config.local.json に connector maxTokens が保存される", diskConfig.connectors?.mock_main?.maxTokens === 32768);
   check("commentReaderの3エンジン別音声設定が保存される", diskConfig.commentReader?.webspeech?.rate === 0.8 && diskConfig.commentReader?.voicevox?.speed === 1.3 && diskConfig.commentReader?.bouyomi?.speed === 140);
+  check("commentReaderの絵文字連投抑制が保存される", diskConfig.commentReader?.collapseConsecutiveEmoji === true);
 
   // 11c. ページを再読み込みしても編集内容が残る (ダウンロード→手動コピー不要であることの確認)
   await page.reload({ waitUntil: "networkidle0" });

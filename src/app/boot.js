@@ -76,6 +76,7 @@ function handleResponseAction(action) {
   if (action.type === "response-skipped") logEvent(`「${persona.name}」はスキップ: ${action.reason} (trigger: ${action.triggerId})`);
   if (action.type === "response-started") { state.thinking.add(persona.id); renderTally(); renderPersonas(); }
   if (action.type === "response-debug") { state.lastDebug = { personaName: persona.name, debugText: action.debugText, at: new Date() }; renderDebug(); }
+  if (action.type === "response-warning") logEvent(`「${persona.name}」: ${action.message}`, "warn");
   if (action.type === "response-final") appendReply({ persona, text: action.text, triggerId: action.triggerId });
   if (action.type === "response-error") appendReply({ persona, error: scrub(action.error.message), triggerId: action.triggerId });
   if (action.type === "response-finished" && appRuntime.isCurrent(action.generation)) { state.thinking.delete(persona.id); renderTally(); renderPersonas(); }
@@ -739,6 +740,7 @@ appRuntime = new AppRuntime({
     onEventTriggerAction: (action) => {
       if (action.type === "action-error") logEvent(`event trigger action失敗 (${action.triggerId}): ${scrub(action.error?.message ?? "unknown error")}`, "error");
       if (action.type === "action-fallback") logEvent(`event trigger action fallback (${action.triggerId}): ${action.reason}`, "warn");
+      if (action.type === "action-warning") logEvent(`event trigger action警告 (${action.triggerId}): ${action.message}`, "warn");
     },
     // `deriveSimulationStatus()`/the `EventHistoryStore` are #96's own real, already-tested pieces —
     // reused here unchanged (never re-derived) so a production event's history entry uses the exact
