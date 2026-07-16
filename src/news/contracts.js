@@ -58,6 +58,7 @@ export function emptyDiagnostics(overrides = {}) {
     mode: "topic",
     timingsMs: {},
     candidateCounts: { acquired: 0, filtered: 0, eligible: 0 },
+    filterStats: null,
     fallbackPath: [],
     rewriteCount: 0,
     sourceIds: [],

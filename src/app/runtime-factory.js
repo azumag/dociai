@@ -368,6 +368,12 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   // individual stages here without ever touching NewsReader itself. NewsReader (below) still
   // owns the public reader API (status/retryNow/skip/restore/run) and simply delegates run()
   // to this pipeline instance.
+  //
+  // Issue #189: `deps.newsHistoryStore`, when supplied, is a MemoryNewsHistoryStore constructed
+  // ONCE at boot.js module scope (same pattern as `deps.commentStore`) so persistent
+  // dedupe/spam/diversity history survives config reload — a fresh generation's runtime
+  // component graph must not reset "have we already delivered this article" memory. Falls back
+  // to createNewsPipelineCoordinator's own bounded default when a caller (tests) doesn't supply one.
   const newsPipeline = define("newsPipeline", () => createNewsPipelineCoordinator({
     getConfig: () => config,
     getConnector: (id) => connectors.get(id),
@@ -376,6 +382,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     speechQueue,
     log: deps.log,
     onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText }); },
+    ...(deps.newsHistoryStore ? { historyStore: deps.newsHistoryStore } : {}),
   }));
 
   const newsReader = define("newsReader", () => new NewsReader({

@@ -6,7 +6,7 @@ import { MemoryItemProcessingStore } from "./readers/item-processing-store.js";
 import { createNewsPipelineCoordinator } from "./news/news-pipeline-coordinator.js";
 
 export class NewsReader {
-  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now(), pipeline = null }) {
+  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), historyStore = undefined, clock = () => Date.now(), pipeline = null }) {
     this.config = config;
     this.getConnector = getConnector;
     this.personaRouter = personaRouter;
@@ -18,7 +18,8 @@ export class NewsReader {
     this.clock = clock;
     // pipelineが注入されない場合 (直接構築されるテスト/簡易利用) は、自分自身の`fetchAll`へ
     // 委譲するacquire stageを持つcoordinatorを内部構築する。これにより `reader.fetchAll = ...`
-    // による差し替えが、run() 経由でも引き続き効く。
+    // による差し替えが、run() 経由でも引き続き効く。historyStoreを渡さない場合は
+    // createNewsPipelineCoordinator自身の既定 (bounded memory store) を使う。
     this.pipeline = pipeline ?? createNewsPipelineCoordinator({
       getConfig: () => this.config,
       getConnector: (id) => this.getConnector(id),
@@ -28,6 +29,7 @@ export class NewsReader {
       log: (...args) => this.log(...args),
       onRead: (...args) => this.onRead(...args),
       store: this.store,
+      ...(historyStore ? { historyStore } : {}),
       clock: this.clock,
       fetchAll: (context) => this.fetchAll(context),
     });

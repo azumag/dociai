@@ -1,16 +1,37 @@
-// select stage (issue #187) — 取得済み候補をItemProcessingStoreへ登録し、今回読める分を選ぶ。
-// Phase 1では旧NewsReader.run()と同じ「ensure -> candidates() -> maxItemsでslice」のまま。
-// issue #189 (永続重複排除・spam判定・鮮度/source diversity選定) がこのstageを差し替える。
+// select stage (issue #187/#189) — 取得済み候補をItemProcessingStoreへ登録し、永続重複排除・
+// spam判定・鮮度/source diversityで今回読む候補を選ぶ。
+//
+// dedupe/spam判定はsrc/news/selection/*、historyは既定でMemoryNewsHistoryStore (Electron
+// 永続repositoryは#188/#189フォローアップ)。
 
-export function createSelectStage({ store, clock }) {
+import { filterCandidates } from "../selection/dedupe-candidates.js";
+import { createSelectionPolicy } from "../selection/selection-policy.js";
+import { createSpamGate } from "../selection/spam-gate.js";
+import { MemoryNewsHistoryStore } from "../selection/memory-news-history-store.js";
+import { NEWS_HISTORY_DEFAULTS } from "../selection/news-history-store.js";
+
+export function createSelectStage({
+  store,
+  clock,
+  historyStore = new MemoryNewsHistoryStore({ clock }),
+  spamGate = createSpamGate(),
+  selectionPolicy = createSelectionPolicy(),
+  topicCooldownMs = NEWS_HISTORY_DEFAULTS.topicCooldownHours * 60 * 60 * 1000,
+  sourceSuffixPatterns,
+}) {
   return {
     id: "select",
+    historyStore,
     async run({ items, generation, maxItems }, _context) {
       const now = clock();
       for (const item of items) store.ensure({ ...item, key: item.processingKey }, generation, now);
       const candidateKeys = new Set(store.candidates(generation, now).map((record) => record.key));
-      const picks = items.filter((item) => candidateKeys.has(item.processingKey)).slice(0, maxItems);
-      return { picks, eligibleCount: candidateKeys.size };
+
+      const { eligible, stats } = await filterCandidates({ items, candidateKeys, historyStore, spamGate, now, topicCooldownMs, sourceSuffixPatterns });
+      const { picks: scoredPicks, warnings } = selectionPolicy.select(eligible, { maxItems, historyStore, now });
+      const picks = scoredPicks.map((p) => p.item);
+
+      return { picks, eligibleCount: eligible.length, stats, warnings };
     },
   };
 }

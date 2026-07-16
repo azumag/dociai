@@ -20,13 +20,16 @@ import { createResearchStage } from "./stages/research-stage.js";
 import { createGenerateStage } from "./stages/generate-stage.js";
 import { createQualityStage } from "./stages/quality-stage.js";
 import { createDeliverStage } from "./stages/deliver-stage.js";
+import { deriveIdentityKeys } from "./selection/dedupe-candidates.js";
+import { MemoryNewsHistoryStore } from "./selection/memory-news-history-store.js";
 
 export class NewsPipelineCoordinator {
-  constructor({ getConfig, adapter, stages, store = new MemoryItemProcessingStore(), clock = () => Date.now(), log = () => {}, onRead = () => {}, maxRewrites = 1 }) {
+  constructor({ getConfig, adapter, stages, store = new MemoryItemProcessingStore(), historyStore = new MemoryNewsHistoryStore(), clock = () => Date.now(), log = () => {}, onRead = () => {}, maxRewrites = 1 }) {
     this.getConfig = getConfig;
     this.adapter = adapter;
     this.stages = stages;
     this.store = store;
+    this.historyStore = historyStore;
     this.clock = clock;
     this.log = log;
     this.onRead = onRead;
@@ -66,9 +69,10 @@ export class NewsPipelineCoordinator {
       const items = await this.stages.acquire.run(null, context);
       diagnostics.candidateCounts.acquired = items.length;
 
-      const { picks, eligibleCount } = await this.stages.select.run({ items, generation: this.generation, maxItems: news.maxItems ?? 3 }, context);
+      const { picks, eligibleCount, stats: filterStats } = await this.stages.select.run({ items, generation: this.generation, maxItems: news.maxItems ?? 3 }, context);
       diagnostics.candidateCounts.filtered = eligibleCount;
       diagnostics.candidateCounts.eligible = picks.length;
+      diagnostics.filterStats = filterStats ?? null;
       this.lastRunResult = { candidates: eligibleCount, processed: 0, succeeded: 0, retryScheduled: 0, failed: 0 };
       this.log(`ニュース候補 ${items.length}件 (再処理可能 ${eligibleCount}件、読み上げ ${picks.length}件)`);
       if (!picks.length) return { status: PIPELINE_STATUS.NO_CANDIDATE, diagnostics };
@@ -119,6 +123,10 @@ export class NewsPipelineCoordinator {
           this.lastRunResult.succeeded++;
           this.lastSuccessAt = new Date(this.clock());
           diagnostics.sourceIds.push(item.sourceName ?? "unknown");
+          // commit(markRead)成功後にだけ永続historyへ記録する — begin()だけでクラッシュした
+          // itemは記録されず、次回runで再候補になる (issue #189)。
+          const deliveredKeys = deriveIdentityKeys(item);
+          this.historyStore.recordDelivered({ candidateId: item.processingKey, titleKey: deliveredKeys.titleKey, topicKey: deliveredKeys.topicKey, urlHash: deliveredKeys.urlHash, sourceId: item.sourceName ?? "unknown" }, this.clock());
         } catch (e) {
           if (isCancellation(e)) {
             this.store.resetUnread(item.processingKey, this.generation, this.clock());
@@ -133,7 +141,11 @@ export class NewsPipelineCoordinator {
           const decision = retryDecision(e, { attempts: record.attempts, now: this.clock(), ...retryOptions(news) });
           this.store.markFailure(item.processingKey, this.generation, e, decision, this.clock());
           if (decision.action === "retry") this.lastRunResult.retryScheduled++;
-          else this.lastRunResult.failed++;
+          else {
+            this.lastRunResult.failed++;
+            const failedKeys = deriveIdentityKeys(item);
+            this.historyStore.recordFailedPermanent({ candidateId: item.processingKey, titleKey: failedKeys.titleKey, topicKey: failedKeys.topicKey, sourceId: item.sourceName ?? "unknown" }, this.clock());
+          }
           this.log(`ニュース1件の読み上げ失敗 [${item.title}]: ${e.message}`, "error");
           diagnostics.errorCode = normalizeStageError(e, "generate").kind;
         }
@@ -175,6 +187,7 @@ export function createNewsPipelineCoordinator({
   log = () => {},
   onRead = () => {},
   store = new MemoryItemProcessingStore(),
+  historyStore = new MemoryNewsHistoryStore({ clock: () => Date.now() }),
   clock = () => Date.now(),
   fetchAll: fetchAllOverride,
   stages: stageOverrides = {},
@@ -183,11 +196,11 @@ export function createNewsPipelineCoordinator({
   const adapter = createLegacyNewsAdapter({ getConfig, getConnector, personaRouter, contextBuilder, speechQueue, log });
   const stages = {
     acquire: stageOverrides.acquire ?? createAcquireStage({ fetchAll: fetchAllOverride ?? adapter.fetchAll }),
-    select: stageOverrides.select ?? createSelectStage({ store, clock }),
+    select: stageOverrides.select ?? createSelectStage({ store, clock, historyStore }),
     research: stageOverrides.research ?? createResearchStage(),
     generate: stageOverrides.generate ?? createGenerateStage({ adapter }),
     quality: stageOverrides.quality ?? createQualityStage(),
     deliver: stageOverrides.deliver ?? createDeliverStage({ adapter }),
   };
-  return new NewsPipelineCoordinator({ getConfig, adapter, stages, store, clock, log, onRead, maxRewrites });
+  return new NewsPipelineCoordinator({ getConfig, adapter, stages, store, historyStore, clock, log, onRead, maxRewrites });
 }
