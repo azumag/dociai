@@ -43,6 +43,13 @@ export class SpeechScheduler {
     return item;
   }
 
+  // 次に take() されるはずのアイテムを、キューから取り除かずに覗き見る。
+  // SpeechQueue が「このアイテムを今始めてよいか (例: コメント読み上げの間隔)」を
+  // 判断してから実際に take() するために使う。
+  peekNext() {
+    return this.resumeNext ?? this.pending[0] ?? null;
+  }
+
   complete(item, state, details = {}) {
     if (this.current !== item) return false;
     transitionSpeechItem(item, state, { now: this.now(), ...details });

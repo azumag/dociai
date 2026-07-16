@@ -324,3 +324,54 @@ test("candidate-start items merge into the shared transfer before rollback", () 
   assert.equal(queue.mergeIntoRuntimeTransfer(), 0, "merge is idempotent by item id");
   queue.dispose();
 });
+
+test("commentReaderIntervalMs paces successive comment reads", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({
+    webSpeech: { synthesis, Utterance: FakeUtterance },
+    commentReaderIntervalMs: 400,
+    isCommentReaderItem: (item) => item.personaId === "reader",
+  });
+
+  const first = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "one", voice: { engine: "webspeech" } });
+  assert.equal(first.state, "speaking");
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  assert.equal(first.state, "done");
+
+  const second = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "two", voice: { engine: "webspeech" } });
+  assert.equal(second.state, "waiting", "間隔が空くまで次のコメントは読み上げを始めない");
+
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(second.state, "waiting", "間隔の途中ではまだ始まらない");
+
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(second.state, "speaking", "間隔が経過すると読み上げを開始する");
+
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  queue.dispose();
+});
+
+test("commentReaderIntervalMs does not delay a persona item queued after a comment finished reading", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({
+    webSpeech: { synthesis, Utterance: FakeUtterance },
+    commentReaderIntervalMs: 5000,
+    isCommentReaderItem: (item) => item.personaId === "reader",
+  });
+
+  const comment = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "one", voice: { engine: "webspeech" } });
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  assert.equal(comment.state, "done");
+
+  const aiReply = queue.enqueue({ personaId: "ai", personaName: "AI", text: "reply", voice: { engine: "webspeech" } });
+  assert.equal(aiReply.state, "speaking", "コメント読み上げ以外のアイテムは間隔の影響を受けない");
+
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  queue.dispose();
+});

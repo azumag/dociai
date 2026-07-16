@@ -1078,6 +1078,7 @@ export class SettingsUI {
       const g = document.createElement("div");
       g.className = "card-grid";
       g.append(this.#pathSelect("engine", VOICE_ENGINES, "commentReader.engine", { value: cr.engine ?? "webspeech" }));
+      g.append(this.#pathField("読み上げ間隔 (秒)", "commentReader.intervalSeconds", { type: "number", value: cr.intervalSeconds ?? 0, attrs: { min: 0, max: 3600, step: 0.5 } }));
       const webspeech = cr.webspeech ?? {};
       const voicevox = cr.voicevox ?? {};
       const bouyomi = cr.bouyomi ?? {};
@@ -1105,7 +1106,7 @@ export class SettingsUI {
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。「連続する絵文字を1つにまとめる」は、単独の絵文字は残し、空白を挟んだ絵文字の連投も先頭1つだけ読み上げます。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
+    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。「読み上げ間隔 (秒)」は、あるコメントの読み上げが終わってから次のコメントの読み上げを始めるまでの最短待機時間です (既定0=間隔なし)。コメントが連続で届いても機関銃のように読み上げ続けないよう調整できます。同じキューにコメント読み上げより後ろに積まれたAI応答は、この待機の間も自分の順番を待つため、間隔を長くするとAI応答の開始も遅れる場合があります。「連続する絵文字を1つにまとめる」は、単独の絵文字は残し、空白を挟んだ絵文字の連投も先頭1つだけ読み上げます。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
     this._body.append(note);
   }
 

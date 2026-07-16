@@ -274,6 +274,8 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       policy: config.speechQueue,
       strictOrdering: config.speechQueue?.strictOrdering,
       bouyomiCharsPerSecond: config.bouyomi?.charsPerSecond,
+      commentReaderIntervalMs: Math.max(0, Number(config.commentReader?.intervalSeconds) || 0) * 1000,
+      isCommentReaderItem: (item) => item.personaId === COMMENT_READER_ID,
       resolveVoice: (personaId, currentVoice) => personaId === COMMENT_READER_ID ? resolveCommentReaderVoice(config.commentReader, config) : config.personas?.find((persona) => persona.id === personaId)?.voice ?? currentVoice,
       resolveFallbackVoice: (personaId, currentVoice, backendId) => personaId === COMMENT_READER_ID && backendId === "webspeech"
         ? resolveCommentReaderVoice({ ...config.commentReader, engine: "webspeech" }, config)
