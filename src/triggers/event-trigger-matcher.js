@@ -1,7 +1,8 @@
 // Issue #91: runtime matcher — decides WHICH EventTriggerConfigs match a single incoming
 // StreamEvent, and WHY (or why not). Applies, in order: a coarse enabled/eventType pre-filter,
-// priority-descending + stable config-order sort, full `all`/`any` condition-tree evaluation with
-// per-leaf failed-reason collection, `stopPropagation`, and a `maxMatchesPerEvent` safety cap.
+// priority-descending sort with equal-priority ties shuffled (so no one equal-priority trigger
+// always wins a stopPropagation/maxMatchesPerEvent tie), full `all`/`any` condition-tree evaluation
+// with per-leaf failed-reason collection, `stopPropagation`, and a `maxMatchesPerEvent` safety cap.
 //
 // Deliberately standalone: this module is never imported by src/trigger-engine.js (the EXISTING
 // keyword/hotkey/interval/random/manual dispatcher, issue #7) and never imports it either — no
@@ -80,15 +81,31 @@ export function evaluateCondition(node, event) {
   return { passed: false, details: [{ field: null, operator: null, expected: undefined, actual: undefined, passed: false, reason: "invalid-condition-shape" }] };
 }
 
-/** Sorts by `priority` descending; ties are broken by ORIGINAL array index (stable), never left to
- * whatever ordering guarantee `Array.prototype.sort` happens to make for equal comparator results
- * — an explicit index tiebreak, so equal-priority entries always evaluate in config-array order
- * regardless of engine/array-size internals. */
-function stableSortByPriorityDesc(triggers) {
-  return triggers
-    .map((trigger, index) => ({ trigger, index }))
-    .sort((a, b) => (b.trigger?.priority ?? DEFAULT_PRIORITY) - (a.trigger?.priority ?? DEFAULT_PRIORITY) || a.index - b.index)
-    .map((entry) => entry.trigger);
+/** Fisher-Yates shuffle using an injectable `random` (defaults to `Math.random`, same convention as
+ * twitch-chat-source.js/reconnect-policy.js) so tests can supply a deterministic sequence instead.
+ * Mutates and returns `array`. */
+function shuffleInPlace(array, random) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+/** Sorts by `priority` descending; equal-priority triggers are shuffled amongst themselves (via
+ * `random`) rather than falling back to config array order. Two triggers competing for the same
+ * event should each get a fair shot at winning ties (`stopPropagation` / `maxMatchesPerEvent`) over
+ * time, instead of the config-array-earlier one always winning. Different-priority triggers are
+ * never reordered relative to each other. */
+function orderByPriorityDesc(triggers, random) {
+  const byPriority = new Map();
+  for (const trigger of triggers) {
+    const priority = trigger?.priority ?? DEFAULT_PRIORITY;
+    if (!byPriority.has(priority)) byPriority.set(priority, []);
+    byPriority.get(priority).push(trigger);
+  }
+  const descendingPriorities = [...byPriority.keys()].sort((a, b) => b - a);
+  return descendingPriorities.flatMap((priority) => shuffleInPlace(byPriority.get(priority), random));
 }
 
 /** Coarse "enabled/source/type" pre-filter, applied before any condition-tree evaluation (cheap
@@ -120,7 +137,7 @@ function buildResult(trigger, event, matched, reason, details = []) {
  *
  * Returns `{ matches, skipped, truncated }`:
  *   - `matches`: MatchResults whose full condition tree evaluated true, in evaluation
- *     (priority-descending, stable) order.
+ *     (priority-descending, equal-priority ties shuffled) order.
  *   - `skipped`: every other trigger considered, each carrying a `reason` (`"disabled"`,
  *     `"event-type-mismatch"`, `"condition-not-met"`, `"max-matches-reached"`, or
  *     `"stopped-by-higher-priority"`).
@@ -129,13 +146,16 @@ function buildResult(trigger, event, matched, reason, details = []) {
  * A `stopPropagation: true` match prevents every LOWER-priority trigger's condition tree from
  * being evaluated at all (they are recorded in `skipped` with reason
  * `"stopped-by-higher-priority"`, for trace completeness, but their conditions are never touched).
+ * Equal-priority triggers are shuffled before evaluation (see `orderByPriorityDesc`), so which one
+ * of several equal-priority contenders wins a `stopPropagation`/`maxMatchesPerEvent` tie is not
+ * always the same one — pass `random` to control/seed this for tests.
  *
  * Pass `trace` (a trigger-trace.js `TriggerTraceBuffer`) to also record every result (matched and
  * skipped) into its bounded history.
  */
-export function matchEvent(triggers, event, { maxMatchesPerEvent = DEFAULT_MAX_MATCHES_PER_EVENT, trace = null } = {}) {
+export function matchEvent(triggers, event, { maxMatchesPerEvent = DEFAULT_MAX_MATCHES_PER_EVENT, trace = null, random = Math.random } = {}) {
   const effectiveMax = Number.isInteger(maxMatchesPerEvent) && maxMatchesPerEvent > 0 ? maxMatchesPerEvent : DEFAULT_MAX_MATCHES_PER_EVENT;
-  const ordered = stableSortByPriorityDesc(Array.isArray(triggers) ? triggers : []);
+  const ordered = orderByPriorityDesc(Array.isArray(triggers) ? triggers : [], random);
   const matches = [];
   const skipped = [];
   let truncated = false;
