@@ -157,6 +157,63 @@ test("TopicReader applies the same retry lifecycle and stops permanent-error loo
   assert.equal(reader.restore(failure.key), true);
 });
 
+test("TopicReader randomPersona picks per item from the enabled candidate pool", async () => {
+  const now = { value: 1_000 };
+  const personaA = { id: "a", name: "A", connector: "mock", enabled: true, voice: {} };
+  const personaB = { id: "b", name: "B", connector: "mock", enabled: true, voice: {} };
+  const personaDisabled = { id: "c", name: "C", connector: "mock", enabled: false, voice: {} };
+  const personas = { a: personaA, b: personaB, c: personaDisabled };
+  const seenPersonas = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 3, randomPersona: true, personas: ["a", "b", "c"] } },
+    getConnector: () => ({ chat: async () => ({ text: "ok" }) }),
+    personaRouter: { get: (id) => personas[id], defaultPersona: () => personaA },
+    contextBuilder: { build: () => ({ messages: [{ role: "user", content: "x" }], debugText: "d" }) },
+    speechQueue: { enqueue: () => ({ state: "waiting" }) },
+    store: new MemoryItemProcessingStore({ clock: () => now.value }),
+    clock: () => now.value,
+    onRead: ({ persona }) => seenPersonas.push(persona.id),
+  });
+  reader.fetchAll = async () => reader.refineItems([
+    { guid: "1", title: "t1", sourceName: "todoist" },
+    { guid: "2", title: "t2", sourceName: "todoist" },
+    { guid: "3", title: "t3", sourceName: "todoist" },
+  ]);
+  // candidates = [a, b] (c is filtered out for being disabled); floor(random*2) selects the index.
+  const sequence = [0, 0.9, 0.4];
+  let i = 0;
+  const originalRandom = Math.random;
+  Math.random = () => sequence[i++ % sequence.length];
+  try {
+    await reader.run({ generation: 1 });
+  } finally {
+    Math.random = originalRandom;
+  }
+  assert.deepEqual(seenPersonas, ["a", "b", "a"]);
+  assert.equal(reader.status().counts.read, 3);
+});
+
+test("TopicReader falls back to topics.persona when randomPersona has no enabled candidates", async () => {
+  const now = { value: 1_000 };
+  const personaFixed = { id: "fixed", name: "Fixed", connector: "mock", enabled: true, voice: {} };
+  const personaDisabled = { id: "c", name: "C", connector: "mock", enabled: false, voice: {} };
+  const personas = { fixed: personaFixed, c: personaDisabled };
+  const seenPersonas = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1, persona: "fixed", randomPersona: true, personas: ["c"] } },
+    getConnector: () => ({ chat: async () => ({ text: "ok" }) }),
+    personaRouter: { get: (id) => personas[id], defaultPersona: () => personaFixed },
+    contextBuilder: { build: () => ({ messages: [{ role: "user", content: "x" }], debugText: "d" }) },
+    speechQueue: { enqueue: () => ({ state: "waiting" }) },
+    store: new MemoryItemProcessingStore({ clock: () => now.value }),
+    clock: () => now.value,
+    onRead: ({ persona }) => seenPersonas.push(persona.id),
+  });
+  reader.fetchAll = async () => reader.refineItems([{ guid: "1", title: "t1", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(seenPersonas, ["fixed"]);
+});
+
 test("TopicReader runs Web research before chat and includes grounded results", async () => {
   const now = { value: 1_000 };
   const order = [];

@@ -1180,7 +1180,39 @@ export class SettingsUI {
     g.append(this.#pathSelect("persona", ["", ...personaIds], "topics.persona", { value: t.persona ?? "" }));
     g.append(this.#pathField("maxItems", "topics.maxItems", { type: "number", value: t.maxItems ?? 3 }));
     g.append(this.#pathCheckbox("dedupe", "topics.dedupe", { value: t.dedupe ?? true }));
+    g.append(this.#pathCheckbox("ランダムに複数ペルソナで読む", "topics.randomPersona", { value: !!t.randomPersona }));
     cardBody.append(g);
+    // personas: ランダム選択の候補プール (randomPersona時、topics.personaの代わりにここから毎回抽選する)
+    const poolWrap = document.createElement("div");
+    poolWrap.className = "field";
+    const poolLab = document.createElement("span");
+    poolLab.className = "field-label";
+    poolLab.textContent = "personas (ランダム候補)";
+    poolWrap.append(poolLab);
+    const poolBox = document.createElement("div");
+    poolBox.className = "checkbox-group";
+    for (const pid of personaIds) {
+      const lab = document.createElement("label");
+      lab.className = "chip-check";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = (t.personas ?? []).includes(pid);
+      cb.addEventListener("change", () => {
+        const set = new Set(this.draft.topics.personas ?? []);
+        if (cb.checked) set.add(pid); else set.delete(pid);
+        this.draft.topics.personas = [...set];
+      });
+      lab.append(cb, document.createTextNode(pid));
+      poolBox.append(lab);
+    }
+    if (!personaIds.length) {
+      const m = document.createElement("span");
+      m.className = "muted";
+      m.textContent = "(ペルソナがありません)";
+      poolBox.append(m);
+    }
+    poolWrap.append(poolBox);
+    cardBody.append(poolWrap);
     cardBody.append(this.#pathField("intro", "topics.intro", { value: t.intro ?? "", textarea: true, rows: 2 }));
     cardBody.append(this.#pathField("style", "topics.style", { value: t.style ?? "", textarea: true, rows: 2 }));
     this._body.append(card);

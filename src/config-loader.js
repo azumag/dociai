@@ -228,6 +228,14 @@ export function validateConfig(cfg) {
     if (cfg.topics.persona && !(cfg.personas ?? []).some((p) => p?.id === cfg.topics.persona)) {
       errors.push(`topics.persona "${cfg.topics.persona}" が personas に存在しません`);
     }
+    for (const pid of cfg.topics.personas ?? []) {
+      if (pid && !(cfg.personas ?? []).some((p) => p?.id === pid)) {
+        errors.push(`topics.personas の "${pid}" が personas に存在しません`);
+      }
+    }
+    if (cfg.topics.randomPersona && !(cfg.topics.personas ?? []).length) {
+      warnings.push("topics.randomPersona が true ですが topics.personas が空です。topics.persona / router.defaultPersona にフォールバックします");
+    }
   }
 
   // comment sources
