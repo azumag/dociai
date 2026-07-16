@@ -137,6 +137,10 @@ export class TopicReader {
         out.push(...(await this.fetchSource(src, index, context)));
       } catch (e) {
         if (isCancellation(e)) throw e;
+        if (String(e?.kind ?? "").toLowerCase() === "auth") {
+          this.log(`話題取得の認証に失敗しました [${src.name}]: トークンが無効か期限切れの可能性があります。設定でTodoist個人アクセストークンを再設定してください (${e.message})`, "error");
+          continue;
+        }
         this.log(`話題取得失敗 [${src.name}]: ${e.message}`, "error");
       }
     }
@@ -152,7 +156,7 @@ export class TopicReader {
         const result = await fetchTopicsThroughElectron({ sourceIndex, requestId, ownerId: "console" }).finally(() => context.signal?.removeEventListener("abort", cancel));
         if (!result?.ok) {
           if (result?.error?.code === "CANCELLED") throw new RequestCancelledError();
-          throw new Error(result?.error?.message ?? "Main processから話題を取得できませんでした");
+          throw Object.assign(new Error(result?.error?.message ?? "Main processから話題を取得できませんでした"), result?.error?.code === "AUTH" ? { kind: "auth" } : {});
         }
         this.#guard(context);
         return result.value.items;
@@ -168,7 +172,7 @@ export class TopicReader {
     const res = await fetch(`https://api.todoist.com/api/v1/tasks?project_id=${encodeURIComponent(src.projectId)}`, {
       headers: { Authorization: `Bearer ${src.token}` }, signal: context.signal,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status} (Todoist token/projectIdを確認してください)`);
+    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status} (Todoist token/projectIdを確認してください)`), (res.status === 401 || res.status === 403) ? { kind: "auth" } : {});
     const body = await res.json();
     const rows = Array.isArray(body) ? body : (body.results ?? []);
     const tasks = rows.filter((t) => String(t.project_id) === String(src.projectId));

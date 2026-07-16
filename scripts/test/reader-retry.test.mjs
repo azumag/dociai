@@ -191,6 +191,51 @@ test("TopicReader fails open when Web research fails", async () => {
   assert.ok(warnings.some((message) => /Web調査prepass/.test(message)));
 });
 
+test("TopicReader turns a Todoist 401 from the Electron Main process into an actionable auth message", async () => {
+  const now = { value: 1_000 };
+  const logs = [];
+  const originalDociai = globalThis.dociai;
+  try {
+    globalThis.dociai = { topics: { fetch: async () => ({ ok: false, error: { code: "AUTH", message: "HTTP 401", retryable: false } }) } };
+    const reader = new TopicReader({
+      config: { topics: { enabled: true, sources: [{ name: "配信ネタ (Todoist)", type: "todoist", enabled: true, projectId: "1" }] } },
+      ...readerDependencies({ now, connector: { chat: async () => ({ text: "unused" }) } }),
+      log: (message, level) => logs.push({ message, level }),
+    });
+    assert.deepEqual(await reader.fetchAll({}), []);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].level, "error");
+    assert.match(logs[0].message, /認証に失敗/);
+    assert.match(logs[0].message, /設定でTodoist個人アクセストークンを再設定/);
+    assert.match(logs[0].message, /HTTP 401/, "the underlying status is still visible for diagnosis");
+  } finally {
+    if (originalDociai === undefined) delete globalThis.dociai; else globalThis.dociai = originalDociai;
+  }
+});
+
+test("TopicReader turns a direct-fetch Todoist 401 (Browser mode without Electron Main) into the same actionable auth message", async () => {
+  const now = { value: 1_000 };
+  const logs = [];
+  const originalDociai = globalThis.dociai;
+  const originalFetch = globalThis.fetch;
+  try {
+    delete globalThis.dociai;
+    globalThis.fetch = async () => new Response("unauthorized", { status: 401 });
+    const reader = new TopicReader({
+      config: { topics: { enabled: true, sources: [{ name: "配信ネタ (Todoist)", type: "todoist", enabled: true, token: "expired-token", projectId: "1" }] } },
+      ...readerDependencies({ now, connector: { chat: async () => ({ text: "unused" }) } }),
+      log: (message, level) => logs.push({ message, level }),
+    });
+    assert.deepEqual(await reader.fetchAll({}), []);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].level, "error");
+    assert.match(logs[0].message, /認証に失敗/);
+  } finally {
+    if (originalDociai === undefined) delete globalThis.dociai; else globalThis.dociai = originalDociai;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("AI-backed readers warn about output limits before handing text to speech", async () => {
   for (const { Reader, key, source } of [
     { Reader: NewsReader, key: "news", source: "source" },
