@@ -1,0 +1,38 @@
+name: Inspect PR 239 merge conflicts
+
+on:
+  push:
+    branches:
+      - claude/github-issue-186-l1m80x
+
+permissions:
+  contents: write
+
+jobs:
+  inspect-conflicts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inspect merge conflicts
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          set +e
+          git merge --no-commit --no-ff origin/main
+          merge_status=$?
+          set -e
+          echo "MERGE_STATUS=${merge_status}"
+          echo "--- git status --short ---"
+          git status --short
+          echo "--- unresolved files ---"
+          git diff --name-only --diff-filter=U
+          if [ "${merge_status}" -eq 0 ]; then
+            git merge --abort || true
+            echo "No conflicts detected"
+            exit 0
+          fi
+          exit 1
