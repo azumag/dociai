@@ -101,23 +101,28 @@ export class NewsPipelineCoordinator {
         try {
           const requestId = `${context.requestId ?? "news"}:summary:${item.guid}`;
           const research = await this.stages.research.run({ item, persona, modePolicy }, context);
-          let generated = await this.stages.generate.run({ item, persona, connector, research, requestId }, context);
+          let generated = await this.stages.generate.run({ item, persona, connector, research, modePolicy, requestId }, context);
           guardPipelineContext(context);
-          let quality = await this.stages.quality.run({ text: generated.text, item, modePolicy }, context);
+          let quality = await this.stages.quality.run({ text: generated.text, item, modePolicy, research }, context);
           let rewriteCount = 0;
           while (!quality.passed && rewriteCount < this.maxRewrites) {
             rewriteCount++;
             diagnostics.rewriteCount++;
             diagnostics.fallbackPath.push(`rewrite:${rewriteCount}`);
-            generated = await this.stages.generate.run({ item, persona, connector, research, requestId: `${requestId}:rewrite:${rewriteCount}`, feedback: quality.reasons }, context);
+            generated = await this.stages.generate.run({ item, persona, connector, research, modePolicy, requestId: `${requestId}:rewrite:${rewriteCount}`, feedback: quality.reasons }, context);
             guardPipelineContext(context);
-            quality = await this.stages.quality.run({ text: generated.text, item, modePolicy }, context);
+            quality = await this.stages.quality.run({ text: generated.text, item, modePolicy, research }, context);
           }
           if (!quality.passed) throw new PipelineStageError("ニュース品質検査に失敗しました", { stage: "quality", kind: "quality_failed" });
 
-          this.onRead({ persona, item, text: generated.text, debugText: generated.debugText });
+          // qualityがparse/sanitize済みの本文 (quality.parsed.body) を返す場合はそれを読み上げる
+          // (issue #192: marker付き生文字列を音声へ流さない)。旧always-passスタブのように
+          // `.parsed` を持たないstageの場合はgenerate結果をそのまま使う (後方互換)。
+          const spokenText = quality.parsed?.body ?? generated.text;
+          const spokenTitle = quality.parsed?.titleSpoken ?? null;
+          this.onRead({ persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle });
           guardPipelineContext(context);
-          await this.stages.deliver.run({ persona, item, text: generated.text }, context);
+          await this.stages.deliver.run({ persona, item, text: spokenText }, context);
           guardPipelineContext(context);
           this.store.markRead(item.processingKey, this.generation, this.clock());
           this.lastRunResult.succeeded++;
