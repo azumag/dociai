@@ -964,7 +964,7 @@ export class SettingsUI {
     researchBody.append(researchGrid);
     const researchHelp = document.createElement("p");
     researchHelp.className = "muted";
-    researchHelp.textContent = "コメントまたは手動依頼への返答前にMiniMax Web検索を行います。Token Planの利用料金が発生する場合があります。検索失敗時は通常回答へフォールバックします。";
+    researchHelp.textContent = "コメント・手動依頼・話題の読み上げへの返答前にMiniMax Web検索を行います。Token Planの利用料金が発生する場合があります。検索失敗時は通常回答へフォールバックします。";
     researchBody.append(researchHelp);
     this._body.append(researchCard);
 

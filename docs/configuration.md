@@ -432,9 +432,10 @@ plan/event/trigger IDを含む`ResolvedOverlayCue`は分離されています。
 
 ## Web調査 prepass (MiniMax)
 
-`research.enabled`を有効にすると、コメントまたは手動依頼への通常回答を生成する前に、
-`research.connector`で指定したMiniMax connectorのWeb検索を実行します。公式Token Plan Search API
-（`POST /v1/coding_plan/search`）を利用するため、契約や利用量に応じた料金が発生する場合があります。
+`research.enabled`を有効にすると、コメント・手動依頼への通常回答、および話題（`topics`）の
+読み上げコメント生成の前に、`research.connector`で指定したMiniMax connectorのWeb検索を実行します。
+公式Token Plan Search API（`POST /v1/coding_plan/search`）を利用するため、契約や利用量に応じた
+料金が発生する場合があります。
 
 ```json
 {
