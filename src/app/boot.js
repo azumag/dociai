@@ -23,6 +23,7 @@ import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } fr
 import { createAppActions } from "./app-actions.js";
 import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron } from "../platform/electron-services.js";
 import { splitConnectorSecrets } from "../config/config-secrets-split.js";
+import { personaTriggerIdsForDisplay } from "../ui/persona-trigger-display.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -288,7 +289,8 @@ function renderPersonas() {
   const personas = (personaRouter?.list() ?? []).map((p) => {
     const cooldown = personaRouter.cooldownRemaining(p);
     const pState = personaState(p);
-    return { ...p, state: pState, dotColor: p.enabled && pState === "ready" ? personaColor(p.id) : "", detail: `${p.connector} / triggers: ${(p.triggers ?? []).join(", ") || "なし"}${cooldown > 0 ? ` / CD ${Math.ceil(cooldown)}s` : ""}` };
+    const triggerIds = personaTriggerIdsForDisplay(p.triggers, state.config?.triggers);
+    return { ...p, state: pState, dotColor: p.enabled && pState === "ready" ? personaColor(p.id) : "", detail: `${p.connector} / triggers: ${triggerIds.join(", ") || "なし"}${cooldown > 0 ? ` / CD ${Math.ceil(cooldown)}s` : ""}` };
   });
   consoleView.renderPersonas(personas, {
     setPersonaEnabled: (id, enabled) => { const persona = personas.find((entry) => entry.id === id); personaRouter.setEnabled(id, enabled); logEvent(`ペルソナ「${persona.name}」を${enabled ? "有効化" : "無効化"}しました`); },
@@ -337,7 +339,7 @@ function renderSpeechQueue() {
     status = `待機 ${speechQueue.waitingCount()}`;
   }
   const diagnostics = snapshot ? `待機 ${snapshot.pending.length} / 最古 ${Math.round(snapshot.oldestPendingAgeMs / 1000)}秒 / drop ${snapshot.metrics.dropped} / hold ${snapshot.holdReasons.join(", ") || "なし"}${snapshot.activeExecution ? ` / 実行 ${snapshot.activeExecution.id}` : ""}${snapshot.backendWarnings.length ? ` / 警告: ${snapshot.backendWarnings.join("; ")}` : ""}${snapshot.remoteClear.status === "failed" ? ` / remote clear失敗: ${snapshot.remoteClear.error}` : ""}` : "キュー未初期化";
-  consoleView.renderSpeech({ current: snapshot?.current ?? null, pending: snapshot ? [...snapshot.pending] : [], diagnostics, status, statusClass });
+  consoleView.renderSpeech({ current: snapshot?.current ?? null, diagnostics, status, statusClass });
 }
 
 function renderCommentReaderStatus() {
@@ -394,6 +396,9 @@ function micLevelToPercent(peak) {
 function renderMicPanel() {
   const el = $("#mic-status");
   const fill = $("#mic-meter-fill");
+  const bargeInBox = $("#chk-mic-bargein");
+  const bargeInEnabled = state.micBargeInEnabled !== false;
+  if (bargeInBox) bargeInBox.checked = bargeInEnabled;
   const micMonitor = appRuntime.getComponent("micMonitor");
   const enabled = state.config?.micMonitor?.enabled;
   $("#btn-mic-start").disabled = !enabled || micMonitor?.active;
@@ -411,7 +416,8 @@ function renderMicPanel() {
     return;
   }
   const s = micMonitor.status();
-  el.textContent = `監視: ${s.active ? "中" : "停止"}` + (s.active ? ` / ${s.speaking ? "発話検知中 (AI保留)" : "無音"}` : "");
+  const speakingLabel = bargeInEnabled ? "発話検知中 (AI保留)" : "発話検知中 (割り込みOFF)";
+  el.textContent = `監視: ${s.active ? "中" : "停止"}` + (s.active ? ` / ${s.speaking ? speakingLabel : "無音"}` : "");
   fill.style.width = `${Math.round(micLevelToPercent(s.peak))}%`;
   // メーターの色ゾーン(緑/琥珀/赤)はトラック全幅を基準にした固定位置なので、fill自身の
   // background-sizeをトラックの実測幅に毎回同期させる。固定px指定だと画面幅が変わった
@@ -704,6 +710,7 @@ appRuntime = new AppRuntime({
     onSpeechUpdate,
     onScreenChange: () => renderScreenPanel(),
     onMicChange: () => renderMicPanel(),
+    isMicBargeInEnabled: () => state.micBargeInEnabled !== false,
     onResponseError: (error, persona) => logEvent(`「${persona?.name ?? "不明"}」応答失敗: ${scrub(error.message)}`, "error"),
     onAutomationError: (kind, error) => logEvent(`${kind === "news" ? "ニュース" : "話題"}読み上げ失敗: ${scrub(error.message)}`, "error"),
     onAutomationComplete: (kind) => (kind === "news" ? renderNewsPanel() : renderTopicPanel()),
@@ -760,7 +767,7 @@ function bindUI() {
     twitchOverviewOpen: "#btn-twitch-overview-open",
     commentForm: "#comment-form", commentText: "#comment-text", commentAuthor: "#comment-author",
     speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
-    micStart: "#btn-mic-start", micStop: "#btn-mic-stop", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
+    micStart: "#btn-mic-start", micStop: "#btn-mic-stop", micBargeIn: "#chk-mic-bargein", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
     screenSourceRefresh: "#btn-screen-source-refresh", screenSourceSelect: "#screen-source-select",
     newsRead: "#btn-news-read", topicRead: "#btn-topic-read", twitchReconnect: "#btn-twitch-reconnect",
   });

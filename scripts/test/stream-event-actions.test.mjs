@@ -38,6 +38,7 @@ import {
   DEFAULT_SIMULATION_OPTIONS,
   SIMULATION_FIXTURE_KINDS,
   buildFixtureEvent,
+  runProductionStreamEvent,
   simulateStreamEvent,
 } from "../../src/simulation/stream-event-simulator.js";
 
@@ -110,9 +111,10 @@ function makeRunner(overrides = {}) {
     rateLimiter: overrides.rateLimiter ?? null,
     resolvePersona: overrides.resolvePersona ?? ((id) => personas[id] ?? null),
     getConnector: overrides.getConnector ?? ((id) => connectors[id] ?? null),
-    speechQueue: overrides.speechQueue === null ? null : { enqueue: (item) => speech.push(item) },
-    obs: overrides.obs === null ? null : { publish: (type, payload) => obsCalls.push({ type, payload }) },
-    dispatch: (action) => dispatched.push(action),
+    speechQueue: overrides.speechQueue === null ? null : (overrides.speechQueue ?? { enqueue: (item) => speech.push(item) }),
+    obs: overrides.obs === null ? null : (overrides.obs ?? { publish: (type, payload) => obsCalls.push({ type, payload }) }),
+    dispatch: overrides.dispatch ?? ((action) => dispatched.push(action)),
+    onExecuted: overrides.onExecuted,
     trace,
     clock: overrides.clock,
   });
@@ -130,8 +132,8 @@ function makePlan(event, action, { triggerId = "trig-1", actionIndex = 0, genera
 // action-schema.js
 // ---------------------------------------------------------------------------------------------
 
-test("action-schema: ACTION_KINDS lists exactly the two action kinds from the issue body", () => {
-  assert.deepEqual([...ACTION_KINDS], ["ai-response", "template-speech"]);
+test("action-schema: ACTION_KINDS preserves speech kinds and exposes overlay-cue", () => {
+  assert.deepEqual([...ACTION_KINDS], ["ai-response", "template-speech", "overlay-cue"]);
 });
 
 test("action-schema: validateActionConfig accepts a well-formed ai-response/template-speech config", () => {
@@ -550,17 +552,45 @@ test("ActionRunner: template-speech action renders placeholders and speaks the r
   assert.equal(connector.calls.length, 0, "template-speech must never call the AI connector");
 });
 
+test("ActionRunner: overlay-cue safely skips as overlay-unavailable without AI, speech, or OBS side effects", async () => {
+  const connector = capturingConnector();
+  const { runner, runtime, speech, obsCalls, dispatched } = makeRunner({ connectors: { c1: connector } });
+  const event = baseEvent("cheer", { bits: 77 });
+  const plan = makePlan(event, { id: "overlay-1", kind: "overlay-cue", cue: { visual: { assetId: "reward-image" } } }, { generation: runtime.generations.current() });
+  const result = await runner.execute(plan, { speak: true, notifyObs: true });
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "overlay-unavailable");
+  assert.equal(connector.calls.length, 0);
+  assert.equal(speech.length, 0);
+  assert.equal(obsCalls.length, 0);
+  assert.ok(dispatched.some((entry) => entry.type === "action-skipped" && entry.reason === "overlay-unavailable"));
+});
+
+test("ActionRunner: an unknown future action kind is denied instead of falling into the AI path", async () => {
+  const connector = capturingConnector();
+  const { runner, runtime, speech, obsCalls } = makeRunner({ connectors: { c1: connector } });
+  const event = baseEvent("cheer", { bits: 1 });
+  const result = await runner.execute({ id: "manual-plan", eventId: event.id, triggerId: "t", actionIndex: 0, kind: "future-kind", action: { kind: "future-kind" }, event, priority: 0, context: "production", generation: runtime.generations.current(), createdAt: 0 }, { speak: true, notifyObs: true });
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "unsupported-action-kind");
+  assert.equal(connector.calls.length, 0); assert.equal(speech.length, 0); assert.equal(obsCalls.length, 0);
+});
+
 test("ActionRunner: duplicate plan — the SAME ActionPlan is executed only once; a second execute() call is skipped, and downstream side effects fire only once", async () => {
   const { runner, runtime, speech, dispatched } = makeRunner();
   const event = baseEvent("cheer", { bits: 10 });
   const plan = makePlan(event, { id: "a1", kind: "ai-response", personaId: "p1" }, { generation: runtime.generations.current() });
 
-  const first = await runner.execute(plan, { speak: true, notifyObs: false });
-  const second = await runner.execute(plan, { speak: true, notifyObs: false });
+  let firstStarts = 0;
+  let duplicateStarts = 0;
+  const first = await runner.execute(plan, { speak: true, notifyObs: false, onStarted: () => { firstStarts += 1; } });
+  const second = await runner.execute(plan, { speak: true, notifyObs: false, onStarted: () => { duplicateStarts += 1; } });
 
   assert.equal(first.status, "executed");
   assert.equal(second.status, "skipped");
   assert.equal(second.reason, "duplicate-plan");
+  assert.equal(firstStarts, 1);
+  assert.equal(duplicateStarts, 0, "a duplicate rejected during preflight never reaches started");
   assert.equal(speech.length, 1, "the duplicate must never reach SpeechQueue a second time");
   assert.ok(dispatched.some((entry) => entry.type === "action-skipped" && entry.reason === "duplicate-plan"));
 });
@@ -572,12 +602,14 @@ test("ActionRunner: stale-generation plan is rejected without ever calling the c
   const plan = makePlan(event, { id: "a1", kind: "ai-response", personaId: "p1" }, { generation: runtime.generations.current() });
 
   runtime.beginTransition("config reload"); // moves the runtime to a NEW generation
-  const result = await runner.execute(plan, { speak: true, notifyObs: false });
+  let starts = 0;
+  const result = await runner.execute(plan, { speak: true, notifyObs: false, onStarted: () => { starts += 1; } });
 
   assert.equal(result.status, "skipped");
   assert.equal(result.reason, "stale-generation");
   assert.equal(connector.calls.length, 0);
   assert.equal(speech.length, 0);
+  assert.equal(starts, 0, "a stale plan rejected during preflight never reaches started");
 });
 
 test("ActionRunner: re-consults the REAL #92 GlobalActionBudget immediately before executing, not just at match/plan time", async () => {
@@ -591,10 +623,12 @@ test("ActionRunner: re-consults the REAL #92 GlobalActionBudget immediately befo
   const { runner: hangRunner } = makeRunner({ globalActionBudget: budget, connectors: { c1: hangingConnector() } });
   void hangRunner.execute(planA, { speak: false, notifyObs: false });
 
-  const result = await runner.execute(planB, { speak: false, notifyObs: false });
+  let starts = 0;
+  const result = await runner.execute(planB, { speak: false, notifyObs: false, onStarted: () => { starts += 1; } });
   assert.equal(result.status, "skipped");
   assert.equal(result.reason, "global-concurrency-limit");
   assert.equal(speech.length, 0);
+  assert.equal(starts, 0, "a budget rejection never reaches started");
 });
 
 test("ActionRunner: re-consults a REAL #92 ActionRateLimiter when the action config opts in with its own rateLimit tuple", async () => {
@@ -605,12 +639,16 @@ test("ActionRunner: re-consults a REAL #92 ActionRateLimiter when the action con
   const planA = makePlan(event, action, { generation: runtime.generations.current(), triggerId: "trig-rl" });
   const planB = makePlan(baseEvent("cheer", { bits: 1 }, { id: "evt-rl-2" }), action, { generation: runtime.generations.current(), triggerId: "trig-rl", actionIndex: 0 });
 
-  const first = await runner.execute(planA, { speak: false, notifyObs: false });
-  const second = await runner.execute(planB, { speak: false, notifyObs: false });
+  let firstStarts = 0;
+  let rateLimitedStarts = 0;
+  const first = await runner.execute(planA, { speak: false, notifyObs: false, onStarted: () => { firstStarts += 1; } });
+  const second = await runner.execute(planB, { speak: false, notifyObs: false, onStarted: () => { rateLimitedStarts += 1; } });
 
   assert.equal(first.status, "executed");
   assert.equal(second.status, "skipped");
   assert.equal(second.reason, "rate-limit-exceeded");
+  assert.equal(firstStarts, 1);
+  assert.equal(rateLimitedStarts, 0, "a rate-limit rejection never reaches started");
   assert.equal(speech.length, 0);
 });
 
@@ -723,6 +761,133 @@ test("simulateStreamEvent: productionEquivalent:true is the explicit opt-in that
   assert.equal(connector.calls.length, 1, "productionEquivalent must call the real connector");
   assert.equal(speech.length, 1, "productionEquivalent must enqueue to the real SpeechQueue");
   assert.equal(obsCalls.length, 1, "productionEquivalent must notify the real OBS bridge");
+});
+
+test("simulateStreamEvent: overlay-cue is overlay-unavailable in safe and production-equivalent paths with zero side effects", async () => {
+  for (const options of [undefined, { productionEquivalent: true }]) {
+    const connector = capturingConnector();
+    const speech = [];
+    const obsCalls = [];
+    const runtime = new BrowserRuntimeController();
+    const runner = new ActionRunner({ runtime, globalActionBudget: new GlobalActionBudget(), resolvePersona: () => persona, getConnector: () => connector, speechQueue: { enqueue: (item) => speech.push(item) }, obs: { publish: (type, payload) => obsCalls.push({ type, payload }) } });
+    const triggers = [{ id: "t-overlay", enabled: true, eventTypes: ["cheer"], priority: 0, stopPropagation: false, condition: { all: [] }, actions: [{ id: "overlay-1", kind: "overlay-cue", cue: { visual: { assetId: "reward-image" } } }] }];
+    const result = await simulateStreamEvent({ fixture: "cheer", triggers, actionRunner: runner, ...(options ? { options } : {}) });
+    assert.equal(result.results[0].status, "skipped");
+    assert.equal(result.results[0].reason, "overlay-unavailable");
+    assert.equal(connector.calls.length, 0);
+    assert.equal(speech.length, 0);
+    assert.equal(obsCalls.length, 0);
+  }
+});
+
+test("runProductionStreamEvent: overlay-cue is skipped without connector, SpeechQueue, or OBS", async () => {
+  const connector = capturingConnector();
+  const { runner, runtime, speech, obsCalls } = makeRunner({ connectors: { c1: connector } });
+  const triggers = [{ id: "t-overlay-prod", enabled: true, eventTypes: ["cheer"], priority: 0, stopPropagation: false, condition: { all: [] }, actions: [{ id: "overlay-1", kind: "overlay-cue", cue: { visual: { assetId: "reward-image" } } }] }];
+  const result = await runProductionStreamEvent({ event: buildFixtureEvent("cheer"), triggers, actionRunner: runner, generation: runtime.generations.current() });
+  assert.equal(result.context, "production");
+  assert.equal(result.results[0].status, "skipped");
+  assert.equal(result.results[0].reason, "overlay-unavailable");
+  assert.equal(connector.calls.length, 0);
+  assert.equal(speech.length, 0);
+  assert.equal(obsCalls.length, 0);
+});
+
+test("runProductionStreamEvent: unavailable overlay leaves no cooldown reservation and never blocks a following speech action", async () => {
+  for (const consumeOn of ["scheduled", "started", "completed"]) {
+    const tracker = new CooldownTracker({ clock: () => 0 });
+    const { runner, runtime, speech } = makeRunner({ clock: () => 0 });
+    const overlay = { id: "overlay-1", kind: "overlay-cue", cue: { visual: { assetId: "reward-image" } } };
+    const overlayOnly = [{ id: `t-overlay-${consumeOn}`, enabled: true, eventTypes: ["cheer"], priority: 0, stopPropagation: false, condition: { all: [] }, cooldown: { cooldownMs: 10_000, consumeOn }, actions: [overlay] }];
+    const cooldownConfigByTrigger = (triggerId) => overlayOnly.find((entry) => entry.id === triggerId)?.cooldown ?? null;
+    for (const index of [1, 2]) {
+      const result = await runProductionStreamEvent({ event: buildFixtureEvent("cheer", { id: `overlay-${consumeOn}-${index}` }), triggers: overlayOnly, actionRunner: runner, cooldownTracker: tracker, cooldownConfigByTrigger, generation: runtime.generations.current(), now: 0 });
+      assert.equal(result.results[0].reason, "overlay-unavailable", consumeOn);
+    }
+    assert.equal(tracker.stats().reservations, 0, `${consumeOn}: unavailable overlay must not reserve cooldown`);
+    assert.equal(tracker.stats().committedTotalSinceStart, 0, `${consumeOn}: unavailable overlay must not consume cooldown`);
+
+    const mixedTracker = new CooldownTracker({ clock: () => 0 });
+    const mixed = [{ ...overlayOnly[0], id: `t-mixed-${consumeOn}`, actions: [overlay, { id: "speech-1", kind: "template-speech", template: "still runs" }] }];
+    const mixedResult = await runProductionStreamEvent({ event: buildFixtureEvent("cheer", { id: `mixed-${consumeOn}` }), triggers: mixed, actionRunner: runner, cooldownTracker: mixedTracker, cooldownConfigByTrigger: (triggerId) => mixed.find((entry) => entry.id === triggerId)?.cooldown ?? null, generation: runtime.generations.current(), now: 0 });
+    assert.equal(mixedResult.results[0].reason, "overlay-unavailable", consumeOn);
+    assert.equal(mixedResult.results[1].status, "executed", consumeOn);
+    assert.equal(mixedTracker.stats().reservations, 0, `${consumeOn}: executable action must resolve its gate`);
+  }
+});
+
+test("runProductionStreamEvent: one trigger with multiple actions uses one cooldown gate and never self-blocks", async () => {
+  for (const consumeOn of ["scheduled", "started", "completed"]) {
+    const tracker = new CooldownTracker({ clock: () => 0 });
+    const { runner, runtime, speech } = makeRunner({ clock: () => 0 });
+    const trigger = {
+      id: `t-batch-${consumeOn}`,
+      enabled: true,
+      eventTypes: ["cheer"],
+      priority: 0,
+      stopPropagation: false,
+      condition: { all: [] },
+      cooldown: { cooldownMs: 10_000, consumeOn },
+      actions: [
+        { id: "speech-1", kind: "template-speech", template: "first" },
+        { id: "overlay-1", kind: "overlay-cue", cue: { visual: { assetId: "reward-image" } } },
+        { id: "speech-2", kind: "template-speech", template: "second" },
+      ],
+    };
+    const result = await runProductionStreamEvent({
+      event: buildFixtureEvent("cheer", { id: `batch-${consumeOn}` }),
+      triggers: [trigger],
+      actionRunner: runner,
+      cooldownTracker: tracker,
+      cooldownConfigByTrigger: () => trigger.cooldown,
+      generation: runtime.generations.current(),
+      now: 0,
+    });
+    assert.deepEqual(result.results.map((entry) => [entry.status, entry.reason]), [
+      ["executed", null],
+      ["skipped", "overlay-unavailable"],
+      ["executed", null],
+    ], consumeOn);
+    assert.deepEqual(speech.map((entry) => entry.text), ["first", "second"], `${consumeOn}: both executable actions run`);
+    assert.equal(tracker.stats().reservations, 0, `${consumeOn}: the shared batch gate is fully resolved`);
+    assert.equal(tracker.stats().committedTotalSinceStart, 1, `${consumeOn}: the trigger consumes cooldown exactly once`);
+  }
+});
+
+test("runProductionStreamEvent: dependency failures become error results and release a pending completed cooldown", async () => {
+  const dependencyCases = [
+    { name: "budget.reserve", action: { id: "speech", kind: "template-speech", template: "hello" }, overrides: { globalActionBudget: { reserve: () => { throw new Error("budget failed"); } } } },
+    { name: "rateLimiter.attempt", action: { id: "speech", kind: "template-speech", template: "hello", rateLimit: { windowMs: 10_000, maxActions: 1 } }, overrides: { rateLimiter: { attempt: () => { throw new Error("rate failed"); } } } },
+    { name: "dispatch", action: { id: "speech", kind: "template-speech", template: "hello" }, overrides: { dispatch: () => { throw new Error("dispatch failed"); } } },
+    { name: "speechQueue.enqueue", action: { id: "speech", kind: "template-speech", template: "hello" }, overrides: { speechQueue: { enqueue: () => { throw new Error("speech failed"); } } } },
+    { name: "obs.publish", action: { id: "speech", kind: "template-speech", template: "hello" }, overrides: { obs: { publish: () => { throw new Error("obs failed"); } } } },
+    { name: "onExecuted", action: { id: "speech", kind: "template-speech", template: "hello" }, overrides: { onExecuted: () => { throw new Error("history failed"); } } },
+  ];
+
+  for (const dependency of dependencyCases) {
+    const tracker = new CooldownTracker({ clock: () => 0 });
+    const { runner, runtime } = makeRunner({ clock: () => 0, ...dependency.overrides });
+    const trigger = { id: `t-dependency-${dependency.name}`, enabled: true, eventTypes: ["cheer"], priority: 0, stopPropagation: false, condition: { all: [] }, cooldown: { cooldownMs: 10_000, consumeOn: "completed" }, actions: [dependency.action] };
+    const result = await runProductionStreamEvent({ event: buildFixtureEvent("cheer", { id: `dependency-${dependency.name}` }), triggers: [trigger], actionRunner: runner, cooldownTracker: tracker, cooldownConfigByTrigger: () => trigger.cooldown, generation: runtime.generations.current(), now: 0 });
+    assert.equal(result.results[0].status, "error", dependency.name);
+    assert.equal(result.results[0].reason, "dependency-error", dependency.name);
+    assert.equal(tracker.stats().reservations, 0, `${dependency.name}: no pending reservation leaks`);
+    assert.equal(tracker.stats().committedTotalSinceStart, 0, `${dependency.name}: failed execution does not consume completed cooldown`);
+  }
+});
+
+test("runProductionStreamEvent: completed cooldown starts at actual completion time, not pipeline start", async () => {
+  let clock = 1_000;
+  const tracker = new CooldownTracker({ clock: () => clock });
+  const { runner, runtime } = makeRunner({
+    clock: () => clock,
+    speechQueue: { enqueue: () => { clock = 21_000; } },
+  });
+  const trigger = { id: "t-completion-clock", enabled: true, eventTypes: ["cheer"], priority: 0, stopPropagation: false, condition: { all: [] }, cooldown: { cooldownMs: 10_000, consumeOn: "completed" }, actions: [{ id: "speech", kind: "template-speech", template: "hello" }] };
+  const result = await runProductionStreamEvent({ event: buildFixtureEvent("cheer", { id: "completion-clock" }), triggers: [trigger], actionRunner: runner, cooldownTracker: tracker, cooldownConfigByTrigger: () => trigger.cooldown, generation: runtime.generations.current(), now: 1_000 });
+  assert.equal(result.results[0].status, "executed");
+  assert.equal(tracker.isOnCooldown("production:t-completion-clock", 10_000, 30_999), true);
+  assert.equal(tracker.isOnCooldown("production:t-completion-clock", 10_000, 31_000), false, "the window expires ten seconds after completion");
 });
 
 test("simulateStreamEvent: default bypassCooldown=true never blocks a repeated run, while productionEquivalent's real cooldown DOES block a second run within the window", async () => {

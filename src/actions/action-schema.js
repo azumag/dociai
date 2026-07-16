@@ -6,16 +6,22 @@
 // same "contract vs runtime" layering already established for src/stream-events/* and
 // src/triggers/*).
 //
-// An ActionConfig is attached to a matched EventTriggerConfig (#91) by whatever future config layer
-// authors `trigger.actions` (out of this issue's scope — #91's own trigger-validation.js doesn't
-// know about this field and simply leaves it alone, exactly like a plain JS object tolerates an
-// extra untyped key). Two kinds, per the issue body:
+// An ActionConfig is attached to a matched EventTriggerConfig (#91). The trigger validation layer
+// delegates each `trigger.actions` entry back to validateActionConfig() so action-specific issue
+// paths compose cleanly with `eventTriggers.<id>.actions.<index>`. Supported kinds are:
 //   - "ai-response": build a prompt (src/context/stream-event-context.js), call the AI connector,
 //     speak the result.
 //   - "template-speech": a fixed/templated string with placeholders filled from event data, no AI
 //     call — cheaper, used as an overflow-policy target from #92 or for simple redemptions.
+//   - "overlay-cue": a persisted visual/audio cue contract; actual playback belongs to later
+//     runtime issues.
 
-export const ACTION_KINDS = Object.freeze(["ai-response", "template-speech"]);
+import { validateOverlayCueConfig } from "../overlay/overlay-cue-validation.js";
+
+export const ACTION_KINDS = Object.freeze(["ai-response", "template-speech", "overlay-cue"]);
+const OVERLAY_ACTION_FIELDS = Object.freeze(["id", "kind", "priority", "cue"]);
+const OVERLAY_ACTION_RUNTIME_FIELDS = new Set(["schemaVersion", "cueInstanceId", "planId", "eventId", "triggerId", "generation", "issuedAt", "expiresAt", "assetHandle", "mimeType", "durationMs", "url", "path"]);
+const OVERLAY_ACTION_PROHIBITED_FIELDS = new Set(["css", "js", "keyframes", "style"]);
 
 export const DEFAULT_ACTION_PRIORITY = 0;
 
@@ -61,10 +67,21 @@ export function validateActionConfig(candidate) {
   if (candidate.kind === "template-speech" && !isNonEmptyString(candidate.template)) {
     issues.push(issue(["template"], "required", 'template-speech actions require a non-empty "template" string'));
   }
+  if (candidate.kind === "overlay-cue") {
+    for (const key of Object.keys(candidate)) {
+      if (OVERLAY_ACTION_RUNTIME_FIELDS.has(key)) issues.push(issue([key], "runtime-field.persisted", `${key} is runtime-only and must not be persisted`));
+      else if (OVERLAY_ACTION_PROHIBITED_FIELDS.has(key)) issues.push(issue([key], "field.prohibited", `${key} is not allowed in an overlay-cue action`));
+      else if (!OVERLAY_ACTION_FIELDS.includes(key)) issues.push(issue([key], "unknown", `Unknown overlay-cue action field: ${key}`, { severity: "warning" }));
+    }
+    const result = validateOverlayCueConfig(candidate.cue);
+    for (const entry of result.issues) issues.push(issue(["cue", ...entry.path], entry.code, entry.message, { severity: entry.severity, meta: entry.meta }));
+  }
   if (candidate.priority !== undefined && typeof candidate.priority !== "number") {
     issues.push(issue(["priority"], "type.number", "priority must be a number when present"));
+  } else if (candidate.kind === "overlay-cue" && candidate.priority !== undefined && !Number.isFinite(candidate.priority)) {
+    issues.push(issue(["priority"], "type.number", "overlay-cue priority must be a finite number"));
   }
-  if (candidate.maxChars !== undefined && !(Number.isInteger(candidate.maxChars) && candidate.maxChars > 0)) {
+  if ((candidate.kind === "ai-response" || candidate.kind === "template-speech") && candidate.maxChars !== undefined && !(Number.isInteger(candidate.maxChars) && candidate.maxChars > 0)) {
     issues.push(issue(["maxChars"], "type.positiveInteger", "maxChars must be a positive integer when present"));
   }
 

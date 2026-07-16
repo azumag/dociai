@@ -9,6 +9,7 @@ export class SpeechScheduler {
     this.policy = normalizeSpeechPolicy(policy);
     this.now = now;
     this.current = null;
+    this.resumeNext = null;
     this.pending = [];
     this.history = new SpeechHistory(this.policy.maxHistory);
     this.metrics = new SpeechMetrics();
@@ -32,8 +33,10 @@ export class SpeechScheduler {
   take() {
     if (this.current || this.held) return null;
     this.expire();
-    const item = this.pending.shift() ?? null;
+    const item = this.resumeNext ?? this.pending.shift() ?? null;
     if (!item) return null;
+    this.resumeNext = null;
+    item.resumeNext = false;
     this.current = item;
     transitionSpeechItem(item, "speaking", { now: this.now() });
     this.metrics.started++;
@@ -59,6 +62,16 @@ export class SpeechScheduler {
     return true;
   }
 
+  removeResumeNext(state = "skipped", details = {}) {
+    const item = this.resumeNext;
+    if (!item) return false;
+    this.resumeNext = null;
+    transitionSpeechItem(item, state, { now: this.now(), ...details });
+    this.history.add(item);
+    this.metrics.terminal++;
+    return true;
+  }
+
   requeueCurrent() {
     if (!this.current) return false;
     const item = this.current;
@@ -68,6 +81,36 @@ export class SpeechScheduler {
     this.pending.push(item);
     this.pending.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
     return true;
+  }
+
+  restorePending(items) {
+    const existing = this.pending;
+    this.pending = [];
+    const restored = [];
+    const current = items.find((item) => item.runtimeReloadCurrent);
+    if (current) this.resumeNext = createSpeechItem({ ...current, resumeNext: true }, current.createdAt);
+    // Existing user-queued items are never silently discarded just because the
+    // new configuration lowers a pending limit. New items added while the new
+    // runtime was starting are appended after the transferred queue.
+    for (const item of items.filter((item) => !item.runtimeReloadCurrent)) {
+      const restoredItem = createSpeechItem(item, item.createdAt);
+      this.pending.push(restoredItem);
+      restored.push(restoredItem);
+    }
+    this.pending.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
+    for (const item of existing) {
+      const candidate = item;
+      const sourceCount = this.pending.filter((entry) => entry.source === candidate.source).length;
+      if (sourceCount >= this.policy.maxPendingPerSource || this.pending.length >= this.policy.maxPending) {
+        this.#drop(candidate, "runtime-restore-overflow");
+      } else {
+        this.pending.push(candidate);
+        this.pending.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
+        this.metrics.enqueued++;
+        restored.push(candidate);
+      }
+    }
+    return restored.length;
   }
 
   expire(now = this.now()) {
@@ -86,7 +129,7 @@ export class SpeechScheduler {
   snapshot() {
     const clone = (item) => item ? Object.freeze({ ...item, voice: Object.freeze({ ...item.voice }) }) : null;
     return Object.freeze({
-      current: clone(this.current),
+      current: clone(this.current ?? this.resumeNext),
       pending: Object.freeze(this.pending.map(clone)),
       history: Object.freeze(this.history.snapshot()),
       metrics: this.metrics.snapshot(),

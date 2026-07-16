@@ -31,7 +31,7 @@
       "name": "相棒AI",
       "connector": "mock_main",
       "systemPrompt": "あなたは配信者の相棒AIです。",
-      "triggers": ["mention_ai"],
+      "triggers": ["hotkey_global", "mention_ai"],
       "voice": {
         "enabled": true,
         "engine": "webspeech"

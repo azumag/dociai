@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { build } from "esbuild";
+import { ConnectorError, createConnector } from "../../src/connectors.js";
 
 async function loadModules() {
   const result = await build({
@@ -49,8 +50,146 @@ test("AiService resolves secrets in Main, normalizes OpenAI response, and never 
     assert.equal(seen[0].url, "https://openrouter.ai/api/v1/chat/completions");
     assert.equal(seen[0].headers.Authorization, "Bearer test-secret");
     assert.equal(seen[0].headers["HTTP-Referer"], "https://dociai.local");
+    assert.equal(seen[0].body.max_tokens, 300);
     assert.doesNotMatch(JSON.stringify(result), /test-secret/);
     assert.doesNotMatch(JSON.stringify(seen[0].body), /test-secret/);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("AiService disables Ollama reasoning, honors connector maxTokens, and never exposes reasoning as the answer", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    const bodies = [];
+    const { configRepository, secretStore } = dependencies({ local: { provider: "ollama", model: "gemma4:12b", maxTokens: 4096, retries: 0 } });
+    const service = new modules.AiService(configRepository, secretStore, async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ choices: [{ message: { reasoning: "private chain", content: " final answer " } }] }), { status: 200 });
+    });
+    assert.equal((await service.chat(input("local"))).text, "final answer");
+    assert.equal(bodies[0].reasoning_effort, "none");
+    assert.equal(bodies[0].max_tokens, 4096);
+
+    const reasoningOnly = new modules.AiService(configRepository, secretStore, async () => new Response(JSON.stringify({ choices: [{ message: { reasoning: "must stay private", content: "" } }] }), { status: 200 }));
+    await assert.rejects(reasoningOnly.chat(input("local")), (error) => error.code === "EMPTY" && !error.message.includes("must stay private"));
+
+    const encoder = new TextEncoder();
+    const streamBodies = [];
+    const streamTokens = [];
+    const streaming = new modules.AiService(configRepository, secretStore, async (_url, init) => {
+      streamBodies.push(JSON.parse(init.body));
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning":"private stream"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"public"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":" answer"}}]}\n\n'));
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }, (event) => streamTokens.push(event.text));
+    assert.equal((await streaming.chat(input("local", { stream: true }))).text, "public answer");
+    assert.deepEqual(streamTokens, ["public", " answer"]);
+    assert.equal(streamBodies[0].reasoning_effort, "none");
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("browser connector applies Ollama-only reasoning controls without exposing reasoning-only output", async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  try {
+    globalThis.fetch = async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ choices: [{ message: { reasoning: "private", content: bodies.length === 1 ? " answer " : "" } }] }), { status: 200 });
+    };
+    const ollama = createConnector("local", { provider: "ollama", model: "gemma4:12b", maxTokens: 2048, retries: 0 });
+    assert.equal((await ollama.chat([{ role: "user", content: "hello" }])).text, "answer");
+    assert.equal(bodies[0].reasoning_effort, "none");
+    assert.equal(bodies[0].max_tokens, 2048);
+
+    const compatible = createConnector("remote", { provider: "openai-compatible", model: "model", apiKey: "test", retries: 0 });
+    await assert.rejects(compatible.chat([{ role: "user", content: "hello" }]), (error) => error instanceof ConnectorError && error.kind === "empty" && !error.message.includes("private"));
+    assert.equal("reasoning_effort" in bodies[1], false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("browser MiniMax connector honors configured maxTokens and per-call overrides", async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  try {
+    globalThis.fetch = async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ content: [{ type: "text", text: "answer" }] }), { status: 200 });
+    };
+    const configured = createConnector("mini", { provider: "minimax", model: "MiniMax-M3", apiKey: "test", maxTokens: 4096, retries: 0 });
+    await configured.chat([{ role: "user", content: "hello" }]);
+    await configured.chat([{ role: "user", content: "hello" }], { maxTokens: 1024 });
+    const defaulted = createConnector("mini-default", { provider: "minimax", model: "MiniMax-M3", apiKey: "test", retries: 0 });
+    await defaulted.chat([{ role: "user", content: "hello" }]);
+    assert.deepEqual(bodies.map((body) => body.max_tokens), [4096, 1024, 300]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("MiniMax Web search uses the official endpoint in Browser and Electron without exposing the key", async () => {
+  const originalFetch = globalThis.fetch;
+  const browserCalls = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      browserCalls.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ organic: [{ title: "Latest", link: "https://example.com/latest", snippet: "summary", date: "2026-07-16" }], related_searches: [{ query: "related" }], base_resp: { status_code: 0 } }), { status: 200 });
+    };
+    const browser = createConnector("mini", { provider: "openai-compatible", model: "MiniMax-M3", baseUrl: "https://api.minimax.io/v1", apiKey: "browser-secret", retries: 0 });
+    const browserResult = await browser.search("latest topic");
+    assert.equal(browserCalls[0].url, "https://api.minimax.io/v1/coding_plan/search");
+    assert.equal(browserCalls[0].headers.Authorization, "Bearer browser-secret");
+    assert.deepEqual(browserCalls[0].body, { q: "latest topic" });
+    assert.equal(browserResult.results[0].title, "Latest");
+  } finally { globalThis.fetch = originalFetch; }
+
+  const { modules, directory } = await loadModules();
+  try {
+    const calls = [];
+    const deps = dependencies({ minimax: { provider: "openai-compatible", model: "MiniMax-M3", baseUrl: "https://api.minimax.io/v1", apiKeySecretRef: "connectors.minimax.apiKey", retries: 0 } }, { "connectors.minimax.apiKey": "main-secret" });
+    const service = new modules.AiService(deps.configRepository, deps.secretStore, async (url, init) => {
+      calls.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ organic: [{ title: "Main", link: "https://example.com/main", snippet: "facts" }], related_searches: [], base_resp: { status_code: 0 } }), { status: 200 });
+    });
+    const result = await service.search({ connectorId: "minimax", query: "topic", requestId: "search-request" });
+    assert.equal(calls[0].url, "https://api.minimax.io/v1/coding_plan/search");
+    assert.equal(calls[0].headers.Authorization, "Bearer main-secret");
+    assert.deepEqual(result, { results: [{ title: "Main", link: "https://example.com/main", snippet: "facts" }], relatedQueries: [], requestId: "search-request" });
+    assert.doesNotMatch(JSON.stringify(result), /main-secret/);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("Electron connector keeps Renderer generation out of Main search metadata", async () => {
+  const originalDociai = globalThis.dociai;
+  const seen = [];
+  try {
+    globalThis.dociai = { ai: { chat: async () => ({ ok: true, value: { text: "unused" } }), search: async (input) => { seen.push(input); return { ok: true, value: { results: [], relatedQueries: [], requestId: input.requestId } }; }, cancel: async () => ({ ok: true, value: { cancelled: true } }) } };
+    const connector = createConnector("mini", { provider: "minimax", model: "MiniMax-M3" });
+    await connector.search("topic", { generation: 7, requestId: "renderer-search" });
+    assert.equal(seen.length, 1);
+    assert.equal("generation" in seen[0], false, "Renderer and Main generations are independent");
+  } finally { if (originalDociai === undefined) delete globalThis.dociai; else globalThis.dociai = originalDociai; }
+});
+
+test("AiService registers Web search before async config lookup so early cancellation prevents a paid call", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    let releaseConfig;
+    let fetchCalls = 0;
+    const configPending = new Promise((resolve) => { releaseConfig = resolve; });
+    const service = new modules.AiService({ getPublic: () => configPending }, { getForService: async () => "secret" }, async () => { fetchCalls += 1; return new Response("{}"); });
+    const pending = service.search({ connectorId: "minimax", query: "topic", requestId: "early-cancel" });
+    assert.equal(service.cancel("early-cancel"), true);
+    releaseConfig({ config: { connectors: { minimax: { provider: "minimax", model: "MiniMax-M3", retries: 0 } } } });
+    await assert.rejects(pending, (error) => error.code === "CANCELLED");
+    assert.equal(fetchCalls, 0);
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 

@@ -24,5 +24,6 @@ export function createSpeechItem(input, now = Date.now()) {
     dropReason: null,
     chunkIndex: 0,
     chunkCount: 0,
+    resumeNext: Boolean(input.resumeNext),
   };
 }

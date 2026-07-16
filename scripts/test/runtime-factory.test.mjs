@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { RuntimeFactory, personaColorFor, selectPlatformAdapter, createDociaiRuntimeFactory } from "../../src/app/runtime-factory.js";
+import { RuntimeFactory, personaColorFor, resolveCommentReaderVoice, selectPlatformAdapter, createDociaiRuntimeFactory } from "../../src/app/runtime-factory.js";
 import { AppRuntime } from "../../src/app/app-runtime.js";
 import { CommentStore } from "../../src/comment-store.js";
 import { ManualCommentSource } from "../../src/comment-sources.js";
 import { BrowserRuntimeController } from "../../src/runtime/runtime-controller.js";
 import { processConfig } from "../../src/config/config-pipeline.js";
 import { CURRENT_SCHEMA_VERSION } from "../../src/stream-events/contract.js";
+import { SpeechQueue } from "../../src/speech-queue.js";
 
 test("RuntimeFactory.createCandidate rejects a non-integer generation and duplicate component names", async () => {
   const factory = new RuntimeFactory(({ define }) => { define("x", () => ({})); define("x", () => ({})); });
@@ -29,6 +30,36 @@ test("personaColorFor is deterministic per persona index and neutral for unknown
   assert.notEqual(personaColorFor(config, "a"), personaColorFor(config, "b"));
   assert.equal(personaColorFor(config, "missing"), "hsl(0 0% 70%)");
   assert.equal(personaColorFor(null, "a"), "hsl(0 0% 70%)");
+});
+
+test("comment reader resolves only the selected engine's independent voice settings", () => {
+  const config = {
+    enabled: true,
+    engine: "voicevox",
+    webspeech: { name: "Kyoko", rate: 0.8, pitch: 1.4 },
+    voicevox: { speaker: 7, speed: 1.2, pitch: -0.05 },
+    bouyomi: { voice: 3, speed: 150, tone: 90 },
+  };
+  const shared = { voicevox: { defaultSpeaker: 9, maxChars: 180 }, bouyomi: { voice: 4, speed: 120, tone: 110, volume: 80 } };
+  assert.deepEqual(resolveCommentReaderVoice(config, shared), { enabled: true, engine: "voicevox", speaker: 7, maxChars: 180, speed: 1.2, pitch: -0.05 });
+  assert.deepEqual(resolveCommentReaderVoice({ ...config, engine: "webspeech" }), { enabled: true, engine: "webspeech", name: "Kyoko", rate: 0.8, pitch: 1.4 });
+  assert.deepEqual(resolveCommentReaderVoice({ ...config, engine: "bouyomi" }, shared), { enabled: true, engine: "bouyomi", voice: 3, speed: 150, tone: 90, volume: 80 });
+  assert.deepEqual(resolveCommentReaderVoice({ enabled: true, engine: "voicevox", voicevox: {} }, shared), { enabled: true, engine: "voicevox", speaker: 9, maxChars: 180 });
+  assert.deepEqual(resolveCommentReaderVoice({ enabled: true, engine: "voicevox", voicevox: { speaker: null } }, shared), { enabled: true, engine: "voicevox", speaker: 9, maxChars: 180 });
+  assert.deepEqual(resolveCommentReaderVoice({ enabled: true, engine: "bouyomi", bouyomi: {} }, shared), { enabled: true, engine: "bouyomi", voice: 4, speed: 120, tone: 110, volume: 80 });
+});
+
+test("runtime reload re-resolves transferred comment reader items with the new engine settings", () => {
+  const commentReader = { enabled: true, engine: "bouyomi", bouyomi: { speed: 150 } };
+  const shared = { bouyomi: { voice: 4, speed: 120, tone: 110, volume: 80 } };
+  const queue = new SpeechQueue({ resolveVoice: (personaId, voice) => personaId === "__comment_reader__" ? resolveCommentReaderVoice(commentReader, shared) : voice });
+  queue.prepareForRuntimeRestore();
+  queue.restoreAfterRuntimeReload({
+    items: [{ id: "comment", personaId: "__comment_reader__", personaName: "コメント読み上げ", text: "引き継ぎ", voice: { engine: "webspeech", rate: 0.8, pitch: 1.4 } }],
+    holdReasons: ["operator"],
+  });
+  assert.deepEqual(queue.snapshot().pending[0].voice, { enabled: true, engine: "bouyomi", voice: 4, speed: 150, tone: 110, volume: 80 });
+  queue.dispose();
 });
 
 test("selectPlatformAdapter swaps between Browser and Electron implementations based on the injected global scope", () => {
@@ -96,29 +127,81 @@ function minimalConfig(extra = {}) {
 }
 
 test("buildDociaiRuntime wires a candidate bundle in dependency order without starting anything", async () => {
-  const config = minimalConfig({ news: { enabled: true, trigger: "newsTrigger", sources: [] } });
+  const config = minimalConfig({
+    personas: [{ id: "p1", name: "P1", connector: "mock", triggers: ["newsTrigger"] }],
+    news: { enabled: true, trigger: "newsTrigger", sources: [] },
+    topics: { enabled: true, trigger: "newsTrigger", sources: [] },
+  });
   const { deps, calls } = fakeDeps();
   const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
 
   assert.deepEqual(bundle.names(), [
-    "connectors", "personaRouter", "speechQueue", "contextBuilder",
+    "connectors", "personaRouter", "speechQueue", "webResearcher", "contextBuilder",
     "responseCoordinator", "eventTriggerRunner", "automationCoordinator", "newsReader", "topicReader",
     "triggerEngine", "sourceCoordinator",
   ]);
   assert.equal(calls.onSecrets.length, 1);
   assert.equal(bundle.get("connectors").size, 1);
+  assert.equal(bundle.get("webResearcher").enabled, false);
   assert.equal(bundle.get("screenContext"), null);
   assert.equal(bundle.get("micMonitor"), null);
   assert.equal(bundle.get("sourceCoordinator").sources.size, 0, "sourceCoordinator.replace() must only run on start(), not create");
 
   const automationCoordinator = bundle.get("automationCoordinator");
   const newsReader = bundle.get("newsReader");
+  const topicReader = bundle.get("topicReader");
+  const responseCoordinator = bundle.get("responseCoordinator");
   const runCalls = [];
-  automationCoordinator.run = (kind, reader) => { runCalls.push([kind, reader === newsReader]); return Promise.resolve(); };
+  let responseCalls = 0;
+  automationCoordinator.run = (kind, reader) => { runCalls.push([kind, reader]); return Promise.resolve(); };
+  responseCoordinator.handleTrigger = () => { responseCalls += 1; return ["unexpected-response"]; };
 
   const handleTrigger = bundle.get("handleTrigger");
   assert.deepEqual(handleTrigger("newsTrigger"), []);
-  assert.deepEqual(runCalls, [["news", true]]);
+  assert.deepEqual(runCalls, [["news", newsReader], ["topics", topicReader]], "one shared trigger must start every matching automation");
+  assert.equal(responseCalls, 0, "an automation trigger must not also dispatch a persona response");
+});
+
+test("micMonitor only interrupts AI speech (speechQueue.hold(\"mic\")) while deps.isMicBargeInEnabled() is true; toggling it off releases an existing hold", async () => {
+  const config = minimalConfig({ micMonitor: { enabled: true } });
+  let bargeInEnabled = true;
+  const { deps } = fakeDeps({ isMicBargeInEnabled: () => bargeInEnabled });
+  // isCurrent(1) must actually be true for generation 1 — outside of AppRuntime (which calls this
+  // as part of commit()), a fresh BrowserRuntimeController starts at generation 0.
+  deps.runtimeController.generations.next("test");
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+
+  const micMonitor = bundle.get("micMonitor");
+  const speechQueue = bundle.get("speechQueue");
+  assert.ok(micMonitor, "micMonitor must be constructed when config.micMonitor.enabled is true");
+
+  // start() only registers the onChange listener (no real getUserMedia/audio capture) — grab it
+  // to simulate what MicMonitor's real #tick()/#notify() would fire on a speaking-state change.
+  await bundle.components.find((c) => c.name === "micMonitor").start();
+  const notifyListener = [...micMonitor.listeners][0];
+  assert.equal(typeof notifyListener, "function");
+
+  micMonitor.speaking = true;
+  notifyListener();
+  assert.equal(speechQueue.paused, true, "mic speech must hold/interrupt the AI speech queue when barge-in is enabled");
+  assert.deepEqual(speechQueue.holdReasons, ["mic"]);
+
+  micMonitor.speaking = false;
+  notifyListener();
+  assert.equal(speechQueue.paused, false, "silence must release the hold");
+
+  bargeInEnabled = false;
+  micMonitor.speaking = true;
+  notifyListener();
+  assert.equal(speechQueue.paused, false, "mic speech must NOT interrupt the AI speech queue while barge-in is disabled");
+
+  // Disabling barge-in mid-hold must release any pre-existing "mic" hold, not just skip future ones.
+  bargeInEnabled = true;
+  notifyListener();
+  assert.equal(speechQueue.paused, true);
+  bargeInEnabled = false;
+  notifyListener();
+  assert.equal(speechQueue.paused, false, "toggling barge-in off must release an already-held mic hold");
 });
 
 test("starting a candidate bundle activates the trigger engine and comment sources", async () => {

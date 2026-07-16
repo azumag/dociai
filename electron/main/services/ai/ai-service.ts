@@ -1,4 +1,4 @@
-import type { AiChatInput, AiChatResponse, AiMessage, AiTokenEvent } from "../../../shared/services/ai-contract";
+import type { AiChatInput, AiChatResponse, AiMessage, AiTokenEvent, AiWebSearchInput, AiWebSearchResponse } from "../../../shared/services/ai-contract";
 import type { SecretStore } from "../../../shared/secret-contract";
 import { ConfigRepository } from "../../config/config-repository";
 import { ServiceRuntime } from "../service-runtime";
@@ -8,6 +8,7 @@ import { providerConfig } from "./provider-registry";
 import { openAiCompatibleChat } from "./providers/openai-compatible";
 import { miniMaxChat } from "./providers/minimax";
 import { mockChat } from "./providers/mock";
+import { miniMaxWebSearch } from "./providers/minimax-search";
 
 const maxMessages = 64;
 const maxChars = 128000;
@@ -49,7 +50,7 @@ export class AiService {
     if (generation !== this.runtime.generation) throw new ServiceError("CANCELLED", "request generation is stale", { serviceId: input.connectorId, retryable: false });
     const handle = this.runtime.registry.create({ serviceId: input.connectorId, generation, ownerId: input.ownerId ?? "console", requestId: input.requestId, timeoutMs: config.timeoutMs });
     const options = {
-      maxTokens: boundedNumber(input.options?.maxTokens, 300, 1, 4096),
+      maxTokens: boundedNumber(input.options?.maxTokens, config.maxTokens, 1, 32768),
       ...(input.options?.temperature !== undefined ? { temperature: boundedNumber(input.options.temperature, 1, 0, 2) } : {}),
       stream: input.options?.stream === true,
       onToken: (text: string) => {
@@ -73,6 +74,40 @@ export class AiService {
       this.runtime.health.report({ type: "failed", serviceId: input.connectorId, requestId: handle.context.requestId, at: Date.now(), error: normalized.toJSON() });
       throw normalized;
     }
+  }
+
+  async search(input: AiWebSearchInput): Promise<AiWebSearchResponse> {
+    const query = String(input.query ?? "").trim();
+    if (!input.connectorId || input.connectorId.length > 128 || !query || query.length > 500) throw new ServiceError("BAD_REQUEST", "Web検索条件が不正です", { serviceId: "ai", retryable: false });
+    const generation = input.generation ?? this.runtime.generation;
+    if (generation !== this.runtime.generation) throw new ServiceError("CANCELLED", "request generation is stale", { serviceId: input.connectorId, retryable: false });
+    // IPC cancelがconfig/secret awaitより先に来ても捕捉できるよう、最初のawait前に登録する。
+    const handle = this.runtime.registry.create({ serviceId: input.connectorId, generation, ownerId: input.ownerId ?? "console", requestId: input.requestId });
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const loaded = await this.configRepository.getPublic();
+      if (handle.context.signal.aborted) throw handle.context.signal.reason;
+      const connectors = (loaded.config.connectors ?? {}) as Record<string, Record<string, unknown>>;
+      const connector = connectors[input.connectorId];
+      if (!connector) throw new ServiceError("BAD_REQUEST", "connector was not found", { serviceId: input.connectorId, retryable: false });
+      const secretRef = typeof connector.apiKeySecretRef === "string" ? connector.apiKeySecretRef : typeof connector.secretRef === "string" ? connector.secretRef : `connector.${input.connectorId}.apiKey`;
+      const secret = await this.secretStore.getForService(secretRef as never);
+      if (handle.context.signal.aborted) throw handle.context.signal.reason;
+      const config = providerConfig(input.connectorId, connector, secret);
+      if (!config.apiKey) throw new ServiceError("AUTH", "connector secret is not configured", { serviceId: input.connectorId, retryable: false });
+      timeout = setTimeout(() => handle.cancel("timeout"), config.timeoutMs);
+      const result = await retryWithPolicy(() => miniMaxWebSearch(this.fetchFn, { ...config, apiKey: config.apiKey ?? "" }, query, handle.context.signal), { maxAttempts: 1 + config.retries, baseDelayMs: 500, maxDelayMs: 5000 }, handle.context);
+      if (handle.context.generation !== this.runtime.generation || handle.context.signal.aborted) throw new ServiceError("CANCELLED", "request generation is stale", { serviceId: input.connectorId, retryable: false });
+      const response = { ...result, requestId: handle.context.requestId };
+      handle.complete(response);
+      this.runtime.health.report({ type: "completed", serviceId: input.connectorId, requestId: handle.context.requestId, at: Date.now() });
+      return response;
+    } catch (error) {
+      const normalized = normalizeServiceError(error, handle.context);
+      handle.fail(normalized);
+      this.runtime.health.report({ type: "failed", serviceId: input.connectorId, requestId: handle.context.requestId, at: Date.now(), error: normalized.toJSON() });
+      throw normalized;
+    } finally { if (timeout) clearTimeout(timeout); }
   }
   dispose(): void { this.runtime.dispose(); }
 }

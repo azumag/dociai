@@ -51,6 +51,16 @@ export function createAppActions({
       render.mic?.();
     },
     stopMic: () => { component("micMonitor")?.stop(); render.mic?.(); },
+    setMicBargeIn: (enabled) => {
+      store.dispatch({ type: "set", key: "micBargeInEnabled", value: enabled });
+      const micMonitor = component("micMonitor");
+      const speechQueue = component("speechQueue");
+      if (speechQueue && micMonitor?.active) {
+        if (enabled && micMonitor.speaking) speechQueue.hold("mic");
+        else if (!enabled) speechQueue.release("mic");
+      }
+      render.mic?.();
+    },
     startScreen: async () => {
       try { await component("screenContext")?.start(); }
       catch (error) { log(`画面共有を開始できません: ${scrub(error.message)}`, "error"); }

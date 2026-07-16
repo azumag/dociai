@@ -14,6 +14,7 @@ import { TriggerEngine } from "../trigger-engine.js";
 import { ResponseCoordinator } from "./response-coordinator.js";
 import { AutomationCoordinator } from "./automation-coordinator.js";
 import { SourceCoordinator } from "./source-coordinator.js";
+import { WebResearcher } from "./web-researcher.js";
 import { TwitchChatSource, stripEmotes } from "../comment-sources.js";
 import { ElectronTwitchSource, subscribeStreamEventsThroughElectron } from "../platform/electron-services.js";
 import { listCaptureSources, selectCaptureSource } from "../platform/capture-adapter.js";
@@ -25,6 +26,23 @@ import { ActionRunner } from "../actions/action-runner.js";
 import { runProductionStreamEvent } from "../simulation/stream-event-simulator.js";
 
 const COMMENT_READER_ID = "__comment_reader__";
+
+const nonNullEntries = (value) => Object.fromEntries(Object.entries(value ?? {}).filter(([, entry]) => entry != null));
+
+export function resolveCommentReaderVoice(commentReader = {}, shared = {}) {
+  const engine = commentReader.engine ?? "webspeech";
+  const legacy = engine === "webspeech"
+    ? { name: commentReader.name, rate: commentReader.rate, pitch: commentReader.pitch }
+    : engine === "voicevox"
+      ? { speaker: commentReader.speaker, speed: commentReader.rate, pitch: commentReader.pitch, intonation: commentReader.intonation, volume: commentReader.volume }
+      : { voice: commentReader.voice, speed: commentReader.speed, tone: commentReader.tone, volume: commentReader.volume };
+  const sharedVoice = engine === "voicevox"
+    ? { speaker: shared.voicevox?.defaultSpeaker, maxChars: shared.voicevox?.maxChars }
+    : engine === "bouyomi"
+      ? { voice: shared.bouyomi?.voice, speed: shared.bouyomi?.speed, tone: shared.bouyomi?.tone, volume: shared.bouyomi?.volume }
+      : {};
+  return { enabled: commentReader.enabled, engine, ...nonNullEntries(sharedVoice), ...nonNullEntries(legacy), ...nonNullEntries(commentReader[engine]) };
+}
 
 // Generic, DOM-free engine: turns a NormalizedConfig + platform deps into an unstarted
 // RuntimeBundle. `build` never calls start() on anything it creates — that is AppRuntime's
@@ -255,6 +273,11 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
         : null,
       policy: config.speechQueue,
       strictOrdering: config.speechQueue?.strictOrdering,
+      bouyomiCharsPerSecond: config.bouyomi?.charsPerSecond,
+      resolveVoice: (personaId, currentVoice) => personaId === COMMENT_READER_ID ? resolveCommentReaderVoice(config.commentReader, config) : config.personas?.find((persona) => persona.id === personaId)?.voice ?? currentVoice,
+      resolveFallbackVoice: (personaId, currentVoice, backendId) => personaId === COMMENT_READER_ID && backendId === "webspeech"
+        ? resolveCommentReaderVoice({ ...config.commentReader, engine: "webspeech" }, config)
+        : currentVoice,
       onHealth: ({ backend, status, error }) => deps.log(`音声backend[${backend}] ${status}${error ? `: ${error}` : ""}`, status === "error" ? "warn" : "info"),
     }),
     (instance) => ({
@@ -287,13 +310,15 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
           start: () => instance.onChange(() => {
             if (!isCurrent()) return;
             deps.onMicChange();
-            if (instance.speaking) speechQueue.hold("mic"); else speechQueue.release("mic");
+            const bargeInEnabled = deps.isMicBargeInEnabled?.() ?? true;
+            if (bargeInEnabled && instance.speaking) speechQueue.hold("mic"); else speechQueue.release("mic");
           }),
           stop: () => instance.stop(),
         }),
       )
     : expose("micMonitor", null);
 
+  const webResearcher = define("webResearcher", () => new WebResearcher({ config, getConnector: (id) => connectors.get(id) }));
   const contextBuilder = define("contextBuilder", () => new ContextBuilder({ commentStore: deps.commentStore, screenContext, config }));
 
   const responseCoordinator = define(
@@ -304,6 +329,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       getConnector: (id) => connectors.get(id),
       personaRouter,
       contextBuilder,
+      webResearcher,
       speechQueue,
       publish: (type, payload) => deps.broadcast(type, { ...payload, color: payload.personaId ? personaColorFor(config, payload.personaId) : payload.color }),
       dispatch: deps.dispatch,
@@ -357,8 +383,16 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   }));
 
   const handleTrigger = expose("handleTrigger", (triggerId, options = {}) => {
-    if (newsReader.enabled && config.news.trigger === triggerId) { automationCoordinator.run("news", newsReader); return []; }
-    if (topicReader.enabled && config.topics.trigger === triggerId) { automationCoordinator.run("topics", topicReader); return []; }
+    let automationMatched = false;
+    if (newsReader.enabled && config.news.trigger === triggerId) {
+      automationCoordinator.run("news", newsReader);
+      automationMatched = true;
+    }
+    if (topicReader.enabled && config.topics.trigger === triggerId) {
+      automationCoordinator.run("topics", topicReader);
+      automationMatched = true;
+    }
+    if (automationMatched) return [];
     return responseCoordinator.handleTrigger(triggerId, options);
   });
 
@@ -375,7 +409,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     const body = cr.skipEmotes && comment.emotes ? stripEmotes(comment.text, comment.emotes) : comment.text;
     if (!body.trim()) return;
     const text = cr.includeAuthor === false ? body : `${comment.author}: ${body}`;
-    speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice: cr, commentId: comment.id });
+    speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice: resolveCommentReaderVoice(cr, config), commentId: comment.id });
   });
 
   const addComment = expose("addComment", (raw) => {

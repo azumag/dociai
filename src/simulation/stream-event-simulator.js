@@ -107,30 +107,60 @@ async function runStreamEventPipeline({ context, effective, validatedEvent, trig
   const { matches, skipped, truncated } = matchEvent(triggers, validatedEvent, { ...matchOptions, trace });
 
   const plans = [];
+  const planBatches = [];
   const planSkips = [];
   for (const match of matches) {
     const trigger = triggers.find((entry) => entry?.id === match.triggerId);
     const actions = Array.isArray(trigger?.actions) ? trigger.actions : [];
     const planned = planActions({ event: validatedEvent, triggerId: match.triggerId, actions, priority: match.priority, context, generation, now });
     plans.push(...planned.plans);
+    planBatches.push({ triggerId: match.triggerId, plans: planned.plans });
     for (const skip of planned.skipped) planSkips.push({ triggerId: match.triggerId, ...skip });
   }
 
   const results = [];
   if (actionRunner) {
-    for (const plan of plans) {
-      if (cooldownTracker) {
-        const cooldownConfig = cooldownConfigByTrigger(plan.triggerId);
+    for (const batch of planBatches) {
+      const executablePlans = batch.plans.filter((plan) => plan.kind !== "overlay-cue");
+      let cooldownGate = null;
+      if (cooldownTracker && executablePlans.length > 0) {
+        const cooldownConfig = cooldownConfigByTrigger(batch.triggerId);
         if (cooldownConfig) {
-          const gate = cooldownTracker.schedule(`${context}:${plan.triggerId}`, { ...cooldownConfig, bypassCooldown: effective.bypassCooldown }, now);
-          if (!gate.allowed) {
-            results.push({ planId: plan.id, executed: false, reason: gate.reason });
+          cooldownGate = cooldownTracker.schedule(`${context}:${batch.triggerId}`, { ...cooldownConfig, bypassCooldown: effective.bypassCooldown }, now);
+          if (!cooldownGate.allowed) {
+            for (const plan of batch.plans) {
+              if (plan.kind === "overlay-cue") results.push(await actionRunner.execute(plan, { mockAi: effective.useMockAi, speak: effective.enableSpeech, notifyObs: effective.enableObs }));
+              else results.push({ planId: plan.id, executed: false, reason: cooldownGate.reason });
+            }
             continue;
           }
         }
       }
-      const result = await actionRunner.execute(plan, { mockAi: effective.useMockAi, speak: effective.enableSpeech, notifyObs: effective.enableObs });
-      results.push(result);
+
+      let started = false;
+      let allExecutableCompleted = executablePlans.length > 0;
+      try {
+        for (const plan of batch.plans) {
+          const result = await actionRunner.execute(plan, {
+            mockAi: effective.useMockAi,
+            speak: effective.enableSpeech,
+            notifyObs: effective.enableObs,
+            onStarted: () => {
+              if (!started) {
+                started = true;
+                if (cooldownGate) cooldownTracker.markStarted(cooldownGate);
+              }
+            },
+          });
+          if (plan.kind !== "overlay-cue" && result.status !== "executed") allExecutableCompleted = false;
+          results.push(result);
+        }
+      } finally {
+        if (cooldownGate?.reservation) {
+          if (started && allExecutableCompleted) cooldownTracker.markCompleted(cooldownGate);
+          else cooldownTracker.cancel(cooldownGate);
+        }
+      }
     }
   }
 

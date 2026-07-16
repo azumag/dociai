@@ -17,6 +17,7 @@ export function bindConsoleUI(elements, actions, { setIntervalImpl = setInterval
   optionalOn("twitchOverviewOpen", "click", () => actions.openTwitchOverview());
   optionalOn("screenSourceRefresh", "click", () => actions.refreshScreenSources());
   optionalOn("screenSourceSelect", "change", (event) => actions.selectScreenSource(event.target.value));
+  optionalOn("micBargeIn", "change", (event) => actions.setMicBargeIn(event.target.checked));
   on("commentForm", "submit", (event) => {
     event.preventDefault();
     const text = elements.get("commentText");

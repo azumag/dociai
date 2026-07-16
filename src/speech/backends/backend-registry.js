@@ -3,13 +3,13 @@ import { VoiceVoxBackend } from "./voicevox-backend.js";
 import { WebSpeechBackend } from "./web-speech-backend.js";
 
 export class BackendRegistry {
-  constructor({ voicevox = null, bouyomi = null, strictOrdering = false, onWarning = () => {}, onHealth = () => {}, webSpeech = {} } = {}) {
+  constructor({ voicevox = null, bouyomi = null, strictOrdering = false, onWarning = () => {}, onHealth = () => {}, webSpeech = {}, bouyomiCharsPerSecond } = {}) {
     this.strictOrdering = strictOrdering;
     this.onWarning = onWarning;
     this.backends = new Map([
       ["webspeech", new WebSpeechBackend({ ...webSpeech, onHealth })],
       ["voicevox", new VoiceVoxBackend(voicevox, { onHealth })],
-      ["bouyomi", new BouyomiBackend(bouyomi, { onHealth })],
+      ["bouyomi", new BouyomiBackend(bouyomi, { onHealth, charsPerSecond: bouyomiCharsPerSecond })],
     ]);
     this.seen = new Set();
     this.warnedMixedOrdering = false;

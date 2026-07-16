@@ -53,6 +53,15 @@ try {
   const tally = await page.$eval("#tally", (el) => el.textContent);
   check("タリーランプにペルソナ表示", tally.includes("相棒AI") && tally.includes("ツッコミAI"), tally);
 
+  // Issue #205: persona.triggersはnormalizeでソートされるが、表示は設定エディタと同じ
+  // triggers定義順にする。fixtureは意図的に逆順でpersonaへ指定している。
+  const partnerDetail = await page.$eval("#persona-list li:nth-child(1) .detail", (el) => el.textContent);
+  check(
+    "ペルソナのトリガー表示順が設定UIと一致",
+    partnerDetail.includes("triggers: mention_ai, hotkey_global"),
+    partnerDetail,
+  );
+
   // ---- issue #115: integration health summary/detail/diagnostic export ----
   const integrationHealth = await page.evaluate(() => ({
     summary: document.querySelector("#integration-health-summary")?.textContent,
@@ -74,7 +83,7 @@ try {
     heading: document.querySelector(".panel-comments-primary h1")?.textContent,
     center: document.querySelector("#comment-log")?.closest(".col")?.classList.contains("col-center"),
     readerStatus: document.querySelector("#comment-reader-status")?.textContent,
-    controlsLeft: document.querySelector("#speech-pending")?.closest(".col")?.classList.contains("col-left"),
+    controlsLeft: document.querySelector("#speech-current")?.closest(".col")?.classList.contains("col-left"),
   }));
   check("コメント読み上げが中央の主画面", commentFirstUi.heading === "コメント読み上げ" && commentFirstUi.center, JSON.stringify(commentFirstUi));
   check("読み上げ状態とキュー操作が左に集約", commentFirstUi.controlsLeft && commentFirstUi.readerStatus.includes("読み上げ"), commentFirstUi.readerStatus);

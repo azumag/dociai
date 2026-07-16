@@ -26,6 +26,7 @@ import { createTabsController } from "./settings/a11y/tabs-controller.js";
 import { createLiveAnnouncer } from "./settings/a11y/live-region.js";
 import { deferFocus, restoreFocus } from "./settings/a11y/focus-controller.js";
 import { fieldIds } from "./settings/a11y/field-a11y.js";
+import { isMiniMaxSearchConnector } from "./config/minimax-search-config.js";
 
 const PROVIDERS = registryOptions("providers");
 const TRIGGER_TYPES = registryOptions("triggerTypes");
@@ -576,6 +577,7 @@ export class SettingsUI {
       if (this.draft.context?.screenCapture?.connector === oldKey) {
         this.draft.context.screenCapture.connector = newKey;
       }
+      if (this.draft.research?.connector === oldKey) this.draft.research.connector = newKey;
     }
     if (mapName === "triggers") {
       for (const p of this.draft.personas ?? []) {
@@ -738,6 +740,7 @@ export class SettingsUI {
             if (p.connector === id) p.connector = "";
           }
           if (this.draft.context?.screenCapture?.connector === id) this.draft.context.screenCapture.connector = "";
+          if (this.draft.research?.connector === id) this.draft.research.connector = "";
           this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
           this._announcer?.announce(`コネクタ ${id} を削除しました`);
@@ -749,6 +752,7 @@ export class SettingsUI {
         this.#mapField("apiKey", "connectors", id, "apiKey", { value: c.apiKey ?? "", placeholder: c.apiKeyConfigured && !c.apiKey ? "設定済み（変更する場合のみ入力）" : "", attrs: { spellcheck: "false", autocomplete: "off" } }),
         this.#mapField("baseUrl", "connectors", id, "baseUrl", { value: c.baseUrl ?? "", attrs: { spellcheck: "false" } }),
         this.#mapField("timeoutMs (ms)", "connectors", id, "timeoutMs", { type: "number", value: c.timeoutMs ?? "" }),
+        this.#mapField("maxTokens", "connectors", id, "maxTokens", { type: "number", value: c.maxTokens ?? "", attrs: { step: 1 } }),
       );
       cardBody.append(row1, row2);
       this._body.append(card);
@@ -922,6 +926,9 @@ export class SettingsUI {
     const connectorIds = Object.keys(this.draft.connectors ?? {});
     const sc = this.draft.context?.screenCapture ?? {};
     const ctx = this.draft.context ?? {};
+    const research = this.draft.research ?? { enabled: false, connector: "", maxResults: 5 };
+    const researchConnectorIds = connectorIds.filter((id) => isMiniMaxSearchConnector(this.draft.connectors?.[id]));
+    if (!this.draft.research) this.draft.research = research;
 
     // screenCapture
     const scTitle = document.createElement("div");
@@ -940,6 +947,22 @@ export class SettingsUI {
     scGrid.append(this.#pathField("maxPromptChars", "context.maxPromptChars", { type: "number", value: ctx.maxPromptChars ?? 4000 }));
     scBody.append(scGrid);
     this._body.append(scCard);
+
+    const researchTitle = document.createElement("div");
+    researchTitle.className = "card-title";
+    researchTitle.textContent = "Web調査 prepass (MiniMax)";
+    const { card: researchCard, body: researchBody } = this.#card([researchTitle]);
+    const researchGrid = document.createElement("div");
+    researchGrid.className = "card-grid";
+    researchGrid.append(this.#pathCheckbox("有効", "research.enabled", { value: research.enabled }));
+    researchGrid.append(this.#pathSelect("検索担当connector", ["", ...researchConnectorIds], "research.connector", { value: research.connector ?? "" }));
+    researchGrid.append(this.#pathField("最大検索結果数", "research.maxResults", { type: "number", value: research.maxResults ?? 5, attrs: { min: 1, max: 10, step: 1 } }));
+    researchBody.append(researchGrid);
+    const researchHelp = document.createElement("p");
+    researchHelp.className = "muted";
+    researchHelp.textContent = "コメントまたは手動依頼への返答前にMiniMax Web検索を行います。Token Planの利用料金が発生する場合があります。検索失敗時は通常回答へフォールバックします。";
+    researchBody.append(researchHelp);
+    this._body.append(researchCard);
 
     // commonRules — 全ペルソナのsystemPromptの後ろに共通で付加される指示文 (issue: ハードコード
     // されていたものをconfig化)。空にすると何も付加されない (persona.systemPromptのみになる)。
@@ -1002,11 +1025,12 @@ export class SettingsUI {
     g.append(this.#pathField("volume", "bouyomi.volume", { type: "number", value: b.volume ?? -1 }));
     g.append(this.#pathField("speed", "bouyomi.speed", { type: "number", value: b.speed ?? -1 }));
     g.append(this.#pathField("tone", "bouyomi.tone", { type: "number", value: b.tone ?? -1 }));
+    g.append(this.#pathField("charsPerSecond (待機時間の見積り基準)", "bouyomi.charsPerSecond", { type: "number", value: b.charsPerSecond ?? 6, attrs: { step: "0.5", min: "0.5" } }));
     cardBody.append(g);
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "棒読みちゃんの「HTTP連携」を有効にし、通常は 127.0.0.1:50080 を使います。コメント読み上げまたはペルソナ音声の engine に bouyomi を選択してください。";
+    note.textContent = "棒読みちゃんの「HTTP連携」を有効にし、通常は 127.0.0.1:50080 を使います。コメント読み上げまたはペルソナ音声の engine に bouyomi を選択してください。charsPerSecond は「他backendとの音声かぶり防止」のための発話時間見積り (speed=100相当で1秒に読む文字数、既定6) で、実際の再生速度には影響しません。読み上げが速い/遅い声を使っていて待機が長すぎる・短すぎる場合はここを調整してください。";
     this._body.append(note);
   }
 
@@ -1032,7 +1056,7 @@ export class SettingsUI {
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "配信者の発話を検知するとAI音声キューを保留し、無音に戻ると再開します (中断された発話は最初から読み上げ直されます)。スピーカー環境ではAI自身の声を誤検知することがあるため、ヘッドホンや仮想オーディオデバイスでの分離を推奨します (docs/obs-mode.md 参照)。deviceが「既定のデバイス」以外に一覧されない場合は、一度「監視開始」でマイク権限を許可してから設定を開き直してください。";
+    note.textContent = "配信者の発話を検知すると次のAI音声の開始を保留し、無音に戻ると再開します (再生中の読み上げは止めずに最後まで続きます)。スピーカー環境ではAI自身の声を誤検知することがあるため、ヘッドホンや仮想オーディオデバイスでの分離を推奨します (docs/obs-mode.md 参照)。deviceが「既定のデバイス」以外に一覧されない場合は、一度「監視開始」でマイク権限を許可してから設定を開き直してください。";
     this._body.append(note);
   }
 
@@ -1050,14 +1074,24 @@ export class SettingsUI {
       const g = document.createElement("div");
       g.className = "card-grid";
       g.append(this.#pathSelect("engine", VOICE_ENGINES, "commentReader.engine", { value: cr.engine ?? "webspeech" }));
+      const webspeech = cr.webspeech ?? {};
+      const voicevox = cr.voicevox ?? {};
+      const bouyomi = cr.bouyomi ?? {};
       g.append(this.#withTestVoiceButton(
-        this.#pathSelect("name (webspeech音声名)", this.#voiceNameOptions(cr.name), "commentReader.name", { value: cr.name ?? "default" }),
-        () => ({ rate: this.draft.commentReader?.rate, pitch: this.draft.commentReader?.pitch }),
+        this.#pathSelect("Web Speech: 音声名", this.#voiceNameOptions(webspeech.name), "commentReader.webspeech.name", { value: webspeech.name ?? "default" }),
+        () => ({ rate: this.draft.commentReader?.webspeech?.rate, pitch: this.draft.commentReader?.webspeech?.pitch }),
       ));
-      g.append(this.#pathField("rate", "commentReader.rate", { type: "number", value: cr.rate ?? 1.0, attrs: { step: "0.1" } }));
-      g.append(this.#pathField("pitch", "commentReader.pitch", { type: "number", value: cr.pitch ?? 1.0, attrs: { step: "0.1" } }));
-      g.append(this.#pathField("speaker (voicevox話者ID)", "commentReader.speaker", { type: "number", value: cr.speaker ?? "" }));
-      g.append(this.#pathField("voice (棒読みちゃん話者)", "commentReader.voice", { type: "number", value: cr.voice ?? this.draft.bouyomi?.voice ?? 0 }));
+      g.append(this.#pathField("Web Speech: rate", "commentReader.webspeech.rate", { type: "number", value: webspeech.rate ?? 1.0, attrs: { min: 0.5, max: 2, step: 0.1 } }));
+      g.append(this.#pathField("Web Speech: pitch", "commentReader.webspeech.pitch", { type: "number", value: webspeech.pitch ?? 1.0, attrs: { min: 0, max: 2, step: 0.1 } }));
+      g.append(this.#pathField("VOICEVOX: 話者ID", "commentReader.voicevox.speaker", { type: "number", value: voicevox.speaker ?? "", attrs: { min: 0, step: 1 } }));
+      g.append(this.#pathField("VOICEVOX: speed", "commentReader.voicevox.speed", { type: "number", value: voicevox.speed ?? 1.0, attrs: { min: 0.5, max: 2, step: 0.1 } }));
+      g.append(this.#pathField("VOICEVOX: pitch", "commentReader.voicevox.pitch", { type: "number", value: voicevox.pitch ?? 0, attrs: { min: -0.15, max: 0.15, step: 0.01 } }));
+      g.append(this.#pathField("VOICEVOX: intonation", "commentReader.voicevox.intonation", { type: "number", value: voicevox.intonation ?? 1.0, attrs: { min: 0, max: 2, step: 0.1 } }));
+      g.append(this.#pathField("VOICEVOX: volume", "commentReader.voicevox.volume", { type: "number", value: voicevox.volume ?? 1.0, attrs: { min: 0, max: 2, step: 0.1 } }));
+      g.append(this.#pathField("棒読みちゃん: 話者", "commentReader.bouyomi.voice", { type: "number", value: bouyomi.voice ?? this.draft.bouyomi?.voice ?? 0, attrs: { min: 0, step: 1 } }));
+      g.append(this.#pathField("棒読みちゃん: speed", "commentReader.bouyomi.speed", { type: "number", value: bouyomi.speed ?? this.draft.bouyomi?.speed ?? -1, attrs: { min: -1, max: 200, step: 1 } }));
+      g.append(this.#pathField("棒読みちゃん: tone", "commentReader.bouyomi.tone", { type: "number", value: bouyomi.tone ?? this.draft.bouyomi?.tone ?? -1, attrs: { min: -1, max: 200, step: 1 } }));
+      g.append(this.#pathField("棒読みちゃん: volume", "commentReader.bouyomi.volume", { type: "number", value: bouyomi.volume ?? this.draft.bouyomi?.volume ?? -1, attrs: { min: -1, max: 100, step: 1 } }));
       cardBody.append(g);
       cardBody.append(this.#pathCheckbox("ユーザー名を読み上げる", "commentReader.includeAuthor", { value: cr.includeAuthor !== false }));
       cardBody.append(this.#pathCheckbox("エモートを読み上げない", "commentReader.skipEmotes", { value: !!cr.skipEmotes }));
@@ -1066,7 +1100,7 @@ export class SettingsUI {
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。エモート除去はTwitchの emotes タグ (正確な文字範囲) を使うため、Twitch経由のコメントのみ対象です。";
+    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
     this._body.append(note);
   }
 

@@ -26,6 +26,8 @@ export class AppRuntime {
     this.errorState = null;
     this.lastGoodConfig = null;
     this.lastTeardownReport = null;
+    this.pendingSpeechQueueTransfer = null;
+    this.transitionSpeechQueue = null;
   }
 
   async start(config, options = {}) {
@@ -63,7 +65,7 @@ export class AppRuntime {
 
   isCurrent(generation) { return this.runtimeController.isCurrent(generation); }
   currentGeneration() { return this.runtimeController.generations.current(); }
-  getComponent(name) { return this.current?.get(name) ?? null; }
+  getComponent(name) { return this.current?.get(name) ?? (name === "speechQueue" ? this.transitionSpeechQueue : null); }
 
   snapshot() {
     return {
@@ -87,6 +89,9 @@ export class AppRuntime {
     }
 
     const old = this.current;
+    const speechQueueTransfer = this.pendingSpeechQueueTransfer ?? old?.get("speechQueue")?.exportForRuntimeReload?.() ?? { items: [], holdReasons: [] };
+    this.transitionSpeechQueue = candidate.get("speechQueue") ?? null;
+    this.transitionSpeechQueue?.prepareForRuntimeRestore?.(speechQueueTransfer);
     let cancelledRequests = 0;
     let teardownReport = null;
     if (old) {
@@ -98,13 +103,31 @@ export class AppRuntime {
     const startError = await this.#startCandidate(candidate);
     if (startError) {
       this.log(`runtime candidate start failed: ${startError.message}`, "error");
-      const rollback = await this.#attemptRollback(reason);
-      if (!rollback.ok) this.errorState = { error: startError, reason, generation, at: Date.now() };
+      const rollback = await this.#attemptRollback(reason, speechQueueTransfer);
+      if (!rollback.ok) {
+        this.pendingSpeechQueueTransfer = speechQueueTransfer;
+        this.transitionSpeechQueue = null;
+        this.errorState = { error: startError, reason, generation, at: Date.now() };
+      }
       return { ok: false, stage: "start", generation, error: startError, cancelledRequests, teardownReport, rollback };
     }
 
     candidate.startedAt = Date.now();
+    try {
+      this.#restoreSpeechQueue(candidate, speechQueueTransfer);
+    } catch (error) {
+      candidate.get("speechQueue")?.mergeIntoRuntimeTransfer?.();
+      await this.disposer.teardown(candidate.components, { reason: "speech queue restore failed" });
+      const rollback = await this.#attemptRollback(reason, speechQueueTransfer);
+      if (!rollback.ok) {
+        this.pendingSpeechQueueTransfer = speechQueueTransfer;
+        this.transitionSpeechQueue = null;
+      }
+      return { ok: false, stage: "restore", generation, error, cancelledRequests, teardownReport, rollback };
+    }
     this.current = candidate;
+    this.transitionSpeechQueue = null;
+    this.pendingSpeechQueueTransfer = null;
     this.errorState = null;
     this.lastGoodConfig = config;
     return { ok: true, stage: "complete", generation, cancelledRequests, teardownReport, error: null, rollback: null };
@@ -120,12 +143,18 @@ export class AppRuntime {
       }
       return null;
     } catch (error) {
+      candidate.get("speechQueue")?.mergeIntoRuntimeTransfer?.();
       await this.disposer.teardown(started, { reason: "candidate start failed" });
       return error;
     }
   }
 
-  async #attemptRollback(reason) {
+  #restoreSpeechQueue(bundle, items) {
+    const restored = bundle.get("speechQueue")?.restoreAfterRuntimeReload?.(items) ?? 0;
+    if (restored) this.log(`設定反映後も読み上げキューを${restored}件維持しました`, "info");
+  }
+
+  async #attemptRollback(reason, speechQueueTransfer = []) {
     if (!this.lastGoodConfig) return { ok: false, reason: "no-previous-config", error: null, generation: null };
     const generation = this.runtimeController.generations.next(`${reason}:rollback`);
     let candidate;
@@ -134,10 +163,21 @@ export class AppRuntime {
     } catch (error) {
       return { ok: false, reason: "rollback-create-failed", error, generation };
     }
+    this.transitionSpeechQueue = candidate.get("speechQueue") ?? null;
+    this.transitionSpeechQueue?.prepareForRuntimeRestore?.(speechQueueTransfer);
     const startError = await this.#startCandidate(candidate);
     if (startError) return { ok: false, reason: "rollback-start-failed", error: startError, generation };
     candidate.startedAt = Date.now();
+    try {
+      this.#restoreSpeechQueue(candidate, speechQueueTransfer);
+    } catch (error) {
+      candidate.get("speechQueue")?.mergeIntoRuntimeTransfer?.();
+      await this.disposer.teardown(candidate.components, { reason: "rollback speech queue restore failed" });
+      return { ok: false, reason: "rollback-restore-failed", error, generation };
+    }
     this.current = candidate;
+    this.transitionSpeechQueue = null;
+    this.pendingSpeechQueueTransfer = null;
     return { ok: true, reason: "rollback-restored", error: null, generation };
   }
 }

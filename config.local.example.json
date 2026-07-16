@@ -42,6 +42,11 @@
       "maxTokens": 768
     }
   },
+  "research": {
+    "enabled": false,
+    "connector": "minimax_main",
+    "maxResults": 5
+  },
   "voicevox": {
     "enabled": false,
     "baseUrl": "http://127.0.0.1:50021",
@@ -77,9 +82,9 @@
   "commentReader": {
     "enabled": true,
     "engine": "webspeech",
-    "name": "default",
-    "rate": 1.0,
-    "pitch": 1.0,
+    "webspeech": { "name": "default", "rate": 1.0, "pitch": 1.0 },
+    "voicevox": { "speaker": 3, "speed": 1.0, "pitch": 0.0, "intonation": 1.0, "volume": 1.0 },
+    "bouyomi": { "voice": 0, "speed": -1, "tone": -1, "volume": -1 },
     "includeAuthor": true,
     "skipEmotes": false,
     "ignoreUsers": ["nightbot", "streamelements"]

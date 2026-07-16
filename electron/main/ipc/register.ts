@@ -159,6 +159,12 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     if (optionsValue && optionsValue.stream !== undefined && typeof optionsValue.stream !== "boolean") throw new PublicIpcError("INVALID_INPUT", "streamが不正です");
     return options.aiService.chat({ connectorId, messages, ...(optionsValue ? { options: optionsValue as AiChatInput["options"] } : {}), ...(typeof payload.requestId === "string" ? { requestId: payload.requestId } : {}), ...(typeof payload.generation === "number" && Number.isSafeInteger(payload.generation) ? { generation: payload.generation } : {}), ...(typeof payload.ownerId === "string" ? { ownerId: payload.ownerId } : {}) });
   }, options);
+  register(CHANNELS.AI_WEB_SEARCH, (event, input) => {
+    const payload = expectRecord(input, "AI web search");
+    const connectorId = expectString(payload.connectorId, "connectorId", 128);
+    const query = expectString(payload.query, "query", 500);
+    return options.aiService.search({ connectorId, query, ...requestMetadata(payload) });
+  }, options);
   register(CHANNELS.AI_CANCEL, (event, input) => ({ cancelled: options.aiService.cancel(expectString(input, "requestId", 256)) }), options);
   register(CHANNELS.FEED_FETCH, (event, input) => {
     const payload = expectRecord(input, "feed request");

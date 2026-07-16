@@ -18,6 +18,7 @@
 import { STREAM_EVENT_KINDS } from "../stream-events/contract.js";
 import { getFieldDefinition, isFieldValidForAnyKind, operatorsForField } from "./event-field-registry.js";
 import { MAX_CONDITION_DEPTH, failureResult, isConditionLeafNode, issue, successResult } from "./event-trigger-schema.js";
+import { validateActionConfig } from "../actions/action-schema.js";
 
 /** Operator names that look like a regex-family match — rejected outright per this file's own
  * header comment, rather than silently ignored or coerced. */
@@ -144,6 +145,13 @@ export function validateEventTriggerConfig(candidate) {
   if (candidate.stopPropagation !== undefined && typeof candidate.stopPropagation !== "boolean") issues.push(issue(["stopPropagation"], "type.boolean", "stopPropagation must be a boolean"));
 
   validateConditionNode(candidate.condition, ["condition"], eventTypes ?? [], issues, 0);
+  if (candidate.actions !== undefined) {
+    if (!Array.isArray(candidate.actions)) issues.push(issue(["actions"], "type.array", "actions must be an array"));
+    else candidate.actions.forEach((action, index) => {
+      const result = validateActionConfig(action);
+      for (const entry of result.issues) issues.push(issue(["actions", index, ...entry.path], entry.code, entry.message, { severity: entry.severity, meta: entry.meta }));
+    });
+  }
 
   const errors = issues.filter((entry) => entry.severity === "error");
   return errors.length ? failureResult(issues, candidate) : successResult(candidate, issues);

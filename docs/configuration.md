@@ -29,11 +29,13 @@
 | `model` | モデルID。`mock` では省略可 |
 | `baseUrl` | 省略可。ローカルLLM やOpenAI互換サーバーを指す。`ollama` の既定は `http://localhost:11434/v1` |
 | `timeoutMs` | 省略可。既定 30000 (ミリ秒。秒ではない点に注意) |
+| `maxTokens` | 省略可。通常応答の最大出力トークン数。既定 300、範囲 1〜32768 |
 | `retries` | 省略可。既定 1。タイムアウトした場合のみ即座に再試行する回数 (認証エラー等はリトライしない) |
 
 `mock` はAPIキーなしで応答・画面認識・ニュース要約の動作確認ができるモックです。
 
 Ollama を使う場合は、Ollama を起動してモデルを pull したうえで `provider: "ollama"` を指定します。発話用ペルソナ、ニュース要約、`context.screenCapture.connector` の vision_model 参照先として同じように選べます。
+Ollama の OpenAI 互換APIには `reasoning_effort: "none"` を自動指定し、thinking対応モデルでも内部思考ではなく最終回答に出力予算を使わせます。内部思考は応答や読み上げには使用しません。モデル側がthinking無効化に対応しておらず回答が途中で切れる場合は、設定画面の `maxTokens` を増やしてください。
 
 ```json
 {
@@ -139,7 +141,8 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
     "voice": 0,
     "volume": -1,
     "speed": -1,
-    "tone": -1
+    "tone": -1,
+    "charsPerSecond": 6
   }
 }
 ```
@@ -149,6 +152,32 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
 棒読みちゃん自身のキューが管理します。「全消去」は `/Clear` にも送られます。
 ブラウザ版で CORS に阻まれる場合は Electron 版を使うと、限定された preload API 経由で
 メインプロセスからローカル HTTP API を呼び出せます。
+
+`speed` は棒読みちゃんの speed パラメータで 50〜200 程度のスケール (既定 -1 は
+棒読みちゃん本体の設定に従う) です。Web Speech の `commentReader.webspeech.rate`
+(0.5〜2)、VOICEVOX の `commentReader.voicevox.speed` (0.5〜2) とは互換性がありません。
+棒読みちゃんの速度を変えたい場合は `bouyomi.speed` または `personas[].voice.speed` /
+`commentReader.bouyomi.speed` を個別に指定してください。
+
+`/Talk` は投入した瞬間に応答が返る (実際の再生完了は通知されない) ため、`commentReader`
+と `personas[].voice` で異なるエンジンを組み合わせている場合 (例: コメント読み上げは
+`bouyomi`、AIペルソナは `voicevox`/`webspeech`)、文字数と `speed` から発話時間を見積もり、
+その時間が経過するまで次のアイテムの再生を待たせることでコメント読み上げとAI読み上げの
+音声が被らないようにしています。見積もりのため実際の発話時間とはずれる場合があります。
+見積りの基準は `charsPerSecond` (既定 6、speed=100相当のとき1秒に読む文字数) で、
+実際に使っている声の速さと見積りがずれていて待機が長すぎる/短すぎると感じる場合は
+この値を調整してください (小さくすると見積り時間が延び、大きくすると縮みます)。
+
+## 設定適用中の読み上げキュー
+
+設定エディタの保存や設定ファイルの再読込では、実行中のランタイムを安全に切り替えます。
+この切替だけでキューを全消去することはありません。再生中の項目は新しい音声backendで先頭から
+再開し、待機中の項目は元の順序を保って引き継がれます。再開後の保留・再投入では通常のpriorityと
+待機数上限が再び適用されます。
+
+ペルソナまたはコメント読み上げのvoice設定を変更した場合、引き継いだ項目は新しいvoice設定で
+再生します。マイク発話による一時保留は新しいマイク監視状態で判定し直しますが、手動の「停止」は
+設定適用後も維持されます。キューを確実に破棄する操作は明示的な「全消去」のみです。
 
 ## micMonitor
 
@@ -175,10 +204,11 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
 | `silenceHoldMs` | 800 | しきい値未満がこの時間継続したら「無音」と判定し読み上げを再開するまでの継続時間 (ms) |
 | `deviceId` | null | 監視対象の入力デバイスの`MediaDeviceInfo.deviceId`。未指定 (null) の場合はOS/ブラウザの既定デバイスを使う。Electronにはブラウザのようなデバイス選択UIが無いため、設定パネルの「マイク監視」タブから明示的に選択する (issue #32) |
 
-「発話中」判定になると `SpeechQueue.stop()` が呼ばれ、再生中の発話は中断されて
-**保留 (waiting) に戻ります** (手動の「停止」ボタンと同じ挙動)。無音判定に戻ると
-`SpeechQueue.resume()` が呼ばれ、中断された発話は最初から読み上げ直されます。しきい値の
-調整は操作卓の「マイク監視」パネルのメーター表示を見ながら行ってください。
+「発話中」判定になると `SpeechQueue.hold("mic")` が呼ばれます。**再生中の発話は中断せず
+最後まで読み上げます** が、次に控えている項目の開始は保留されます。無音判定に戻ると
+`SpeechQueue.release("mic")` が呼ばれ、保留していた次の項目の読み上げが始まります
+(手動の「停止」ボタンとは異なり、マイク発話による保留は再生中の項目を巻き戻しません)。
+しきい値の調整は操作卓の「マイク監視」パネルのメーター表示を見ながら行ってください。
 
 スピーカーで音声を再生している環境では、AI自身の声がマイクに回り込んで誤検知する
 可能性があります。`echoCancellation`/`noiseSuppression` は既定で有効にしていますが、
@@ -195,9 +225,9 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
   "commentReader": {
     "enabled": false,
     "engine": "webspeech",
-    "name": "default",
-    "rate": 1.0,
-    "pitch": 1.0,
+    "webspeech": { "name": "default", "rate": 1.0, "pitch": 1.0 },
+    "voicevox": { "speaker": 3, "speed": 1.0, "pitch": 0.0, "intonation": 1.0, "volume": 1.0 },
+    "bouyomi": { "voice": 0, "speed": -1, "tone": -1, "volume": -1 },
     "includeAuthor": true,
     "skipEmotes": false,
     "ignoreUsers": []
@@ -209,10 +239,9 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 |---|---|---|
 | `enabled` | false | コメント読み上げを有効化 |
 | `engine` | webspeech | `webspeech` / `voicevox` / `bouyomi` (personas の `voice.engine` と同じ選択肢) |
-| `name` | default | webspeech使用時の音声名。省略時は日本語音声を自動選択 |
-| `rate` / `pitch` | 1.0 / 1.0 | 読み上げ速度・音高 |
-| `speaker` | (voicevox.defaultSpeakerを使用) | voicevox使用時の話者ID。省略可 |
-| `voice` | 0 | bouyomi使用時の話者ID。0 は棒読みちゃん側の既定 |
+| `webspeech` | `{ name: "default", rate: 1, pitch: 1 }` | Web Speech専用の音声名・速度・音高 |
+| `voicevox` | `{ speed: 1, pitch: 0, intonation: 1, volume: 1 }` | VOICEVOX専用の話者ID (`speaker`)・速度・音高・抑揚・音量。`speaker` 省略時は共通の `voicevox.defaultSpeaker` を使用 |
+| `bouyomi` | `{}` | 棒読みちゃん専用の話者・速度・音程・音量。省略した項目は共通の `bouyomi.voice` / `speed` / `tone` / `volume` を継承し、共通値の `-1` は本体設定に従う。待機時間が合わない場合は `speed` または `bouyomi.charsPerSecond` を調整する |
 | `includeAuthor` | true | falseにすると「author: 本文」ではなく本文のみ読み上げる |
 | `skipEmotes` | false | trueにするとTwitchのエモートを読み上げから除去する。Twitchが送るIRCの `emotes` タグ (エモートの正確な文字範囲) を使うため、手動入力コメントなど emotes 情報がないソースには影響しない |
 | `ignoreUsers` | `[]` | このユーザー名 (大文字小文字区別なし、前後空白は無視) からのコメントは読み上げをスキップする。AI応答のトリガー判定自体には影響しない |
@@ -222,6 +251,10 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 「コメント読み上げ」→「AI応答」の順で積まれるため、視聴者のコメントとAIの返答を
 両方音声で聞ける。読み上げに使うエンジンは `voicevox` / `webspeech` / `bouyomi`
 から選べます。
+
+3エンジンの音声設定は独立して保存されます。`engine`を切り替えても、別エンジンの
+速度や音高を上書きしません。旧形式のフラットな`name` / `rate` / `pitch` / `speed`
+なども読み込み時に対応するエンジン設定へ移されるため、既存configはそのまま利用できます。
 
 ## triggers
 
@@ -367,6 +400,53 @@ Todoist由来の話題は `topics.intro`/`topics.style` を使って読み上げ
 旧設定の `news.sources[].type: "todoist"` は読み込み時に `topics` へ移されますが、新しい設定では
 `news` と `topics` を分けて書いてください。これにより、実ニュース(rss/mock)とTodoist話題を
 別々の頻度・別々のペルソナで同時併走できます。
+
+## EventTriggerのoverlay-cue
+
+`eventTriggers.<id>.actions` では、発話Actionに加えて画像・音声を表す`overlay-cue`を保存できます。
+保存設定にはasset registryの安全な`assetId`だけを書き、URL、絶対path、CSS、JavaScript、
+`assetHandle`、`cueInstanceId`などのruntime値は書けません。未指定の表示・時間・transition・
+競合policyは、simulationとproductionで共有する同じdefault関数によって実行時に展開されます。
+
+```json
+{
+  "id": "reward-overlay",
+  "kind": "overlay-cue",
+  "priority": 10,
+  "cue": {
+    "visual": { "assetId": "reward-image", "x": 0.5, "y": 0.5, "fit": "contain" },
+    "audio": { "assetId": "reward-sound", "volume": 0.8 },
+    "timing": { "enterMs": 250, "holdMs": 2000, "exitMs": 250 },
+    "transition": { "enter": "fade", "exit": "fade", "easing": "ease" },
+    "policy": { "channel": "rewards", "mode": "queue", "maxQueue": 20 }
+  }
+}
+```
+
+`visual`と`audio`の少なくとも一方が必要です。保存形式と、asset metadata・opaque handle・
+plan/event/trigger IDを含む`ResolvedOverlayCue`は分離されています。このcontract対応前の古いbuildは
+`overlay-cue`を未知Actionとしてvalidation errorにし、そのActionだけを実行計画から除外します。
+現buildでもrenderer runtimeが利用可能になるまでは、安全に`overlay-unavailable`としてskipします。
+
+## Web調査 prepass (MiniMax)
+
+`research.enabled`を有効にすると、コメントまたは手動依頼への通常回答を生成する前に、
+`research.connector`で指定したMiniMax connectorのWeb検索を実行します。公式Token Plan Search API
+（`POST /v1/coding_plan/search`）を利用するため、契約や利用量に応じた料金が発生する場合があります。
+
+```json
+{
+  "research": {
+    "enabled": true,
+    "connector": "minimax_main",
+    "maxResults": 5
+  }
+}
+```
+
+検索結果は外部の未検証資料として本回答のcontextへ渡されます。検索結果に含まれる命令は無視するよう
+promptで明示し、最大10件に制限します。検索失敗時は検索なしの通常回答へフォールバックし、応答全体は
+停止しません。ElectronではconnectorのAPI keyをMain process内だけで参照し、Rendererへ返しません。
 
 ## ニュース読み上げの参考: `azumag/soviet_now` 構造メモ (issue #10)
 

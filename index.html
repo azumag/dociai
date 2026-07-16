@@ -50,7 +50,6 @@
           <button id="btn-speech-clear" type="button" aria-label="音声キューを全消去">全消去</button>
         </div>
         <h3>再生中</h3><div id="speech-current" class="speech-current" aria-live="polite">再生中なし</div>
-        <h3>待機</h3><ul id="speech-pending" class="rack-list speech-list"></ul>
         <div id="speech-diagnostics" class="muted speech-diagnostics" aria-live="polite"></div>
       </section>
       <section class="panel">
@@ -59,6 +58,11 @@
           <button id="btn-mic-start" type="button">監視開始</button>
           <button id="btn-mic-stop" type="button">監視停止</button>
         </div>
+        <label class="switch mic-bargein-toggle" title="AI発話中にマイク発話を検知したら読み上げを保留する">
+          <input type="checkbox" id="chk-mic-bargein" checked>
+          <span class="track"></span>
+          発話検知でAIの読み上げに割り込む
+        </label>
         <div class="mic-meter"><div id="mic-meter-fill" class="mic-meter-fill"></div></div>
         <div id="mic-status" class="muted"></div>
       </section>
