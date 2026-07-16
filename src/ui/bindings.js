@@ -18,6 +18,8 @@ export function bindConsoleUI(elements, actions, { setIntervalImpl = setInterval
   optionalOn("screenSourceRefresh", "click", () => actions.refreshScreenSources());
   optionalOn("screenSourceSelect", "change", (event) => actions.selectScreenSource(event.target.value));
   optionalOn("micBargeIn", "change", (event) => actions.setMicBargeIn(event.target.checked));
+  optionalOn("newsEnabled", "change", (event) => actions.setNewsEnabled(event.target.checked));
+  optionalOn("topicsEnabled", "change", (event) => actions.setTopicsEnabled(event.target.checked));
   on("commentForm", "submit", (event) => {
     event.preventDefault();
     const text = elements.get("commentText");

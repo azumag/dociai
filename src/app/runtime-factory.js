@@ -275,6 +275,8 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       policy: config.speechQueue,
       strictOrdering: config.speechQueue?.strictOrdering,
       bouyomiCharsPerSecond: config.bouyomi?.charsPerSecond,
+      commentReaderIntervalMs: Math.max(0, Number(config.commentReader?.intervalSeconds) || 0) * 1000,
+      isCommentReaderItem: (item) => item.personaId === COMMENT_READER_ID,
       resolveVoice: (personaId, currentVoice) => personaId === COMMENT_READER_ID ? resolveCommentReaderVoice(config.commentReader, config) : config.personas?.find((persona) => persona.id === personaId)?.voice ?? currentVoice,
       resolveFallbackVoice: (personaId, currentVoice, backendId) => personaId === COMMENT_READER_ID && backendId === "webspeech"
         ? resolveCommentReaderVoice({ ...config.commentReader, engine: "webspeech" }, config)
@@ -358,6 +360,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       runtime: deps.runtimeController,
       getGeneration: () => generation,
       onError: (kind, error) => deps.onAutomationError(kind, error),
+      onStart: (kind) => deps.onAutomationStart?.(kind),
       onComplete: (kind) => deps.onAutomationComplete(kind),
     }),
     (instance) => ({ dispose: () => instance.dispose() }),
@@ -393,6 +396,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     speechQueue,
     log: deps.log,
     onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText }); },
+    isRuntimeEnabled: deps.isNewsRuntimeEnabled,
     pipeline: newsPipeline,
   }));
 
@@ -405,6 +409,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     webResearcher,
     log: deps.log,
     onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },
+    isRuntimeEnabled: deps.isTopicsRuntimeEnabled,
   }));
 
   const handleTrigger = expose("handleTrigger", (triggerId, options = {}) => {

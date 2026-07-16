@@ -68,4 +68,6 @@ test("legacy commentReader voice fields migrate only into their selected engine 
   assert.equal("speaker" in defaults.voicevox, false, "未指定speakerはvoicevox.defaultSpeakerへフォールバックさせる");
   assert.equal(defaults.collapseConsecutiveEmoji, false);
   assert.equal(commentReaderDefaults({ collapseConsecutiveEmoji: true }).collapseConsecutiveEmoji, true);
+  assert.equal(defaults.intervalSeconds, 0, "既定は間隔なし");
+  assert.equal(commentReaderDefaults({ intervalSeconds: 5 }).intervalSeconds, 5);
 });

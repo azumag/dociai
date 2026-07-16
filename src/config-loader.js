@@ -240,6 +240,14 @@ export function validateConfig(cfg) {
     if (cfg.topics.persona && !(cfg.personas ?? []).some((p) => p?.id === cfg.topics.persona)) {
       errors.push(`topics.persona "${cfg.topics.persona}" が personas に存在しません`);
     }
+    for (const pid of cfg.topics.personas ?? []) {
+      if (pid && !(cfg.personas ?? []).some((p) => p?.id === pid)) {
+        errors.push(`topics.personas の "${pid}" が personas に存在しません`);
+      }
+    }
+    if (cfg.topics.randomPersona && !(cfg.topics.personas ?? []).length) {
+      warnings.push("topics.randomPersona が true ですが topics.personas が空です。topics.persona / router.defaultPersona にフォールバックします");
+    }
   }
 
   // comment sources
@@ -333,6 +341,7 @@ export function validateConfig(cfg) {
     for (const key of ["includeAuthor", "skipEmotes", "collapseConsecutiveEmoji"]) {
       if (cr[key] != null && typeof cr[key] !== "boolean") errors.push(`commentReader.${key} はbooleanで指定してください`);
     }
+    if (cr.intervalSeconds != null) validateNumber(cr.intervalSeconds, "commentReader.intervalSeconds", errors, { min: 0, max: 3600 });
     validateCommentReaderVoices(cr, errors);
   }
 

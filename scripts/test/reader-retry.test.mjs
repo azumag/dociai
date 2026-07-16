@@ -139,6 +139,41 @@ test("NewsReader preserves unread items for missing/auth connectors and resets a
   assert.equal(cancelled.status().counts.unread, 1, "stale generation cannot mark a late response read");
 });
 
+test("NewsReader/TopicReader stay enabled per config.news.enabled/config.topics.enabled but pause once isRuntimeEnabled() reports the main-screen toggle is off", async () => {
+  const now = { value: 1_000 };
+  let newsRuntimeEnabled = true;
+  const news = new NewsReader({
+    config: { news: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    isRuntimeEnabled: () => newsRuntimeEnabled,
+  });
+  news.fetchAll = async () => news.refineItems([{ guid: "news-only", title: "news-only", sourceName: "source", publishedAt: "2026-07-02T10:00:00Z" }]);
+
+  assert.equal(news.enabled, true);
+  await news.run({ generation: 1 });
+  assert.equal(news.status().counts.read, 1, "runs normally while the toggle is on");
+
+  newsRuntimeEnabled = false;
+  assert.equal(news.enabled, false, "config.news.enabled stays true — only the session toggle flips .enabled");
+  news.fetchAll = async () => news.refineItems([{ guid: "news-second", title: "news-second", sourceName: "source", publishedAt: "2026-07-02T11:00:00Z" }]);
+  await news.run({ generation: 1 });
+  assert.equal(news.status().counts.read, 1, "paused: no new item is processed while the toggle is off");
+
+  let topicsRuntimeEnabled = true;
+  const topics = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    isRuntimeEnabled: () => topicsRuntimeEnabled,
+  });
+  topics.fetchAll = async () => topics.refineItems([{ guid: "topic-only", title: "topic-only", sourceName: "todoist" }]);
+  assert.equal(topics.enabled, true);
+
+  topicsRuntimeEnabled = false;
+  assert.equal(topics.enabled, false, "config.topics.enabled stays true — only the session toggle flips .enabled");
+  await topics.run({ generation: 1 });
+  assert.equal(topics.status().counts.read, 0, "paused before any topic is picked up");
+});
+
 test("TopicReader applies the same retry lifecycle and stops permanent-error loops", async () => {
   const now = { value: 1_000 };
   let calls = 0;
@@ -155,6 +190,63 @@ test("TopicReader applies the same retry lifecycle and stops permanent-error loo
   assert.equal(reader.retryNow(failure.key), true);
   assert.equal(reader.skip(failure.key), true);
   assert.equal(reader.restore(failure.key), true);
+});
+
+test("TopicReader randomPersona picks per item from the enabled candidate pool", async () => {
+  const now = { value: 1_000 };
+  const personaA = { id: "a", name: "A", connector: "mock", enabled: true, voice: {} };
+  const personaB = { id: "b", name: "B", connector: "mock", enabled: true, voice: {} };
+  const personaDisabled = { id: "c", name: "C", connector: "mock", enabled: false, voice: {} };
+  const personas = { a: personaA, b: personaB, c: personaDisabled };
+  const seenPersonas = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 3, randomPersona: true, personas: ["a", "b", "c"] } },
+    getConnector: () => ({ chat: async () => ({ text: "ok" }) }),
+    personaRouter: { get: (id) => personas[id], defaultPersona: () => personaA },
+    contextBuilder: { build: () => ({ messages: [{ role: "user", content: "x" }], debugText: "d" }) },
+    speechQueue: { enqueue: () => ({ state: "waiting" }) },
+    store: new MemoryItemProcessingStore({ clock: () => now.value }),
+    clock: () => now.value,
+    onRead: ({ persona }) => seenPersonas.push(persona.id),
+  });
+  reader.fetchAll = async () => reader.refineItems([
+    { guid: "1", title: "t1", sourceName: "todoist" },
+    { guid: "2", title: "t2", sourceName: "todoist" },
+    { guid: "3", title: "t3", sourceName: "todoist" },
+  ]);
+  // candidates = [a, b] (c is filtered out for being disabled); floor(random*2) selects the index.
+  const sequence = [0, 0.9, 0.4];
+  let i = 0;
+  const originalRandom = Math.random;
+  Math.random = () => sequence[i++ % sequence.length];
+  try {
+    await reader.run({ generation: 1 });
+  } finally {
+    Math.random = originalRandom;
+  }
+  assert.deepEqual(seenPersonas, ["a", "b", "a"]);
+  assert.equal(reader.status().counts.read, 3);
+});
+
+test("TopicReader falls back to topics.persona when randomPersona has no enabled candidates", async () => {
+  const now = { value: 1_000 };
+  const personaFixed = { id: "fixed", name: "Fixed", connector: "mock", enabled: true, voice: {} };
+  const personaDisabled = { id: "c", name: "C", connector: "mock", enabled: false, voice: {} };
+  const personas = { fixed: personaFixed, c: personaDisabled };
+  const seenPersonas = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1, persona: "fixed", randomPersona: true, personas: ["c"] } },
+    getConnector: () => ({ chat: async () => ({ text: "ok" }) }),
+    personaRouter: { get: (id) => personas[id], defaultPersona: () => personaFixed },
+    contextBuilder: { build: () => ({ messages: [{ role: "user", content: "x" }], debugText: "d" }) },
+    speechQueue: { enqueue: () => ({ state: "waiting" }) },
+    store: new MemoryItemProcessingStore({ clock: () => now.value }),
+    clock: () => now.value,
+    onRead: ({ persona }) => seenPersonas.push(persona.id),
+  });
+  reader.fetchAll = async () => reader.refineItems([{ guid: "1", title: "t1", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(seenPersonas, ["fixed"]);
 });
 
 test("TopicReader runs Web research before chat and includes grounded results", async () => {
@@ -189,6 +281,51 @@ test("TopicReader fails open when Web research fails", async () => {
   await reader.run({ generation: 1 });
   assert.equal(reader.status().counts.read, 1, "research failure falls back to the normal response instead of blocking readout");
   assert.ok(warnings.some((message) => /Web調査prepass/.test(message)));
+});
+
+test("TopicReader turns a Todoist 401 from the Electron Main process into an actionable auth message", async () => {
+  const now = { value: 1_000 };
+  const logs = [];
+  const originalDociai = globalThis.dociai;
+  try {
+    globalThis.dociai = { topics: { fetch: async () => ({ ok: false, error: { code: "AUTH", message: "HTTP 401", retryable: false } }) } };
+    const reader = new TopicReader({
+      config: { topics: { enabled: true, sources: [{ name: "配信ネタ (Todoist)", type: "todoist", enabled: true, projectId: "1" }] } },
+      ...readerDependencies({ now, connector: { chat: async () => ({ text: "unused" }) } }),
+      log: (message, level) => logs.push({ message, level }),
+    });
+    assert.deepEqual(await reader.fetchAll({}), []);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].level, "error");
+    assert.match(logs[0].message, /認証に失敗/);
+    assert.match(logs[0].message, /設定でTodoist個人アクセストークンを再設定/);
+    assert.match(logs[0].message, /HTTP 401/, "the underlying status is still visible for diagnosis");
+  } finally {
+    if (originalDociai === undefined) delete globalThis.dociai; else globalThis.dociai = originalDociai;
+  }
+});
+
+test("TopicReader turns a direct-fetch Todoist 401 (Browser mode without Electron Main) into the same actionable auth message", async () => {
+  const now = { value: 1_000 };
+  const logs = [];
+  const originalDociai = globalThis.dociai;
+  const originalFetch = globalThis.fetch;
+  try {
+    delete globalThis.dociai;
+    globalThis.fetch = async () => new Response("unauthorized", { status: 401 });
+    const reader = new TopicReader({
+      config: { topics: { enabled: true, sources: [{ name: "配信ネタ (Todoist)", type: "todoist", enabled: true, token: "expired-token", projectId: "1" }] } },
+      ...readerDependencies({ now, connector: { chat: async () => ({ text: "unused" }) } }),
+      log: (message, level) => logs.push({ message, level }),
+    });
+    assert.deepEqual(await reader.fetchAll({}), []);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].level, "error");
+    assert.match(logs[0].message, /認証に失敗/);
+  } finally {
+    if (originalDociai === undefined) delete globalThis.dociai; else globalThis.dociai = originalDociai;
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("AI-backed readers warn about output limits before handing text to speech", async () => {

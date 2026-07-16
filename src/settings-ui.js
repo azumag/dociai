@@ -1078,6 +1078,7 @@ export class SettingsUI {
       const g = document.createElement("div");
       g.className = "card-grid";
       g.append(this.#pathSelect("engine", VOICE_ENGINES, "commentReader.engine", { value: cr.engine ?? "webspeech" }));
+      g.append(this.#pathField("読み上げ間隔 (秒)", "commentReader.intervalSeconds", { type: "number", value: cr.intervalSeconds ?? 0, attrs: { min: 0, max: 3600, step: 0.5 } }));
       const webspeech = cr.webspeech ?? {};
       const voicevox = cr.voicevox ?? {};
       const bouyomi = cr.bouyomi ?? {};
@@ -1105,7 +1106,7 @@ export class SettingsUI {
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。「連続する絵文字を1つにまとめる」は、単独の絵文字は残し、空白を挟んだ絵文字の連投も先頭1つだけ読み上げます。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
+    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。「読み上げ間隔 (秒)」は、あるコメントの読み上げが終わってから次のコメントの読み上げを始めるまでの最短待機時間です (既定0=間隔なし)。コメントが連続で届いても機関銃のように読み上げ続けないよう調整できます。同じキューにコメント読み上げより後ろに積まれたAI応答は、この待機の間も自分の順番を待つため、間隔を長くするとAI応答の開始も遅れる場合があります。「連続する絵文字を1つにまとめる」は、単独の絵文字は残し、空白を挟んだ絵文字の連投も先頭1つだけ読み上げます。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
     this._body.append(note);
   }
 
@@ -1179,7 +1180,39 @@ export class SettingsUI {
     g.append(this.#pathSelect("persona", ["", ...personaIds], "topics.persona", { value: t.persona ?? "" }));
     g.append(this.#pathField("maxItems", "topics.maxItems", { type: "number", value: t.maxItems ?? 3 }));
     g.append(this.#pathCheckbox("dedupe", "topics.dedupe", { value: t.dedupe ?? true }));
+    g.append(this.#pathCheckbox("ランダムに複数ペルソナで読む", "topics.randomPersona", { value: !!t.randomPersona }));
     cardBody.append(g);
+    // personas: ランダム選択の候補プール (randomPersona時、topics.personaの代わりにここから毎回抽選する)
+    const poolWrap = document.createElement("div");
+    poolWrap.className = "field";
+    const poolLab = document.createElement("span");
+    poolLab.className = "field-label";
+    poolLab.textContent = "personas (ランダム候補)";
+    poolWrap.append(poolLab);
+    const poolBox = document.createElement("div");
+    poolBox.className = "checkbox-group";
+    for (const pid of personaIds) {
+      const lab = document.createElement("label");
+      lab.className = "chip-check";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = (t.personas ?? []).includes(pid);
+      cb.addEventListener("change", () => {
+        const set = new Set(this.draft.topics.personas ?? []);
+        if (cb.checked) set.add(pid); else set.delete(pid);
+        this.draft.topics.personas = [...set];
+      });
+      lab.append(cb, document.createTextNode(pid));
+      poolBox.append(lab);
+    }
+    if (!personaIds.length) {
+      const m = document.createElement("span");
+      m.className = "muted";
+      m.textContent = "(ペルソナがありません)";
+      poolBox.append(m);
+    }
+    poolWrap.append(poolBox);
+    cardBody.append(poolWrap);
     cardBody.append(this.#pathField("intro", "topics.intro", { value: t.intro ?? "", textarea: true, rows: 2 }));
     cardBody.append(this.#pathField("style", "topics.style", { value: t.style ?? "", textarea: true, rows: 2 }));
     this._body.append(card);

@@ -355,7 +355,7 @@ test("nested all/any group: any(bits>=1000, tier in [2000,3000]) works across ev
   assert.equal(evaluateCondition(nestedAllAny, cheerEvent(2000)).passed, true);
 });
 
-test("matchEvent: priority descending order, with a STABLE tiebreak preserving config array order for equal priorities", () => {
+test("matchEvent: priority descending order is always preserved across different priorities", () => {
   const triggers = [
     trigger({ id: "low", priority: 1 }),
     trigger({ id: "tie-a", priority: 5 }),
@@ -364,7 +364,32 @@ test("matchEvent: priority descending order, with a STABLE tiebreak preserving c
     trigger({ id: "tie-c", priority: 5 }),
   ];
   const { matches } = matchEvent(triggers, cheerEvent(100));
-  assert.deepEqual(matches.map((entry) => entry.triggerId), ["high", "tie-a", "tie-b", "tie-c", "low"]);
+  assert.equal(matches[0].triggerId, "high");
+  assert.equal(matches[matches.length - 1].triggerId, "low");
+  assert.deepEqual(
+    matches.map((entry) => entry.triggerId).filter((id) => id.startsWith("tie-")).sort(),
+    ["tie-a", "tie-b", "tie-c"],
+  );
+});
+
+test("matchEvent: equal-priority ties are shuffled via the injectable `random`, not fixed to config array order", () => {
+  const triggers = [
+    trigger({ id: "tie-a", priority: 5 }),
+    trigger({ id: "tie-b", priority: 5 }),
+    trigger({ id: "tie-c", priority: 5 }),
+  ];
+  // A `random` that always returns 0 drives a deterministic (non-config-array-order) Fisher-Yates permutation.
+  const { matches: shuffled } = matchEvent(triggers, cheerEvent(100), { random: () => 0 });
+  assert.deepEqual(shuffled.map((entry) => entry.triggerId), ["tie-b", "tie-c", "tie-a"]);
+
+  // The default `random` (Math.random) does not deterministically reproduce config array order
+  // every time — sample many runs and confirm more than one distinct ordering occurs.
+  const orderings = new Set();
+  for (let i = 0; i < 50; i++) {
+    const { matches } = matchEvent(triggers, cheerEvent(100));
+    orderings.add(matches.map((entry) => entry.triggerId).join(","));
+  }
+  assert.ok(orderings.size > 1, `expected multiple distinct tie orderings across 50 runs, got: ${[...orderings].join(" | ")}`);
 });
 
 test("matchEvent: stopPropagation prevents lower-priority triggers from even being condition-evaluated", () => {

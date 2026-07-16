@@ -497,15 +497,24 @@ function renderNewsPanel() {
   const el = $("#news-status");
   const failures = $("#news-failures");
   const newsReader = appRuntime.getComponent("newsReader");
+  const toggle = $("#chk-news-enabled");
+  const configEnabled = !!state.config?.news?.enabled;
+  toggle.checked = state.newsRuntimeEnabled !== false;
+  toggle.disabled = !configEnabled;
   $("#btn-news-read").disabled = !newsReader?.enabled || newsReader?.busy;
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
     failures.replaceChildren();
     return;
   }
+  if (!configEnabled) {
+    el.textContent = "設定で無効です (news.enabled: false)";
+    failures.replaceChildren();
+    return;
+  }
   const s = newsReader.status();
   if (!s.enabled) {
-    el.textContent = "設定で無効です (news.enabled: false)";
+    el.textContent = "操作卓のトグルで一時停止中です";
     failures.replaceChildren();
     return;
   }
@@ -518,15 +527,25 @@ function renderTopicPanel() {
   const el = $("#topic-status");
   const failures = $("#topic-failures");
   const topicReader = appRuntime.getComponent("topicReader");
+  const toggle = $("#chk-topics-enabled");
+  const configEnabled = !!state.config?.topics?.enabled;
+  toggle.checked = state.topicsRuntimeEnabled !== false;
+  toggle.disabled = !configEnabled;
   $("#btn-topic-read").disabled = !topicReader?.enabled || topicReader?.busy;
+  $("#topic-busy").hidden = !topicReader?.busy;
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
     failures.replaceChildren();
     return;
   }
+  if (!configEnabled) {
+    el.textContent = "設定で無効です (topics.enabled: false)";
+    failures.replaceChildren();
+    return;
+  }
   const s = topicReader.status();
   if (!s.enabled) {
-    el.textContent = "設定で無効です (topics.enabled: false)";
+    el.textContent = "操作卓のトグルで一時停止中です";
     failures.replaceChildren();
     return;
   }
@@ -718,8 +737,11 @@ appRuntime = new AppRuntime({
     onScreenChange: () => renderScreenPanel(),
     onMicChange: () => renderMicPanel(),
     isMicBargeInEnabled: () => state.micBargeInEnabled !== false,
+    isNewsRuntimeEnabled: () => state.newsRuntimeEnabled !== false,
+    isTopicsRuntimeEnabled: () => state.topicsRuntimeEnabled !== false,
     onResponseError: (error, persona) => logEvent(`「${persona?.name ?? "不明"}」応答失敗: ${scrub(error.message)}`, "error"),
     onAutomationError: (kind, error) => logEvent(`${kind === "news" ? "ニュース" : "話題"}読み上げ失敗: ${scrub(error.message)}`, "error"),
+    onAutomationStart: (kind) => (kind === "news" ? renderNewsPanel() : renderTopicPanel()),
     onAutomationComplete: (kind) => (kind === "news" ? renderNewsPanel() : renderTopicPanel()),
     onNewsRead: ({ persona, item, text, debugText }) => {
       state.lastDebug = { personaName: `${persona.name} (ニュース)`, debugText, at: new Date() };
@@ -777,7 +799,7 @@ function bindUI() {
     speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
     micStart: "#btn-mic-start", micStop: "#btn-mic-stop", micBargeIn: "#chk-mic-bargein", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
     screenSourceRefresh: "#btn-screen-source-refresh", screenSourceSelect: "#screen-source-select",
-    newsRead: "#btn-news-read", topicRead: "#btn-topic-read", twitchReconnect: "#btn-twitch-reconnect",
+    newsRead: "#btn-news-read", topicRead: "#btn-topic-read", newsEnabled: "#chk-news-enabled", topicsEnabled: "#chk-topics-enabled", twitchReconnect: "#btn-twitch-reconnect",
   });
   const actions = createAppActions({
     appRuntime,

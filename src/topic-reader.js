@@ -22,7 +22,7 @@ function parseDate(value) {
 }
 
 export class TopicReader {
-  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, webResearcher = null, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now() }) {
+  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, webResearcher = null, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now(), isRuntimeEnabled = () => true }) {
     this.config = config;
     this.getConnector = getConnector;
     this.personaRouter = personaRouter;
@@ -33,6 +33,7 @@ export class TopicReader {
     this.onRead = onRead;
     this.store = store;
     this.clock = clock;
+    this.isRuntimeEnabled = isRuntimeEnabled;
     this.generation = 0;
     this.busy = false;
     this.lastRunAt = null;
@@ -44,14 +45,20 @@ export class TopicReader {
     return new Set(this.store.list({ states: "read" }).map((record) => record.guid ?? record.key));
   }
 
+  // config.topics.enabled (設定保存が必要) と、操作卓のトグル (即時・セッション限りの一時停止)
+  // の両方が立っているときだけ有効。
   get enabled() {
-    return !!this.config.topics?.enabled;
+    return !!this.config.topics?.enabled && this.isRuntimeEnabled();
   }
 
   async run(context = {}) {
     const topics = this.config.topics;
     if (!topics?.enabled) {
       this.log("話題機能は無効です (topics.enabled: false)");
+      return;
+    }
+    if (!this.isRuntimeEnabled()) {
+      this.log("話題機能は操作卓のトグルで一時停止中です");
       return;
     }
     if (this.busy) {
@@ -72,14 +79,7 @@ export class TopicReader {
       this.log(`話題候補 ${items.length}件 (再処理可能 ${candidateKeys.size}件、読み上げ ${picks.length}件)`);
       if (!picks.length) return;
 
-      const persona = (topics.persona && this.personaRouter.get(topics.persona)) || this.personaRouter.defaultPersona();
-      if (!persona) throw new Error("話題読み上げに使えるペルソナがありません");
-      if (!persona.enabled) {
-        this.log(`話題担当ペルソナ「${persona.name}」が無効化中のためスキップしました`);
-        return;
-      }
-      const connector = this.#getConnector(persona);
-      if (!connector) return;
+      if (!this.#hasUsablePersonaConfig(topics)) throw new Error("話題読み上げに使えるペルソナがありません");
       if (typeof this.speechQueue?.enqueue !== "function") {
         this.log("話題音声キューが利用できません。item は未読のままです", "error");
         return;
@@ -87,6 +87,13 @@ export class TopicReader {
 
       for (const item of picks) {
         this.#guard(context);
+        const persona = this.#resolvePersona(topics);
+        if (!persona || !persona.enabled) {
+          if (persona) this.log(`話題担当ペルソナ「${persona.name}」が無効化中のためスキップしました`);
+          continue;
+        }
+        const connector = this.#getConnector(persona);
+        if (!connector) continue;
         const record = this.store.begin(item.processingKey, this.generation, this.clock());
         if (!record) continue;
         this.lastRunResult.processed++;
@@ -137,6 +144,10 @@ export class TopicReader {
         out.push(...(await this.fetchSource(src, index, context)));
       } catch (e) {
         if (isCancellation(e)) throw e;
+        if (String(e?.kind ?? "").toLowerCase() === "auth") {
+          this.log(`話題取得の認証に失敗しました [${src.name}]: トークンが無効か期限切れの可能性があります。設定でTodoist個人アクセストークンを再設定してください (${e.message})`, "error");
+          continue;
+        }
         this.log(`話題取得失敗 [${src.name}]: ${e.message}`, "error");
       }
     }
@@ -152,7 +163,7 @@ export class TopicReader {
         const result = await fetchTopicsThroughElectron({ sourceIndex, requestId, ownerId: "console" }).finally(() => context.signal?.removeEventListener("abort", cancel));
         if (!result?.ok) {
           if (result?.error?.code === "CANCELLED") throw new RequestCancelledError();
-          throw new Error(result?.error?.message ?? "Main processから話題を取得できませんでした");
+          throw Object.assign(new Error(result?.error?.message ?? "Main processから話題を取得できませんでした"), result?.error?.code === "AUTH" ? { kind: "auth" } : {});
         }
         this.#guard(context);
         return result.value.items;
@@ -168,7 +179,7 @@ export class TopicReader {
     const res = await fetch(`https://api.todoist.com/api/v1/tasks?project_id=${encodeURIComponent(src.projectId)}`, {
       headers: { Authorization: `Bearer ${src.token}` }, signal: context.signal,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status} (Todoist token/projectIdを確認してください)`);
+    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status} (Todoist token/projectIdを確認してください)`), (res.status === 401 || res.status === 403) ? { kind: "auth" } : {});
     const body = await res.json();
     const rows = Array.isArray(body) ? body : (body.results ?? []);
     const tasks = rows.filter((t) => String(t.project_id) === String(src.projectId));
@@ -262,6 +273,24 @@ export class TopicReader {
       this.log(`話題のWeb調査prepassに失敗しました [${item.title}]: ${error.message}`, "warn");
       return null;
     }
+  }
+
+  // 実行前の設定不備チェック用。乱数は消費せず「そもそも解決しうるペルソナ設定があるか」だけを見る
+  // (有効/無効の判定はitemごとの#resolvePersonaに任せる)。
+  #hasUsablePersonaConfig(topics) {
+    if (topics.randomPersona && Array.isArray(topics.personas) && topics.personas.length) return true;
+    return !!((topics.persona && this.personaRouter.get(topics.persona)) || this.personaRouter.defaultPersona());
+  }
+
+  // topics.randomPersona が有効な場合、topics.personas (有効なものだけ) から毎item抽選する。
+  // これにより同じ実行内でも話題ごとに担当ペルソナが変わりうる。無効時/候補が尽きた場合は
+  // 従来通り topics.persona → router.defaultPersona の順にフォールバックする。
+  #resolvePersona(topics) {
+    if (topics.randomPersona && Array.isArray(topics.personas) && topics.personas.length) {
+      const candidates = topics.personas.map((id) => this.personaRouter.get(id)).filter((p) => p?.enabled);
+      if (candidates.length) return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+    return (topics.persona && this.personaRouter.get(topics.persona)) || this.personaRouter.defaultPersona();
   }
 
   #getConnector(persona) {

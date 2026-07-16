@@ -5,9 +5,11 @@
 // list-only order, so moving a rule up/down in this list has an observable runtime effect.
 import { rewardWarningsForRule, summarizeActions, summarizeBudget, summarizeCondition, summarizeEventTypes, summarizeValidation } from "./rule-summary.js";
 
-/** `[{ id, rule, index }]`, sorted the SAME way event-trigger-matcher.js's own
- * `stableSortByPriorityDesc` orders triggers for matching (priority descending, ties broken by
- * original insertion order) — so this list's visual order always matches real evaluation order. */
+/** `[{ id, rule, index }]`, sorted by priority descending (ties broken by original insertion order
+ * for a stable list). Note: event-trigger-matcher.js's `orderByPriorityDesc` now SHUFFLES
+ * equal-priority triggers at match time (so no one equal-priority rule always wins a
+ * stopPropagation/maxMatchesPerEvent tie) — this list's insertion-order tiebreak is for a stable
+ * display only and is no longer a guarantee of real evaluation order among tied rules. */
 export function orderRules(rulesById) {
   return Object.entries(rulesById ?? {})
     .map(([id, rule], index) => ({ id, rule, index }))
