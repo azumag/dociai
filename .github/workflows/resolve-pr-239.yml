@@ -1,4 +1,4 @@
-name: Inspect PR 239 merge conflicts
+name: Resolve PR 239 merge conflicts
 
 on:
   push:
@@ -9,34 +9,85 @@ permissions:
   contents: write
 
 jobs:
-  inspect-conflicts:
+  resolve-conflicts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Inspect merge conflicts and persist result
+      - name: Merge current main and resolve known conflicts
         shell: bash
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
+
           set +e
           git merge --no-commit --no-ff origin/main
           merge_status=$?
           set -e
-          conflicts="$(git diff --name-only --diff-filter=U)"
-          status_short="$(git status --short)"
-          git merge --abort || true
 
-          {
-            echo "MERGE_STATUS=${merge_status}"
-            echo "--- unresolved files ---"
-            printf '%s\n' "${conflicts}"
-            echo "--- git status --short ---"
-            printf '%s\n' "${status_short}"
-          } > .github/pr239-conflicts.txt
+          unresolved="$(git diff --name-only --diff-filter=U | sort)"
+          expected="$(printf '%s\n' package.json src/app/runtime-factory.js src/news-reader.js | sort)"
+          if [ "${merge_status}" -ne 0 ] && [ "${unresolved}" != "${expected}" ]; then
+            echo "Unexpected unresolved files:"
+            printf '%s\n' "${unresolved}"
+            exit 1
+          fi
 
-          git add .github/pr239-conflicts.txt
-          git commit -m "ci: record PR 239 merge conflicts"
+          if [ "${merge_status}" -ne 0 ]; then
+            git checkout --ours -- package.json src/app/runtime-factory.js src/news-reader.js
+
+            python <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          package_path = Path("package.json")
+          package = json.loads(package_path.read_text())
+          main_package = json.loads(subprocess.check_output(["git", "show", "origin/main:package.json"], text=True))
+          package["version"] = main_package["version"]
+          package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n")
+
+          runtime_path = Path("src/app/runtime-factory.js")
+          runtime = runtime_path.read_text()
+          replacements = [
+              (
+                  '      bouyomiCharsPerSecond: config.bouyomi?.charsPerSecond,\n      resolveVoice:',
+                  '      bouyomiCharsPerSecond: config.bouyomi?.charsPerSecond,\n      commentReaderIntervalMs: Math.max(0, Number(config.commentReader?.intervalSeconds) || 0) * 1000,\n      isCommentReaderItem: (item) => item.personaId === COMMENT_READER_ID,\n      resolveVoice:',
+              ),
+              (
+                  '      onError: (kind, error) => deps.onAutomationError(kind, error),\n      onComplete:',
+                  '      onError: (kind, error) => deps.onAutomationError(kind, error),\n      onStart: (kind) => deps.onAutomationStart?.(kind),\n      onComplete:',
+              ),
+              (
+                  '    onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText }); },\n    pipeline: newsPipeline,',
+                  '    onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText }); },\n    isRuntimeEnabled: deps.isNewsRuntimeEnabled,\n    pipeline: newsPipeline,',
+              ),
+              (
+                  '    onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },\n  }));',
+                  '    onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },\n    isRuntimeEnabled: deps.isTopicsRuntimeEnabled,\n  }));',
+              ),
+          ]
+          for old, new in replacements:
+              count = runtime.count(old)
+              if count != 1:
+                  raise SystemExit(f"runtime-factory replacement expected once, found {count}: {old[:80]!r}")
+              runtime = runtime.replace(old, new)
+          runtime_path.write_text(runtime)
+          PY
+          fi
+
+          rm -f .github/pr239-conflicts.txt .github/workflows/resolve-pr-239.yml
+          git add -A
+
+          remaining="$(git diff --name-only --diff-filter=U)"
+          if [ -n "${remaining}" ]; then
+            echo "Unresolved files remain:"
+            printf '%s\n' "${remaining}"
+            exit 1
+          fi
+
+          git commit -m "Merge main and resolve PR #239 conflicts"
           git push origin HEAD:claude/github-issue-186-l1m80x
