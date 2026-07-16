@@ -475,6 +475,21 @@ test("ActionRunner: AI action success — dispatches action-final, enqueues the 
   assert.ok(trace.list().some((entry) => entry.status === "executed"));
 });
 
+test("ActionRunner: AI output-limit finish reason warns before EventSub speech", async () => {
+  const connector = { id: "c1", chat: async () => ({ text: "途中まで", finishReason: "max_tokens" }) };
+  const { runner, runtime, speech, dispatched } = makeRunner({ connectors: { c1: connector } });
+  const event = baseEvent("cheer", { bits: 10, message: "hi" });
+  const plan = makePlan(event, { id: "a1", kind: "ai-response", personaId: "p1" }, { generation: runtime.generations.current() });
+
+  await runner.execute(plan, { speak: true, notifyObs: false });
+
+  const warning = dispatched.find((entry) => entry.type === "action-warning");
+  assert.equal(warning.finishReason, "max_tokens");
+  assert.match(warning.message, /読み上げ処理による切断ではありません/);
+  assert.ok(dispatched.indexOf(warning) < dispatched.findIndex((entry) => entry.type === "action-final"));
+  assert.equal(speech.length, 1);
+});
+
 test("ActionRunner: AI action cancel — a mid-flight abort of the specific request produces a 'cancelled' result, no fallback, no speech", async () => {
   const { runner, runtime, speech, dispatched } = makeRunner({ connectors: { c1: hangingConnector() } });
   const event = baseEvent("cheer", { bits: 10 });

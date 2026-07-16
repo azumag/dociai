@@ -72,5 +72,51 @@ export function stripEmotes(text, emotesTag) {
   return out.replace(/\s+/g, " ").trim();
 }
 
+const emojiSegmenter = typeof Intl?.Segmenter === "function"
+  ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+  : null;
+const pictographicEmoji = /\p{Extended_Pictographic}/u;
+const emojiModifier = /^\p{Emoji_Modifier}$/u;
+const consecutiveEmojiModifiers = /(\p{Emoji_Modifier})(?:\s*\p{Emoji_Modifier})+/gu;
+const flagEmoji = /^\p{Regional_Indicator}{2}$/u;
+const keycapEmoji = /^[#*0-9]\uFE0F?\u20E3$/u;
+
+function isEmojiGrapheme(value) {
+  return pictographicEmoji.test(value) || emojiModifier.test(value) || flagEmoji.test(value) || keycapEmoji.test(value);
+}
+
+// Unicode絵文字の連続を、読み上げ対象の先頭1個へまとめる。ZWJ/肌色/VS16を含む
+// grapheme clusterはIntl.Segmenterで1絵文字として扱い、絵文字間の空白だけは連続扱いに
+// する。一方で句読点や通常文字を挟む場合は別の絵文字として残す。
+export function collapseConsecutiveEmojiRuns(text) {
+  // Intl.Segmenterは不正な単独modifier列を直前の通常文字と同じgraphemeへ含めることが
+  // あるため、modifierだけの連続はsegment分割より先に正規化する。
+  const input = String(text ?? "").replace(consecutiveEmojiModifiers, "$1");
+  if (!input || !emojiSegmenter) return input;
+  const output = [];
+  let emojiRun = false;
+  let pendingWhitespace = "";
+  for (const { segment } of emojiSegmenter.segment(input)) {
+    if (/^\s+$/u.test(segment) && emojiRun) {
+      pendingWhitespace += segment;
+      continue;
+    }
+    if (isEmojiGrapheme(segment)) {
+      if (!emojiRun) {
+        output.push(segment);
+        emojiRun = true;
+      }
+      pendingWhitespace = "";
+      continue;
+    }
+    if (pendingWhitespace) output.push(pendingWhitespace);
+    pendingWhitespace = "";
+    output.push(segment);
+    emojiRun = false;
+  }
+  if (pendingWhitespace) output.push(pendingWhitespace);
+  return output.join("");
+}
+
 // 将来のYouTubeアダプタもこの形で追加する:
 // export class YouTubeChatSource { id = "youtube"; start(onComment) { /* liveChatMessages polling */ } stop() {} }

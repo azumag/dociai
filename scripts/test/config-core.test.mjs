@@ -66,4 +66,6 @@ test("legacy commentReader voice fields migrate only into their selected engine 
   const defaults = commentReaderDefaults({ enabled: true, engine: "bouyomi" });
   assert.deepEqual(defaults.bouyomi, {}, "未指定の棒読みちゃん値は共通bouyomi設定へフォールバックさせる");
   assert.equal("speaker" in defaults.voicevox, false, "未指定speakerはvoicevox.defaultSpeakerへフォールバックさせる");
+  assert.equal(defaults.collapseConsecutiveEmoji, false);
+  assert.equal(commentReaderDefaults({ collapseConsecutiveEmoji: true }).collapseConsecutiveEmoji, true);
 });

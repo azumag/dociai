@@ -1,7 +1,8 @@
 // AIコネクタ抽象化 (issue #3)
 // ペルソナはconnector IDだけを参照し、プロバイダ差分はこのモジュールに閉じ込める。
 // インターフェース:
-//   connector.chat(messages, { maxTokens?, temperature? }) -> Promise<{ text, usage }>
+//   connector.chat(messages, { maxTokens?, temperature?, stream?, onToken? })
+//     -> Promise<{ text, usage, finishReason? }>
 //   connector.describe() -> { id, provider, model, apiKeyMasked }
 
 import { maskApiKey } from "./security.js";
@@ -14,7 +15,7 @@ const BASE_URLS = {
   minimax: "https://api.minimax.io/anthropic",
 };
 
-const DEFAULT_MAX_TOKENS = 300;
+const DEFAULT_MAX_TOKENS = 2048;
 const MAX_MAX_TOKENS = 32768;
 
 function boundedMaxTokens(value, fallback = DEFAULT_MAX_TOKENS) {
@@ -55,6 +56,69 @@ function abortableDelay(ms, signal) {
     const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
     const onAbort = () => { clearTimeout(timer); reject(signal.reason ?? new DOMException("Aborted", "AbortError")); };
     signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function readSseChatResponse(response, { id, signal, onToken = () => {}, extract }) {
+  if (!response.body) throw new ConnectorError(`${id}: ストリーム応答が空でした`, { kind: "empty" });
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+  let text = "";
+  let usage = null;
+  let finishReason = null;
+  const processLine = (line) => {
+    if (!line.startsWith("data:")) return;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === "[DONE]") return;
+    let event;
+    try { event = JSON.parse(payload); } catch { return; }
+    const update = extract(event);
+    if (typeof update.token === "string" && update.token) {
+      text += update.token;
+      onToken(update.token);
+    }
+    if (update.usage !== undefined) usage = update.usage;
+    if (typeof update.finishReason === "string" && update.finishReason) finishReason = update.finishReason;
+  };
+  try {
+    while (true) {
+      if (signal.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
+      const { done, value } = await reader.read();
+      pending += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? "";
+      for (const line of lines) processLine(line);
+      if (done) {
+        if (pending) processLine(pending);
+        break;
+      }
+    }
+  } finally { reader.releaseLock(); }
+  const trimmed = text.trim();
+  if (!trimmed) throw new ConnectorError(`${id}: 応答が空でした`, { kind: "empty" });
+  return { text: trimmed, usage, ...(finishReason ? { finishReason } : {}) };
+}
+
+function readOpenAiStream(response, options) {
+  return readSseChatResponse(response, {
+    ...options,
+    extract: (event) => ({
+      token: event.choices?.[0]?.delta?.content,
+      finishReason: event.choices?.[0]?.finish_reason,
+      usage: event.usage,
+    }),
+  });
+}
+
+function readMiniMaxStream(response, options) {
+  return readSseChatResponse(response, {
+    ...options,
+    extract: (event) => ({
+      token: event.delta?.text ?? event.content_block?.text,
+      finishReason: event.delta?.stop_reason,
+      usage: event.usage,
+    }),
   });
 }
 
@@ -270,7 +334,7 @@ class OpenAICompatibleConnector {
 
   async search(query, opts = {}) { return miniMaxSearch(this.id, this.baseUrl, this.#apiKey, this.timeoutMs, query, opts); }
 
-  async #chatOnce(messages, { maxTokens, temperature, signal: parentSignal } = {}) {
+  async #chatOnce(messages, { maxTokens, temperature, stream = false, onToken, signal: parentSignal } = {}) {
     const request = requestSignal(parentSignal, this.timeoutMs);
     let res;
     try {
@@ -284,27 +348,34 @@ class OpenAICompatibleConnector {
           // dociaiは内部思考を表示・読み上げない。OllamaのOpenAI互換APIでは
           // thinkingモデルに最終回答用の予算を残すため、reasoningを明示的に無効化する。
           ...(this.provider === "ollama" ? { reasoning_effort: "none" } : {}),
+          ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
           ...(temperature != null ? { temperature } : {}),
         }),
         signal: request.signal,
       });
     } catch (e) {
+      request.dispose();
       if (request.signal.aborted && request.wasCancelled()) throw cancelledError(this.id);
       if (e.name === "AbortError" || request.signal.aborted) {
         throw new ConnectorError(`${this.id}: ${formatTimeout(this.timeoutMs)}でタイムアウトしました`, { kind: "timeout" });
       }
       throw new ConnectorError(`${this.id}: 接続できません (${e.message})`, { kind: "network" });
-    } finally {
-      request.dispose();
     }
-
-    if (!res.ok) throw await this.#httpError(res);
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    const text = typeof content === "string" ? content.trim() : "";
-    if (!text) throw new ConnectorError(`${this.id}: 応答が空でした`, { kind: "empty" });
-    return { text, usage: data.usage ?? null };
+    try {
+      if (!res.ok) throw await this.#httpError(res);
+      if (stream) return await readOpenAiStream(res, { id: this.id, signal: request.signal, onToken });
+      const data = await res.json();
+      const choice = data.choices?.[0];
+      const content = choice?.message?.content;
+      const text = typeof content === "string" ? content.trim() : "";
+      if (!text) throw new ConnectorError(`${this.id}: 応答が空でした`, { kind: "empty" });
+      const finishReason = typeof choice?.finish_reason === "string" ? choice.finish_reason : null;
+      return { text, usage: data.usage ?? null, ...(finishReason ? { finishReason } : {}) };
+    } catch (error) {
+      if (request.signal.aborted && request.wasCancelled()) throw cancelledError(this.id);
+      if (request.signal.aborted) throw new ConnectorError(`${this.id}: ${formatTimeout(this.timeoutMs)}でタイムアウトしました`, { kind: "timeout" });
+      throw error;
+    } finally { request.dispose(); }
   }
 
   async #httpError(res) {
@@ -356,7 +427,7 @@ class MiniMaxConnector {
 
   async search(query, opts = {}) { return miniMaxSearch(this.id, this.baseUrl, this.#apiKey, this.timeoutMs, query, opts); }
 
-  async #chatOnce(messages, { maxTokens, temperature, signal: parentSignal } = {}) {
+  async #chatOnce(messages, { maxTokens, temperature, stream = false, onToken, signal: parentSignal } = {}) {
     const { system, messages: anthropicMessages } = toAnthropicMessages(messages);
     const request = requestSignal(parentSignal, this.timeoutMs);
     let res;
@@ -372,31 +443,37 @@ class MiniMaxConnector {
           model: this.model,
           messages: anthropicMessages,
           max_tokens: boundedMaxTokens(maxTokens, this.maxTokens),
+          ...(stream ? { stream: true } : {}),
           ...(system ? { system } : {}),
           ...(temperature != null ? { temperature } : {}),
         }),
         signal: request.signal,
       });
     } catch (e) {
+      request.dispose();
       if (request.signal.aborted && request.wasCancelled()) throw cancelledError(this.id);
       if (e.name === "AbortError" || request.signal.aborted) {
         throw new ConnectorError(`${this.id}: ${formatTimeout(this.timeoutMs)}でタイムアウトしました`, { kind: "timeout" });
       }
       throw new ConnectorError(`${this.id}: 接続できません (${e.message})`, { kind: "network" });
-    } finally {
-      request.dispose();
     }
-
-    if (!res.ok) throw await this.#httpError(res);
-
-    const data = await res.json();
-    const text = (data.content ?? [])
-      .filter((part) => part?.type === "text")
-      .map((part) => part.text)
-      .join("")
-      .trim();
-    if (!text) throw new ConnectorError(`${this.id}: 応答が空でした`, { kind: "empty" });
-    return { text, usage: data.usage ?? null };
+    try {
+      if (!res.ok) throw await this.#httpError(res);
+      if (stream) return await readMiniMaxStream(res, { id: this.id, signal: request.signal, onToken });
+      const data = await res.json();
+      const text = (data.content ?? [])
+        .filter((part) => part?.type === "text")
+        .map((part) => part.text)
+        .join("")
+        .trim();
+      if (!text) throw new ConnectorError(`${this.id}: 応答が空でした`, { kind: "empty" });
+      const finishReason = typeof data.stop_reason === "string" ? data.stop_reason : null;
+      return { text, usage: data.usage ?? null, ...(finishReason ? { finishReason } : {}) };
+    } catch (error) {
+      if (request.signal.aborted && request.wasCancelled()) throw cancelledError(this.id);
+      if (request.signal.aborted) throw new ConnectorError(`${this.id}: ${formatTimeout(this.timeoutMs)}でタイムアウトしました`, { kind: "timeout" });
+      throw error;
+    } finally { request.dispose(); }
   }
 
   async #httpError(res) {

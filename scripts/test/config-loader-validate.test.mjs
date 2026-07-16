@@ -66,6 +66,7 @@ test("validateConfig rejects malformed or out-of-range comment reader voice sett
     { webspeech: [] },
     { voicevox: [] },
     { bouyomi: [] },
+    { collapseConsecutiveEmoji: "yes" },
     { webspeech: { name: 3, rate: 0.49, pitch: 2.01 } },
     { voicevox: { speaker: 1.5, speed: 2.01, pitch: 0.16, intonation: -0.01, volume: 2.01 } },
     { bouyomi: { voice: -1, speed: 49, tone: 100.5, volume: 101 } },

@@ -12,13 +12,14 @@ function retryAfterMs(response: Response): number | undefined {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
 }
 
-async function streamResponse(response: Response, signal: AbortSignal, serviceId: string, onToken: (text: string) => void): Promise<{ text: string; usage: unknown }> {
+async function streamResponse(response: Response, signal: AbortSignal, serviceId: string, onToken: (text: string) => void): Promise<{ text: string; usage: unknown; finishReason?: string }> {
   if (!response.body) throw new ServiceError("EMPTY", "provider stream was empty", { serviceId, retryable: false });
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let pending = "";
   let text = "";
   let usage: unknown = null;
+  let finishReason: string | null = null;
   try {
     while (true) {
       if (signal.aborted) throw abortError(signal, serviceId);
@@ -30,10 +31,12 @@ async function streamResponse(response: Response, signal: AbortSignal, serviceId
         if (!line.startsWith("data:")) continue;
         const payload = line.slice(5).trim();
         if (!payload || payload === "[DONE]") continue;
-        let event: { choices?: Array<{ delta?: { content?: unknown } }>; usage?: unknown };
+        let event: { choices?: Array<{ delta?: { content?: unknown }; finish_reason?: unknown }>; usage?: unknown };
         try { event = JSON.parse(payload); } catch { continue; }
         const token = event.choices?.[0]?.delta?.content;
         if (typeof token === "string" && token) { text += token; onToken(token); }
+        const reason = event.choices?.[0]?.finish_reason;
+        if (typeof reason === "string" && reason) finishReason = reason;
         if (event.usage !== undefined) usage = event.usage;
       }
       if (done) break;
@@ -41,18 +44,20 @@ async function streamResponse(response: Response, signal: AbortSignal, serviceId
   } finally { reader.releaseLock(); }
   const trimmed = text.trim();
   if (!trimmed) throw new ServiceError("EMPTY", "provider response was empty", { serviceId, retryable: false });
-  return { text: trimmed, usage };
+  return { text: trimmed, usage, ...(finishReason ? { finishReason } : {}) };
 }
 
-export async function openAiCompatibleChat(fetchFn: typeof fetch, config: { id: string; provider: string; model: string; baseUrl: string; apiKey?: string }, messages: AiMessage[], options: ChatOptions, signal: AbortSignal): Promise<{ text: string; usage: unknown }> {
+export async function openAiCompatibleChat(fetchFn: typeof fetch, config: { id: string; provider: string; model: string; baseUrl: string; apiKey?: string }, messages: AiMessage[], options: ChatOptions, signal: AbortSignal): Promise<{ text: string; usage: unknown; finishReason?: string }> {
   let response: Response;
   try {
     response = await fetchFn(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, { method: "POST", signal, headers: { "Content-Type": "application/json", ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}), ...(config.provider === "openrouter" ? { "HTTP-Referer": "https://dociai.local", "X-Title": "dociai" } : {}) }, body: JSON.stringify({ model: config.model, messages, max_tokens: options.maxTokens, ...(config.provider === "ollama" ? { reasoning_effort: "none" } : {}), ...(options.stream ? { stream: true, stream_options: { include_usage: true } } : {}), ...(options.temperature !== undefined ? { temperature: options.temperature } : {}) }) });
   } catch (error) { throw signal.aborted || (error instanceof Error && error.name === "AbortError") ? abortError(signal, config.id) : new ServiceError("NETWORK", "provider connection failed", { serviceId: config.id }); }
   if (!response.ok) throw errorFromHttpStatus(response.status, { serviceId: config.id, retryAfterMs: retryAfterMs(response) });
   if (options.stream) return streamResponse(response, signal, config.id, options.onToken);
-  const data = await response.json() as { choices?: Array<{ message?: { content?: unknown } }>; usage?: unknown };
-  const text = typeof data.choices?.[0]?.message?.content === "string" ? data.choices[0].message.content.trim() : "";
+  const data = await response.json() as { choices?: Array<{ message?: { content?: unknown }; finish_reason?: unknown }>; usage?: unknown };
+  const choice = data.choices?.[0];
+  const text = typeof choice?.message?.content === "string" ? choice.message.content.trim() : "";
   if (!text) throw new ServiceError("EMPTY", "provider response was empty", { serviceId: config.id, retryable: false });
-  return { text, usage: data.usage ?? null };
+  const finishReason = typeof choice?.finish_reason === "string" ? choice.finish_reason : null;
+  return { text, usage: data.usage ?? null, ...(finishReason ? { finishReason } : {}) };
 }

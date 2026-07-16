@@ -6,6 +6,7 @@ import { RequestCancelledError, isCancellation } from "./runtime/request-registr
 import { MemoryItemProcessingStore } from "./readers/item-processing-store.js";
 import { createReaderItemKey, readerStatus, retryOptions } from "./readers/reader-runner.js";
 import { retryDecision } from "./readers/retry-policy.js";
+import { buildOutputLimitWarning, isOutputLimitFinishReason } from "./ai-finish-reason.js";
 
 function normalizeTitle(title) {
   return (title ?? "")
@@ -90,9 +91,11 @@ export class TopicReader {
         this.lastRunResult.processed++;
         try {
           const { messages, debugText } = this.contextBuilder.build({ persona, topic: item, includeScreen: "never" });
-          const { text } = await connector.chat(messages, { signal: context.signal, requestId: `${context.requestId ?? "topics"}:summary:${item.guid}`, generation: context.generation });
+          const result = await connector.chat(messages, { signal: context.signal, requestId: `${context.requestId ?? "topics"}:summary:${item.guid}`, generation: context.generation });
+          const { text } = result;
           if (!String(text ?? "").trim()) throw Object.assign(new Error("話題コメントが空です"), { kind: "empty" });
           this.#guard(context);
+          if (isOutputLimitFinishReason(result.finishReason)) this.log(buildOutputLimitWarning(result.finishReason, persona.connector), "warn");
           this.onRead({ persona, item, text, debugText });
           this.#guard(context);
           const queued = this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "topics" });

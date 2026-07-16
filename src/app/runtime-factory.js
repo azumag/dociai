@@ -15,7 +15,7 @@ import { ResponseCoordinator } from "./response-coordinator.js";
 import { AutomationCoordinator } from "./automation-coordinator.js";
 import { SourceCoordinator } from "./source-coordinator.js";
 import { WebResearcher } from "./web-researcher.js";
-import { TwitchChatSource, stripEmotes } from "../comment-sources.js";
+import { TwitchChatSource, collapseConsecutiveEmojiRuns, stripEmotes } from "../comment-sources.js";
 import { ElectronTwitchSource, subscribeStreamEventsThroughElectron } from "../platform/electron-services.js";
 import { listCaptureSources, selectCaptureSource } from "../platform/capture-adapter.js";
 import { ElectronIpcTransport } from "../obs/transports/electron-ipc-transport.js";
@@ -406,7 +406,8 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     const cr = config.commentReader;
     if (!cr?.enabled) return;
     if ((cr.ignoreUsers ?? []).some((user) => String(user).trim().toLowerCase() === comment.author.toLowerCase())) return;
-    const body = cr.skipEmotes && comment.emotes ? stripEmotes(comment.text, comment.emotes) : comment.text;
+    let body = cr.skipEmotes && comment.emotes ? stripEmotes(comment.text, comment.emotes) : comment.text;
+    if (cr.collapseConsecutiveEmoji) body = collapseConsecutiveEmojiRuns(body);
     if (!body.trim()) return;
     const text = cr.includeAuthor === false ? body : `${comment.author}: ${body}`;
     speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice: resolveCommentReaderVoice(cr, config), commentId: comment.id });
