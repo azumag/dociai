@@ -134,6 +134,65 @@ test("browser MiniMax connector honors configured maxTokens and per-call overrid
   }
 });
 
+test("MiniMax Web search uses the official endpoint in Browser and Electron without exposing the key", async () => {
+  const originalFetch = globalThis.fetch;
+  const browserCalls = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      browserCalls.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ organic: [{ title: "Latest", link: "https://example.com/latest", snippet: "summary", date: "2026-07-16" }], related_searches: [{ query: "related" }], base_resp: { status_code: 0 } }), { status: 200 });
+    };
+    const browser = createConnector("mini", { provider: "openai-compatible", model: "MiniMax-M3", baseUrl: "https://api.minimax.io/v1", apiKey: "browser-secret", retries: 0 });
+    const browserResult = await browser.search("latest topic");
+    assert.equal(browserCalls[0].url, "https://api.minimax.io/v1/coding_plan/search");
+    assert.equal(browserCalls[0].headers.Authorization, "Bearer browser-secret");
+    assert.deepEqual(browserCalls[0].body, { q: "latest topic" });
+    assert.equal(browserResult.results[0].title, "Latest");
+  } finally { globalThis.fetch = originalFetch; }
+
+  const { modules, directory } = await loadModules();
+  try {
+    const calls = [];
+    const deps = dependencies({ minimax: { provider: "openai-compatible", model: "MiniMax-M3", baseUrl: "https://api.minimax.io/v1", apiKeySecretRef: "connectors.minimax.apiKey", retries: 0 } }, { "connectors.minimax.apiKey": "main-secret" });
+    const service = new modules.AiService(deps.configRepository, deps.secretStore, async (url, init) => {
+      calls.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ organic: [{ title: "Main", link: "https://example.com/main", snippet: "facts" }], related_searches: [], base_resp: { status_code: 0 } }), { status: 200 });
+    });
+    const result = await service.search({ connectorId: "minimax", query: "topic", requestId: "search-request" });
+    assert.equal(calls[0].url, "https://api.minimax.io/v1/coding_plan/search");
+    assert.equal(calls[0].headers.Authorization, "Bearer main-secret");
+    assert.deepEqual(result, { results: [{ title: "Main", link: "https://example.com/main", snippet: "facts" }], relatedQueries: [], requestId: "search-request" });
+    assert.doesNotMatch(JSON.stringify(result), /main-secret/);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("Electron connector keeps Renderer generation out of Main search metadata", async () => {
+  const originalDociai = globalThis.dociai;
+  const seen = [];
+  try {
+    globalThis.dociai = { ai: { chat: async () => ({ ok: true, value: { text: "unused" } }), search: async (input) => { seen.push(input); return { ok: true, value: { results: [], relatedQueries: [], requestId: input.requestId } }; }, cancel: async () => ({ ok: true, value: { cancelled: true } }) } };
+    const connector = createConnector("mini", { provider: "minimax", model: "MiniMax-M3" });
+    await connector.search("topic", { generation: 7, requestId: "renderer-search" });
+    assert.equal(seen.length, 1);
+    assert.equal("generation" in seen[0], false, "Renderer and Main generations are independent");
+  } finally { if (originalDociai === undefined) delete globalThis.dociai; else globalThis.dociai = originalDociai; }
+});
+
+test("AiService registers Web search before async config lookup so early cancellation prevents a paid call", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    let releaseConfig;
+    let fetchCalls = 0;
+    const configPending = new Promise((resolve) => { releaseConfig = resolve; });
+    const service = new modules.AiService({ getPublic: () => configPending }, { getForService: async () => "secret" }, async () => { fetchCalls += 1; return new Response("{}"); });
+    const pending = service.search({ connectorId: "minimax", query: "topic", requestId: "early-cancel" });
+    assert.equal(service.cancel("early-cancel"), true);
+    releaseConfig({ config: { connectors: { minimax: { provider: "minimax", model: "MiniMax-M3", retries: 0 } } } });
+    await assert.rejects(pending, (error) => error.code === "CANCELLED");
+    assert.equal(fetchCalls, 0);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("AiService delivers SSE tokens with request/generation and rejects empty streams", async () => {
   const { modules, directory } = await loadModules();
   try {

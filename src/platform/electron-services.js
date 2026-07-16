@@ -7,6 +7,10 @@ export async function chatThroughElectron(input) {
   return globalThis.dociai.ai.chat(input);
 }
 
+export async function searchThroughElectron(input) {
+  return globalThis.dociai.ai.search(input);
+}
+
 export async function cancelElectronAiRequest(requestId) {
   return globalThis.dociai.ai.cancel(requestId);
 }

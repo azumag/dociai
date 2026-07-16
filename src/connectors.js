@@ -5,7 +5,7 @@
 //   connector.describe() -> { id, provider, model, apiKeyMasked }
 
 import { maskApiKey } from "./security.js";
-import { cancelElectronAiRequest, chatThroughElectron, hasElectronAiService } from "./platform/electron-services.js";
+import { cancelElectronAiRequest, chatThroughElectron, hasElectronAiService, searchThroughElectron } from "./platform/electron-services.js";
 
 const BASE_URLS = {
   openai: "https://api.openai.com/v1",
@@ -109,6 +109,22 @@ class ElectronMainConnector {
     });
   }
 
+  async search(query, opts = {}) {
+    const requestId = opts.requestId ?? `renderer-search-${Date.now()}-${++this.#sequence}`;
+    if (opts.signal?.aborted) throw cancelledError(this.id);
+    // Renderer AppRuntimeとMain AiServiceのgenerationは別系統。chat()と同様にMainへは
+    // generationを送らず、Renderer側のAbortSignal/runtime.guard()でstale結果を破棄する。
+    const response = searchThroughElectron({ connectorId: this.id, query, requestId, ownerId: "console" });
+    const result = await new Promise((resolve, reject) => {
+      const cancel = () => { void cancelElectronAiRequest(requestId); reject(cancelledError(this.id)); };
+      opts.signal?.addEventListener("abort", cancel, { once: true });
+      response.then(resolve, reject).finally(() => opts.signal?.removeEventListener("abort", cancel));
+    });
+    if (result?.ok) return result.value;
+    const error = result?.error ?? { code: "UNKNOWN", message: "Main processから検索結果を取得できませんでした" };
+    throw new ConnectorError(`${this.id}: ${error.message}`, { kind: SERVICE_ERROR_KINDS[error.code] ?? "unknown" });
+  }
+
   async cancel(requestId) {
     const result = await cancelElectronAiRequest(requestId);
     return Boolean(result?.ok && result.value.cancelled);
@@ -134,6 +150,50 @@ async function chatWithRetry(id, retries, log, chatOnce, ...args) {
       log(`${id}: タイムアウトのため再試行します (${attempt}/${maxAttempts - 1})`);
     }
   }
+}
+
+const MINIMAX_SEARCH_HOSTS = new Set(["api.minimax.io", "api.minimaxi.com"]);
+
+function miniMaxSearchUrl(baseUrl, id) {
+  let parsed;
+  try { parsed = new URL(baseUrl); } catch { throw new ConnectorError(`${id}: MiniMax base URLが不正です`, { kind: "bad_request" }); }
+  if (parsed.protocol !== "https:" || !MINIMAX_SEARCH_HOSTS.has(parsed.hostname)) throw new ConnectorError(`${id}: Web検索には公式MiniMax API hostを指定してください`, { kind: "bad_request" });
+  return new URL("/v1/coding_plan/search", parsed.origin).toString();
+}
+
+async function miniMaxSearch(id, baseUrl, apiKey, timeoutMs, query, { signal: parentSignal } = {}) {
+  const normalizedQuery = String(query ?? "").trim();
+  if (!normalizedQuery || normalizedQuery.length > 500) throw new ConnectorError(`${id}: 検索queryが不正です`, { kind: "bad_request" });
+  const request = requestSignal(parentSignal, timeoutMs);
+  let res;
+  try {
+    res = await fetch(miniMaxSearchUrl(baseUrl, id), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "MM-API-Source": "dociai" },
+      body: JSON.stringify({ q: normalizedQuery }),
+      signal: request.signal,
+    });
+  } catch (error) {
+    if (request.signal.aborted && request.wasCancelled()) throw cancelledError(id);
+    if (error.name === "AbortError" || request.signal.aborted) throw new ConnectorError(`${id}: ${formatTimeout(timeoutMs)}でタイムアウトしました`, { kind: "timeout" });
+    throw new ConnectorError(`${id}: MiniMax検索に接続できません (${error.message})`, { kind: "network" });
+  } finally { request.dispose(); }
+  if (!res.ok) {
+    const kind = res.status === 401 || res.status === 403 ? "auth" : res.status === 429 ? "rate_limit" : res.status >= 500 ? "server" : "bad_request";
+    throw new ConnectorError(`${id}: MiniMax検索エラー (HTTP ${res.status})`, { kind });
+  }
+  const data = await res.json();
+  if (data?.base_resp?.status_code !== undefined && data.base_resp.status_code !== 0) {
+    throw new ConnectorError(`${id}: MiniMax検索エラー (${data.base_resp.status_code})`, { kind: data.base_resp.status_code === 1004 ? "auth" : "bad_request" });
+  }
+  const results = (Array.isArray(data?.organic) ? data.organic : []).flatMap((entry) => {
+    const title = typeof entry?.title === "string" ? entry.title.trim() : "";
+    const link = typeof entry?.link === "string" ? entry.link.trim() : "";
+    if (!title || !/^https?:\/\//i.test(link)) return [];
+    return [{ title: title.slice(0, 300), link: link.slice(0, 2048), snippet: String(entry.snippet ?? "").trim().slice(0, 2000), ...(typeof entry.date === "string" && entry.date.trim() ? { date: entry.date.trim().slice(0, 100) } : {}) }];
+  }).slice(0, 20);
+  const relatedQueries = (Array.isArray(data?.related_searches) ? data.related_searches : []).map((entry) => String(entry?.query ?? "").trim()).filter(Boolean).slice(0, 10);
+  return { results, relatedQueries };
 }
 
 function dataUrlToAnthropicSource(url) {
@@ -207,6 +267,8 @@ class OpenAICompatibleConnector {
   async chat(messages, opts = {}) {
     return chatWithRetry(this.id, this.retries, this.log, (...args) => this.#chatOnce(...args), messages, opts);
   }
+
+  async search(query, opts = {}) { return miniMaxSearch(this.id, this.baseUrl, this.#apiKey, this.timeoutMs, query, opts); }
 
   async #chatOnce(messages, { maxTokens, temperature, signal: parentSignal } = {}) {
     const request = requestSignal(parentSignal, this.timeoutMs);
@@ -291,6 +353,8 @@ class MiniMaxConnector {
   async chat(messages, opts = {}) {
     return chatWithRetry(this.id, this.retries, this.log, (...args) => this.#chatOnce(...args), messages, opts);
   }
+
+  async search(query, opts = {}) { return miniMaxSearch(this.id, this.baseUrl, this.#apiKey, this.timeoutMs, query, opts); }
 
   async #chatOnce(messages, { maxTokens, temperature, signal: parentSignal } = {}) {
     const { system, messages: anthropicMessages } = toAnthropicMessages(messages);

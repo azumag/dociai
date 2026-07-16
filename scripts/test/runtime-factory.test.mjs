@@ -136,12 +136,13 @@ test("buildDociaiRuntime wires a candidate bundle in dependency order without st
   const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
 
   assert.deepEqual(bundle.names(), [
-    "connectors", "personaRouter", "speechQueue", "contextBuilder",
+    "connectors", "personaRouter", "speechQueue", "webResearcher", "contextBuilder",
     "responseCoordinator", "eventTriggerRunner", "automationCoordinator", "newsReader", "topicReader",
     "triggerEngine", "sourceCoordinator",
   ]);
   assert.equal(calls.onSecrets.length, 1);
   assert.equal(bundle.get("connectors").size, 1);
+  assert.equal(bundle.get("webResearcher").enabled, false);
   assert.equal(bundle.get("screenContext"), null);
   assert.equal(bundle.get("micMonitor"), null);
   assert.equal(bundle.get("sourceCoordinator").sources.size, 0, "sourceCoordinator.replace() must only run on start(), not create");

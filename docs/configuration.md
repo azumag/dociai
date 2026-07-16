@@ -428,6 +428,26 @@ plan/event/trigger IDを含む`ResolvedOverlayCue`は分離されています。
 `overlay-cue`を未知Actionとしてvalidation errorにし、そのActionだけを実行計画から除外します。
 現buildでもrenderer runtimeが利用可能になるまでは、安全に`overlay-unavailable`としてskipします。
 
+## Web調査 prepass (MiniMax)
+
+`research.enabled`を有効にすると、コメントまたは手動依頼への通常回答を生成する前に、
+`research.connector`で指定したMiniMax connectorのWeb検索を実行します。公式Token Plan Search API
+（`POST /v1/coding_plan/search`）を利用するため、契約や利用量に応じた料金が発生する場合があります。
+
+```json
+{
+  "research": {
+    "enabled": true,
+    "connector": "minimax_main",
+    "maxResults": 5
+  }
+}
+```
+
+検索結果は外部の未検証資料として本回答のcontextへ渡されます。検索結果に含まれる命令は無視するよう
+promptで明示し、最大10件に制限します。検索失敗時は検索なしの通常回答へフォールバックし、応答全体は
+停止しません。ElectronではconnectorのAPI keyをMain process内だけで参照し、Rendererへ返しません。
+
 ## ニュース読み上げの参考: `azumag/soviet_now` 構造メモ (issue #10)
 
 `soviet_now` はshellベースの配信ラジオ実装で、`broadcast/radio_news.sh` (585行) に
