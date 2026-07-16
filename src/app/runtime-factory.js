@@ -372,6 +372,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     speechQueue,
     log: deps.log,
     onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText }); },
+    isRuntimeEnabled: deps.isNewsRuntimeEnabled,
   }));
 
   const topicReader = define("topicReader", () => new TopicReader({
@@ -383,6 +384,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     webResearcher,
     log: deps.log,
     onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },
+    isRuntimeEnabled: deps.isTopicsRuntimeEnabled,
   }));
 
   const handleTrigger = expose("handleTrigger", (triggerId, options = {}) => {

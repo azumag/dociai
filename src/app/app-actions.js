@@ -91,6 +91,8 @@ export function createAppActions({
     },
     readNews: () => { render.news?.(); component("automationCoordinator")?.run("news", component("newsReader")); },
     readTopics: () => { render.topics?.(); component("automationCoordinator")?.run("topics", component("topicReader")); },
+    setNewsEnabled: (enabled) => { store.dispatch({ type: "set", key: "newsRuntimeEnabled", value: enabled }); render.news?.(); },
+    setTopicsEnabled: (enabled) => { store.dispatch({ type: "set", key: "topicsRuntimeEnabled", value: enabled }); render.topics?.(); },
     reconnectTwitch: () => {
       const source = component("sourceCoordinator")?.sources.get("twitch");
       if (source?.reconnectNow?.()) log("Twitchチャットを手動再接続します");

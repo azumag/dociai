@@ -20,6 +20,8 @@ export function createAppState(overrides = {}) {
     speakingPersonaId: null,
     manualSpeechHold: false,
     micBargeInEnabled: true,
+    newsRuntimeEnabled: true,
+    topicsRuntimeEnabled: true,
     lastDebug: null,
     obs: null,
     runtime: null,

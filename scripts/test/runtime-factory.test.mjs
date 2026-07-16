@@ -217,6 +217,52 @@ test("micMonitor only interrupts AI speech (speechQueue.hold(\"mic\")) while dep
   assert.equal(speechQueue.paused, false, "toggling barge-in off must release an already-held mic hold");
 });
 
+test("newsReader/topicReader stay gated by config.news.enabled/config.topics.enabled but also pause per-session via deps.isNewsRuntimeEnabled()/isTopicsRuntimeEnabled(), without mutating config", async () => {
+  const config = minimalConfig({
+    personas: [{ id: "p1", name: "P1", connector: "mock", triggers: ["newsTrigger"] }],
+    news: { enabled: true, trigger: "newsTrigger", sources: [] },
+    topics: { enabled: true, trigger: "newsTrigger", sources: [] },
+  });
+  let newsRuntimeEnabled = true;
+  let topicsRuntimeEnabled = true;
+  const { deps } = fakeDeps({
+    isNewsRuntimeEnabled: () => newsRuntimeEnabled,
+    isTopicsRuntimeEnabled: () => topicsRuntimeEnabled,
+  });
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+
+  const newsReader = bundle.get("newsReader");
+  const topicReader = bundle.get("topicReader");
+  const responseCoordinator = bundle.get("responseCoordinator");
+  const automationCoordinator = bundle.get("automationCoordinator");
+  const runCalls = [];
+  automationCoordinator.run = (kind) => { runCalls.push(kind); return Promise.resolve(); };
+  let responseCalls = 0;
+  responseCoordinator.handleTrigger = () => { responseCalls += 1; return []; };
+  const handleTrigger = bundle.get("handleTrigger");
+
+  assert.equal(newsReader.enabled, true);
+  assert.equal(topicReader.enabled, true);
+  handleTrigger("newsTrigger");
+  assert.deepEqual(runCalls, ["news", "topics"], "both automations run while both runtime toggles are on");
+  assert.equal(responseCalls, 0);
+
+  newsRuntimeEnabled = false;
+  assert.equal(newsReader.enabled, false, "the session toggle gates .enabled independently of config");
+  assert.equal(config.news.enabled, true, "toggling the main-screen switch must never mutate config");
+  runCalls.length = 0;
+  handleTrigger("newsTrigger");
+  assert.deepEqual(runCalls, ["topics"], "news automation is skipped once its runtime toggle is off; topics (still on) keeps handling the shared trigger");
+  assert.equal(responseCalls, 0);
+
+  topicsRuntimeEnabled = false;
+  runCalls.length = 0;
+  handleTrigger("newsTrigger");
+  assert.deepEqual(runCalls, [], "both automations paused once both runtime toggles are off");
+  assert.equal(responseCalls, 1, "with no automation left to claim the shared trigger, it falls back to a normal persona response");
+  assert.equal(config.topics.enabled, true, "toggling the main-screen switch must never mutate config");
+});
+
 test("starting a candidate bundle activates the trigger engine and comment sources", async () => {
   // TriggerEngine.start() always binds a "keydown" listener, even with no hotkey triggers
   // configured — same window shim scripts/test/electron-shortcut.test.mjs uses.

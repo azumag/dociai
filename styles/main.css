@@ -597,8 +597,8 @@ a { color: var(--focus); }
 .reader-failure span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .reader-failure button { padding: 3px 6px; font-size: 11px; }
 
-/* ---- マイク監視: 割り込みトグル ---- */
-.mic-bargein-toggle {
+/* ---- マイク監視の割り込みトグル / ニュース・話題パネルの自動読み上げトグル ---- */
+.mic-bargein-toggle, .reader-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
