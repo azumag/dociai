@@ -36,7 +36,7 @@ function parseDate(value) {
 }
 
 export class NewsReader {
-  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now() }) {
+  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now(), isRuntimeEnabled = () => true }) {
     this.config = config;
     this.getConnector = getConnector;
     this.personaRouter = personaRouter;
@@ -46,6 +46,7 @@ export class NewsReader {
     this.onRead = onRead;
     this.store = store;
     this.clock = clock;
+    this.isRuntimeEnabled = isRuntimeEnabled;
     this.generation = 0;
     this.busy = false;
     this.lastRunAt = null;
@@ -58,8 +59,10 @@ export class NewsReader {
     return new Set(this.store.list({ states: "read" }).map((record) => record.guid ?? record.key));
   }
 
+  // config.news.enabled (設定保存が必要) と、操作卓のトグル (即時・セッション限りの一時停止)
+  // の両方が立っているときだけ有効。
   get enabled() {
-    return !!this.config.news?.enabled;
+    return !!this.config.news?.enabled && this.isRuntimeEnabled();
   }
 
   // トリガー (interval/manual) から呼ばれるエントリポイント
@@ -67,6 +70,10 @@ export class NewsReader {
     const news = this.config.news;
     if (!news?.enabled) {
       this.log("ニュース機能は無効です (news.enabled: false)");
+      return;
+    }
+    if (!this.isRuntimeEnabled()) {
+      this.log("ニュース機能は操作卓のトグルで一時停止中です");
       return;
     }
     if (this.busy) {

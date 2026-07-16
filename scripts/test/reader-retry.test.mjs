@@ -139,6 +139,41 @@ test("NewsReader preserves unread items for missing/auth connectors and resets a
   assert.equal(cancelled.status().counts.unread, 1, "stale generation cannot mark a late response read");
 });
 
+test("NewsReader/TopicReader stay enabled per config.news.enabled/config.topics.enabled but pause once isRuntimeEnabled() reports the main-screen toggle is off", async () => {
+  const now = { value: 1_000 };
+  let newsRuntimeEnabled = true;
+  const news = new NewsReader({
+    config: { news: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    isRuntimeEnabled: () => newsRuntimeEnabled,
+  });
+  news.fetchAll = async () => news.refineItems([{ guid: "news-only", title: "news-only", sourceName: "source", publishedAt: "2026-07-02T10:00:00Z" }]);
+
+  assert.equal(news.enabled, true);
+  await news.run({ generation: 1 });
+  assert.equal(news.status().counts.read, 1, "runs normally while the toggle is on");
+
+  newsRuntimeEnabled = false;
+  assert.equal(news.enabled, false, "config.news.enabled stays true — only the session toggle flips .enabled");
+  news.fetchAll = async () => news.refineItems([{ guid: "news-second", title: "news-second", sourceName: "source", publishedAt: "2026-07-02T11:00:00Z" }]);
+  await news.run({ generation: 1 });
+  assert.equal(news.status().counts.read, 1, "paused: no new item is processed while the toggle is off");
+
+  let topicsRuntimeEnabled = true;
+  const topics = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    isRuntimeEnabled: () => topicsRuntimeEnabled,
+  });
+  topics.fetchAll = async () => topics.refineItems([{ guid: "topic-only", title: "topic-only", sourceName: "todoist" }]);
+  assert.equal(topics.enabled, true);
+
+  topicsRuntimeEnabled = false;
+  assert.equal(topics.enabled, false, "config.topics.enabled stays true — only the session toggle flips .enabled");
+  await topics.run({ generation: 1 });
+  assert.equal(topics.status().counts.read, 0, "paused before any topic is picked up");
+});
+
 test("TopicReader applies the same retry lifecycle and stops permanent-error loops", async () => {
   const now = { value: 1_000 };
   let calls = 0;

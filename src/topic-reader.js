@@ -22,7 +22,7 @@ function parseDate(value) {
 }
 
 export class TopicReader {
-  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, webResearcher = null, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now() }) {
+  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, webResearcher = null, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now(), isRuntimeEnabled = () => true }) {
     this.config = config;
     this.getConnector = getConnector;
     this.personaRouter = personaRouter;
@@ -33,6 +33,7 @@ export class TopicReader {
     this.onRead = onRead;
     this.store = store;
     this.clock = clock;
+    this.isRuntimeEnabled = isRuntimeEnabled;
     this.generation = 0;
     this.busy = false;
     this.lastRunAt = null;
@@ -44,14 +45,20 @@ export class TopicReader {
     return new Set(this.store.list({ states: "read" }).map((record) => record.guid ?? record.key));
   }
 
+  // config.topics.enabled (設定保存が必要) と、操作卓のトグル (即時・セッション限りの一時停止)
+  // の両方が立っているときだけ有効。
   get enabled() {
-    return !!this.config.topics?.enabled;
+    return !!this.config.topics?.enabled && this.isRuntimeEnabled();
   }
 
   async run(context = {}) {
     const topics = this.config.topics;
     if (!topics?.enabled) {
       this.log("話題機能は無効です (topics.enabled: false)");
+      return;
+    }
+    if (!this.isRuntimeEnabled()) {
+      this.log("話題機能は操作卓のトグルで一時停止中です");
       return;
     }
     if (this.busy) {
