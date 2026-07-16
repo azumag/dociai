@@ -72,14 +72,7 @@ export class TopicReader {
       this.log(`話題候補 ${items.length}件 (再処理可能 ${candidateKeys.size}件、読み上げ ${picks.length}件)`);
       if (!picks.length) return;
 
-      const persona = (topics.persona && this.personaRouter.get(topics.persona)) || this.personaRouter.defaultPersona();
-      if (!persona) throw new Error("話題読み上げに使えるペルソナがありません");
-      if (!persona.enabled) {
-        this.log(`話題担当ペルソナ「${persona.name}」が無効化中のためスキップしました`);
-        return;
-      }
-      const connector = this.#getConnector(persona);
-      if (!connector) return;
+      if (!this.#hasUsablePersonaConfig(topics)) throw new Error("話題読み上げに使えるペルソナがありません");
       if (typeof this.speechQueue?.enqueue !== "function") {
         this.log("話題音声キューが利用できません。item は未読のままです", "error");
         return;
@@ -87,6 +80,13 @@ export class TopicReader {
 
       for (const item of picks) {
         this.#guard(context);
+        const persona = this.#resolvePersona(topics);
+        if (!persona || !persona.enabled) {
+          if (persona) this.log(`話題担当ペルソナ「${persona.name}」が無効化中のためスキップしました`);
+          continue;
+        }
+        const connector = this.#getConnector(persona);
+        if (!connector) continue;
         const record = this.store.begin(item.processingKey, this.generation, this.clock());
         if (!record) continue;
         this.lastRunResult.processed++;
@@ -266,6 +266,24 @@ export class TopicReader {
       this.log(`話題のWeb調査prepassに失敗しました [${item.title}]: ${error.message}`, "warn");
       return null;
     }
+  }
+
+  // 実行前の設定不備チェック用。乱数は消費せず「そもそも解決しうるペルソナ設定があるか」だけを見る
+  // (有効/無効の判定はitemごとの#resolvePersonaに任せる)。
+  #hasUsablePersonaConfig(topics) {
+    if (topics.randomPersona && Array.isArray(topics.personas) && topics.personas.length) return true;
+    return !!((topics.persona && this.personaRouter.get(topics.persona)) || this.personaRouter.defaultPersona());
+  }
+
+  // topics.randomPersona が有効な場合、topics.personas (有効なものだけ) から毎item抽選する。
+  // これにより同じ実行内でも話題ごとに担当ペルソナが変わりうる。無効時/候補が尽きた場合は
+  // 従来通り topics.persona → router.defaultPersona の順にフォールバックする。
+  #resolvePersona(topics) {
+    if (topics.randomPersona && Array.isArray(topics.personas) && topics.personas.length) {
+      const candidates = topics.personas.map((id) => this.personaRouter.get(id)).filter((p) => p?.enabled);
+      if (candidates.length) return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+    return (topics.persona && this.personaRouter.get(topics.persona)) || this.personaRouter.defaultPersona();
   }
 
   #getConnector(persona) {

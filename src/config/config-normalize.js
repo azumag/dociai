@@ -5,5 +5,6 @@ export function normalizeConfig(config) {
   const twitch = copy.commentSources?.twitch;
   if (twitch) twitch.channels = dedupe(twitch.channels).map((channel) => channel.toLowerCase().replace(/^#/, ""));
   for (const source of [...(copy.news?.sources ?? []), ...(copy.topics?.sources ?? [])]) if (source?.name) source.name = String(source.name).trim();
+  if (copy.topics) copy.topics.personas = dedupe(copy.topics.personas);
   return copy;
 }

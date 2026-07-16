@@ -198,6 +198,8 @@
     "enabled": false,
     "trigger": "topics_every_15min",
     "persona": "partner_ai",
+    "randomPersona": false,
+    "personas": ["partner_ai"],
     "sources": [
       {
         "name": "配信ネタ (Todoist)",
