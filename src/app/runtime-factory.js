@@ -10,6 +10,7 @@ import { MicMonitor } from "../mic-monitor.js";
 import { ContextBuilder } from "../context-builder.js";
 import { NewsReader } from "../news-reader.js";
 import { createNewsPipelineCoordinator } from "../news/news-pipeline-coordinator.js";
+import { NewsScheduleRunner } from "../news/delivery/news-schedule-runner.js";
 import { TopicReader } from "../topic-reader.js";
 import { TriggerEngine } from "../trigger-engine.js";
 import { ResponseCoordinator } from "./response-coordinator.js";
@@ -429,6 +430,15 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   const triggerEngine = define(
     "triggerEngine",
     () => new TriggerEngine(config.triggers, { onFire: (...args) => { if (isCurrent()) handleTrigger(...args); }, log: deps.log }),
+    (instance) => ({ start: () => instance.start(), stop: () => instance.stop() }),
+  );
+
+  // Issue #193: config.news.scheduleの時刻slot起動。TriggerEngineのinterval/hotkeyとは別の
+  // 独立したcomponent — config.news.scheduleが無い/enabled: falseの既存設定では#tick()が
+  // 即returnするだけなので、既存挙動への影響は無い (opt-inのみ)。
+  define(
+    "newsScheduleRunner",
+    () => new NewsScheduleRunner({ getConfig: () => config, automationCoordinator, getReader: () => newsReader, isCurrent, log: deps.log }),
     (instance) => ({ start: () => instance.start(), stop: () => instance.stop() }),
   );
 

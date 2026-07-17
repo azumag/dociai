@@ -208,6 +208,31 @@ export function validateConfig(cfg) {
     if (cfg.news.persona && !(cfg.personas ?? []).some((p) => p?.id === cfg.news.persona)) {
       errors.push(`news.persona "${cfg.news.persona}" が personas に存在しません`);
     }
+    // news.schedule (issue #193): 時刻slot起動。既存configには存在しない完全にoptionalな
+    // 追加field — 未指定ならNewsScheduleRunnerは何もしない (既存挙動に影響しない)。
+    if (cfg.news.schedule !== undefined) {
+      const schedule = cfg.news.schedule;
+      if (!schedule || typeof schedule !== "object") {
+        errors.push("news.schedule はオブジェクトで指定してください");
+      } else {
+        if (schedule.slots !== undefined && !Array.isArray(schedule.slots)) {
+          errors.push("news.schedule.slots は配列で指定してください");
+        } else {
+          (schedule.slots ?? []).forEach((slot, i) => {
+            const label = `news.schedule.slots[${slot?.id ?? i}]`;
+            if (!slot || typeof slot !== "object") { errors.push(`${label} がオブジェクトではありません`); return; }
+            if (!slot.id) errors.push(`${label}.id がありません`);
+            if (!Number.isFinite(slot.minute) || slot.minute < 0 || slot.minute >= 24 * 60) errors.push(`${label}.minute は0以上1440未満の数値で指定してください`);
+            if (slot.mode && !KNOWN_NEWS_MODES.includes(slot.mode)) errors.push(`${label}.mode "${slot.mode}" は未対応です (対応: ${KNOWN_NEWS_MODES.join(", ")})`);
+            if (slot.daysOfWeek !== undefined && (!Array.isArray(slot.daysOfWeek) || slot.daysOfWeek.some((d) => !Number.isInteger(d) || d < 0 || d > 6))) {
+              errors.push(`${label}.daysOfWeek は0(日)〜6(土)の整数配列で指定してください`);
+            }
+          });
+        }
+        if (schedule.cooldownMinutes !== undefined && (typeof schedule.cooldownMinutes !== "number" || schedule.cooldownMinutes < 0)) errors.push("news.schedule.cooldownMinutes は0以上の数値で指定してください");
+        if (schedule.maxRunsPerHour !== undefined && (typeof schedule.maxRunsPerHour !== "number" || schedule.maxRunsPerHour < 0)) errors.push("news.schedule.maxRunsPerHour は0以上の数値で指定してください");
+      }
+    }
   }
 
   // topics (Todoistなどの配信ネタ)

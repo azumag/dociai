@@ -5,6 +5,7 @@ import { buildAttributions, hasUnattributableRequiredSource } from "../../src/ne
 import { createNewsSpeechMetadata } from "../../src/news/delivery/news-delivery-contract.js";
 import { decideQueueAcceptance } from "../../src/news/delivery/news-queue-policy.js";
 import { buildSlotKey, jitterDelayMs, resolveDueSlot } from "../../src/news/delivery/news-schedule-policy.js";
+import { NewsScheduleRunner } from "../../src/news/delivery/news-schedule-runner.js";
 import { createNewsDeliveryStage } from "../../src/news/stages/deliver-stage.js";
 import { PipelineStageError } from "../../src/news/contracts.js";
 
@@ -175,4 +176,73 @@ test("createNewsDeliveryStage defers when the newstalk queue is above the config
     (error) => error instanceof PipelineStageError && error.retryable === true,
   );
   assert.equal(speechQueue.enqueued.length, 0);
+});
+
+function fakeAutomationCoordinator() {
+  const runs = [];
+  return { runs, run(kind, reader) { runs.push({ kind, reader }); return Promise.resolve(); } };
+}
+
+test("NewsScheduleRunner.start()/stop() arm and disarm a single poll timer via the injected setInterval/clearInterval", () => {
+  const armed = [];
+  const cleared = [];
+  const runner = new NewsScheduleRunner({
+    getConfig: () => ({ news: {} }),
+    automationCoordinator: fakeAutomationCoordinator(),
+    getReader: () => ({ enabled: true }),
+    setIntervalFn: (fn, ms) => { armed.push(ms); return "timer-1"; },
+    clearIntervalFn: (id) => cleared.push(id),
+  });
+  runner.start();
+  runner.start(); // idempotent: must not arm a second timer
+  assert.deepEqual(armed, [30_000]);
+  runner.stop();
+  runner.stop(); // idempotent: must not clear twice
+  assert.deepEqual(cleared, ["timer-1"]);
+});
+
+test("NewsScheduleRunner.tick() is a no-op when the schedule is disabled/absent, the reader is off, or the runtime generation is stale", () => {
+  const coordinator = fakeAutomationCoordinator();
+  const slots = [{ id: "morning", minute: 9 * 60 }];
+  const now = new Date(2026, 0, 5, 9, 0).getTime(); // Monday 09:00 local
+
+  new NewsScheduleRunner({ getConfig: () => ({ news: {} }), automationCoordinator: coordinator, getReader: () => ({ enabled: true }), clock: () => now }).tick();
+  new NewsScheduleRunner({ getConfig: () => ({ news: { schedule: { enabled: false, slots } } }), automationCoordinator: coordinator, getReader: () => ({ enabled: true }), clock: () => now }).tick();
+  new NewsScheduleRunner({ getConfig: () => ({ news: { schedule: { enabled: true, slots } } }), automationCoordinator: coordinator, getReader: () => ({ enabled: false }), clock: () => now }).tick();
+  new NewsScheduleRunner({ getConfig: () => ({ news: { schedule: { enabled: true, slots } } }), automationCoordinator: coordinator, getReader: () => ({ enabled: true }), isCurrent: () => false, clock: () => now }).tick();
+  assert.deepEqual(coordinator.runs, []);
+});
+
+test("NewsScheduleRunner.tick() fires automationCoordinator.run('news', reader) exactly once per due slot per day, and again on the next day's tolerance window", () => {
+  const coordinator = fakeAutomationCoordinator();
+  const reader = { enabled: true };
+  const slots = [{ id: "morning", minute: 9 * 60, toleranceMinutes: 10 }];
+  let now = new Date(2026, 0, 5, 9, 2).getTime(); // Monday 09:02
+  const runner = new NewsScheduleRunner({ getConfig: () => ({ news: { schedule: { enabled: true, slots } } }), automationCoordinator: coordinator, getReader: () => reader, clock: () => now });
+
+  runner.tick();
+  assert.deepEqual(coordinator.runs, [{ kind: "news", reader }]);
+
+  now += 60_000; // still within tolerance, same slot key (same day) — must not refire
+  runner.tick();
+  assert.equal(coordinator.runs.length, 1);
+
+  now = new Date(2026, 0, 6, 9, 2).getTime(); // Tuesday, a new day => a new slot key
+  runner.tick();
+  assert.equal(coordinator.runs.length, 2);
+});
+
+test("NewsScheduleRunner.tick() honors cooldownMinutes and maxRunsPerHour across successive slots", () => {
+  const coordinator = fakeAutomationCoordinator();
+  const reader = { enabled: true };
+  const slots = [{ id: "a", minute: 9 * 60 }, { id: "b", minute: 9 * 60 + 5, toleranceMinutes: 2 }];
+  let now = new Date(2026, 0, 5, 9, 0).getTime();
+  const runner = new NewsScheduleRunner({ getConfig: () => ({ news: { schedule: { enabled: true, slots, cooldownMinutes: 30, maxRunsPerHour: 1 } } }), automationCoordinator: coordinator, getReader: () => reader, clock: () => now });
+
+  runner.tick();
+  assert.equal(coordinator.runs.length, 1, "slot 'a' fires");
+
+  now += 5 * 60_000; // slot 'b' becomes due, but cooldown (30min) and maxRunsPerHour (1) both block it
+  runner.tick();
+  assert.equal(coordinator.runs.length, 1, "cooldown/hourly limit must suppress an immediately-following slot");
 });
