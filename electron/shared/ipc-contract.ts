@@ -3,6 +3,7 @@ import type { PublicError } from "./errors";
 import type { AiChatInput, AiChatResponse, AiWebSearchInput, AiWebSearchResponse } from "./services/ai-contract";
 import type { FeedFetchInput, FeedFetchResponse } from "./services/feed-contract";
 import type { ArticleFetchInput, ArticleFetchResponse } from "./services/news-source-contract";
+import type { NewsSearchInput, NewsSearchResponse, WikipediaSearchInput, WikipediaSearchResponse } from "./services/news-research-contract";
 import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./services/topic-contract";
 import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
 import type { StreamEventListInput, StreamEventListResult } from "./services/stream-event-ipc-contract";
@@ -44,6 +45,14 @@ export type DociaiApi = {
   };
   newsArticles: {
     fetch(input: ArticleFetchInput): Promise<Result<ArticleFetchResponse>>;
+    cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
+  };
+  newsSearch: {
+    query(input: NewsSearchInput): Promise<Result<NewsSearchResponse>>;
+    cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
+  };
+  wikipedia: {
+    search(input: WikipediaSearchInput): Promise<Result<WikipediaSearchResponse>>;
     cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
   };
   topics: {

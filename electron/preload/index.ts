@@ -44,6 +44,14 @@ const api: DociaiApi = {
     fetch: (input) => invoke(CHANNELS.NEWS_ARTICLE_FETCH, input),
     cancel: (requestId) => invoke(CHANNELS.NEWS_ARTICLE_CANCEL, requestId),
   },
+  newsSearch: {
+    query: (input) => invoke(CHANNELS.NEWS_SEARCH_QUERY, input),
+    cancel: (requestId) => invoke(CHANNELS.NEWS_SEARCH_CANCEL, requestId),
+  },
+  wikipedia: {
+    search: (input) => invoke(CHANNELS.WIKIPEDIA_SEARCH, input),
+    cancel: (requestId) => invoke(CHANNELS.WIKIPEDIA_CANCEL, requestId),
+  },
   topics: {
     fetch: (input) => invoke(CHANNELS.TOPIC_FETCH, input),
     complete: (input) => invoke(CHANNELS.TOPIC_COMPLETE, input),
