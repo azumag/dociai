@@ -15,6 +15,8 @@ import type { AiChatInput, AiMessage } from "../../shared/services/ai-contract";
 import { FeedService } from "../services/feeds/feed-service";
 import { TopicService } from "../services/topics/topic-service";
 import type { NewsSourceService } from "../services/news/news-source-service";
+import type { NewsSearchService } from "../services/news/news-search-service";
+import type { WikipediaService } from "../services/news/wikipedia-service";
 import type { FeedFetchInput } from "../../shared/services/feed-contract";
 import type { SpeechBackendService } from "../services/speech/speech-backend-service";
 import type { TwitchChatService } from "../services/twitch/twitch-chat-service";
@@ -28,7 +30,7 @@ import type { TwitchComposition } from "../services/twitch/twitch-composition";
 import type { UpdateService } from "../services/update/update-service";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; newsSourceService: NewsSourceService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; newsSourceService: NewsSourceService; newsSearchService: NewsSearchService; wikipediaService: WikipediaService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -191,6 +193,16 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     return options.newsSourceService.fetchArticle({ sourceIndex: sourceIndex(payload), url: articleUrl(payload), ...requestMetadata(payload) });
   }, options);
   register(CHANNELS.NEWS_ARTICLE_CANCEL, (event, input) => ({ cancelled: options.newsSourceService.cancel(expectString(input, "requestId", 256)) }), options);
+  register(CHANNELS.NEWS_SEARCH_QUERY, (event, input) => {
+    const payload = expectRecord(input, "news search request");
+    return options.newsSearchService.search({ query: expectString(payload.query, "query", 300), language: typeof payload.language === "string" ? payload.language : undefined, ...requestMetadata(payload) });
+  }, options);
+  register(CHANNELS.NEWS_SEARCH_CANCEL, (event, input) => ({ cancelled: options.newsSearchService.cancel(expectString(input, "requestId", 256)) }), options);
+  register(CHANNELS.WIKIPEDIA_SEARCH, (event, input) => {
+    const payload = expectRecord(input, "wikipedia search request");
+    return options.wikipediaService.search({ query: expectString(payload.query, "query", 300), language: typeof payload.language === "string" ? payload.language : undefined, ...requestMetadata(payload) });
+  }, options);
+  register(CHANNELS.WIKIPEDIA_CANCEL, (event, input) => ({ cancelled: options.wikipediaService.cancel(expectString(input, "requestId", 256)) }), options);
   register(CHANNELS.TOPIC_FETCH, (event, input) => {
     const payload = expectRecord(input, "topic request");
     return options.topicService.fetchTopics({ sourceIndex: sourceIndex(payload), ...requestMetadata(payload) });

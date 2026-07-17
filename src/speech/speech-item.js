@@ -18,6 +18,9 @@ export function createSpeechItem(input, now = Date.now()) {
     priority,
     createdAt,
     deadlineAt: input.deadlineAt == null ? null : Number(input.deadlineAt),
+    // 任意のcaller-defined metadata (issue #193: NewsSpeechMetadata等)。音声engineへは渡さず、
+    // 呼び出し側がqueue上のitemを識別する (attribution表示、重複判定) ためだけに使う。
+    metadata: input.metadata ?? null,
     state: "waiting",
     stateChangedAt: createdAt,
     error: null,

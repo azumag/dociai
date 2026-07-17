@@ -43,6 +43,27 @@ test("snapshot store is immutable, bounded, and resets sequence on generation ch
   assert.equal(next.comment, null);
 });
 
+test("snapshot store tracks news-attribution the same way as comment/reply/speech, clips text, and clears it on a generation change (issue #193)", () => {
+  const store = new ObsSnapshotStore({ serverInstanceId: "server-a", maxTextLength: 12 });
+  const withAttribution = store.apply({
+    kind: "news-attribution",
+    title: "a very long headline that should be clipped",
+    time: 500,
+    attribution: [{ sourceName: "a very long source name", url: "https://example.com/x", licenseName: "CC BY 4.0", attributionRequired: true }],
+  }, 1);
+  assert.ok(Object.isFrozen(withAttribution.attribution));
+  assert.ok(Object.isFrozen(withAttribution.attribution.attribution));
+  assert.equal(withAttribution.attribution.title, "a very long…");
+  assert.equal(withAttribution.attribution.attribution[0].sourceName, "a very long…");
+  assert.equal(withAttribution.attribution.attribution[0].attributionRequired, true);
+
+  const afterComment = store.apply({ kind: "comment", author: "viewer", text: "hi" }, 1);
+  assert.ok(afterComment.attribution, "an unrelated kind on the same generation must not clear attribution");
+
+  const afterGenerationChange = store.apply({ kind: "speech", state: "idle" }, 2);
+  assert.equal(afterGenerationChange.attribution, null, "a generation change must clear attribution just like the other 3 fields");
+});
+
 test("client registry bounds clients and expires leases", () => {
   let now = 0;
   const clients = new ObsClientRegistry({ maxClients: 2, leaseMs: 10, clock: () => now });

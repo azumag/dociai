@@ -493,6 +493,41 @@ async function renderScreenSources() {
   select.value = screenSources.find((source) => source.name === preferred)?.id ?? "";
 }
 
+// issue #193: 最後に配信したニュースの出典。音声本文へURLを読ませない代わりにoperatorへ
+// 別途表示する。newsReaderの enabled/status とは独立 (過去に配信したものは無効化後も残す)。
+function renderNewsAttribution(container) {
+  container.replaceChildren();
+  const info = state.lastNewsAttribution;
+  if (!info) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  const heading = document.createElement("div");
+  heading.className = "news-attribution-title";
+  heading.textContent = `最後に配信: ${info.title} (${hhmmss(info.at)})`;
+  container.append(heading);
+  const list = document.createElement("ul");
+  list.className = "news-attribution-list";
+  for (const entry of info.attribution) {
+    const li = document.createElement("li");
+    const licenseNote = entry.attributionRequired && entry.licenseName ? ` [${entry.licenseName}]` : "";
+    if (entry.url) {
+      const link = document.createElement("a");
+      link.href = entry.url;
+      link.textContent = entry.sourceName || entry.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      li.append(link);
+    } else {
+      li.append(document.createTextNode(entry.sourceName || "出典不明"));
+    }
+    if (licenseNote) li.append(document.createTextNode(licenseNote));
+    list.append(li);
+  }
+  container.append(list);
+}
+
 function renderNewsPanel() {
   const el = $("#news-status");
   const failures = $("#news-failures");
@@ -502,6 +537,7 @@ function renderNewsPanel() {
   toggle.checked = state.newsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
   $("#btn-news-read").disabled = !newsReader?.enabled || newsReader?.busy;
+  renderNewsAttribution($("#news-last-attribution"));
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
     failures.replaceChildren();
@@ -743,11 +779,17 @@ appRuntime = new AppRuntime({
     onAutomationError: (kind, error) => logEvent(`${kind === "news" ? "ニュース" : "話題"}読み上げ失敗: ${scrub(error.message)}`, "error"),
     onAutomationStart: (kind) => (kind === "news" ? renderNewsPanel() : renderTopicPanel()),
     onAutomationComplete: (kind) => (kind === "news" ? renderNewsPanel() : renderTopicPanel()),
-    onNewsRead: ({ persona, item, text, debugText }) => {
+    onNewsRead: ({ persona, item, text, debugText, attribution }) => {
       state.lastDebug = { personaName: `${persona.name} (ニュース)`, debugText, at: new Date() };
       renderDebug();
       appendReply({ persona, text, triggerId: "news", newsTitle: item.title });
       broadcast("reply", { personaId: persona.id, personaName: persona.name, color: personaColor(persona.id), text, time: Date.now() });
+      // issue #193: 出典は音声本文へURLを読ませない代わりに、News panel + OBS overlayへ
+      // 別途表示する。attributionが空 (candidate自身のURL/名前も取れない) 場合は表示しない。
+      if (attribution?.length) {
+        state.lastNewsAttribution = { title: item.title, attribution, at: new Date() };
+        broadcast("news-attribution", { title: item.title, attribution, time: Date.now() });
+      }
       renderNewsPanel();
     },
     onTopicRead: ({ persona, item, text, debugText }) => {

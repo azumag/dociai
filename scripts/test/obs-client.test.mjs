@@ -23,3 +23,14 @@ test("connection state preserves prior content during disconnect", () => {
   assert.equal(connectionState("connected", "timeout"), "stale");
   assert.equal(connectionState("waiting", "timeout"), "disconnected");
 });
+
+test("OBS client tracks a news-attribution state message the same way it tracks comment/reply/speech (issue #193)", () => {
+  const transport = new FakeTransport();
+  const client = new ObsClient({ transport, clientId: "client-b" });
+  client.start();
+  transport.listener(createEnvelope("snapshot", { comment: null, reply: null, speech: null, attribution: null }, { serverInstanceId: "server", generation: 1, sequence: 1, targetClientId: "client-b" }));
+  assert.equal(client.snapshot.attribution, null);
+  transport.listener(createEnvelope("state", { kind: "news-attribution", title: "見出し", attribution: [{ sourceName: "Example" }], time: 123 }, { serverInstanceId: "server", generation: 1, sequence: 2 }));
+  assert.equal(client.snapshot.attribution.title, "見出し");
+  assert.equal(client.snapshot.attribution.attribution[0].sourceName, "Example");
+});

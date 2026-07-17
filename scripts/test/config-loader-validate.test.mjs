@@ -83,6 +83,36 @@ test("validateConfig (issue #188) accepts google-news sources and validates arti
   assert.ok(validateConfig(badLicense).errors.some((e) => e.includes("license.name がありません")));
 });
 
+test("validateConfig (issue #193) validates the optional news.schedule slots, and accepts configs that omit it entirely", () => {
+  const base = { connectors: { main: { provider: "mock" } }, personas: [{ id: "p", name: "P", connector: "main" }], triggers: {}, news: { enabled: true, sources: [{ type: "mock", name: "m" }] } };
+
+  assert.deepEqual(validateConfig(base).errors, [], "news.schedule is fully optional");
+
+  const valid = { ...base, news: { ...base.news, schedule: { enabled: true, slots: [{ id: "morning", minute: 540, mode: "topic", daysOfWeek: [1, 2, 3, 4, 5] }], cooldownMinutes: 30, maxRunsPerHour: 4 } } };
+  assert.deepEqual(validateConfig(valid).errors, []);
+
+  const notObject = { ...base, news: { ...base.news, schedule: "daily" } };
+  assert.ok(validateConfig(notObject).errors.some((e) => e.includes("news.schedule はオブジェクト")));
+
+  const missingId = { ...base, news: { ...base.news, schedule: { slots: [{ minute: 540 }] } } };
+  assert.ok(validateConfig(missingId).errors.some((e) => e.includes(".id がありません")));
+
+  const badMinute = { ...base, news: { ...base.news, schedule: { slots: [{ id: "x", minute: 1500 }] } } };
+  assert.ok(validateConfig(badMinute).errors.some((e) => e.includes(".minute は0以上1440未満")));
+
+  const badMode = { ...base, news: { ...base.news, schedule: { slots: [{ id: "x", minute: 0, mode: "bogus" }] } } };
+  assert.ok(validateConfig(badMode).errors.some((e) => e.includes('.mode "bogus"')));
+
+  const badDaysOfWeek = { ...base, news: { ...base.news, schedule: { slots: [{ id: "x", minute: 0, daysOfWeek: [7] }] } } };
+  assert.ok(validateConfig(badDaysOfWeek).errors.some((e) => e.includes("daysOfWeek は0(日)〜6(土)")));
+
+  const badCooldown = { ...base, news: { ...base.news, schedule: { slots: [], cooldownMinutes: -1 } } };
+  assert.ok(validateConfig(badCooldown).errors.some((e) => e.includes("cooldownMinutes は0以上")));
+
+  const badMaxRuns = { ...base, news: { ...base.news, schedule: { slots: [], maxRunsPerHour: -1 } } };
+  assert.ok(validateConfig(badMaxRuns).errors.some((e) => e.includes("maxRunsPerHour は0以上")));
+});
+
 test("validateConfig accepts comment reader engine-specific voice boundaries", () => {
   const config = {
     connectors: { mock: { provider: "mock" } },

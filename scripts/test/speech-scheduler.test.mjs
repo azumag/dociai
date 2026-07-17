@@ -105,3 +105,13 @@ test("invalid transitions fail and a 1000 item burst stays bounded", () => {
   assert.ok(scheduler.history.index.size <= 30);
   assert.ok(scheduler.metrics.dropped > 0);
 });
+
+test("createSpeechItem/scheduler.enqueue carry an optional caller-defined metadata field through unchanged, defaulting to null", () => {
+  const scheduler = new SpeechScheduler();
+  const metadata = { source: "news", candidateId: "c1" };
+  const withMetadata = scheduler.enqueue({ text: "news item", metadata });
+  assert.equal(withMetadata.metadata, metadata);
+
+  const withoutMetadata = scheduler.enqueue({ text: "plain item" });
+  assert.equal(withoutMetadata.metadata, null);
+});

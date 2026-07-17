@@ -607,6 +607,12 @@ a { color: var(--focus); }
 .reader-failure span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .reader-failure button { padding: 3px 6px; font-size: 11px; }
 
+.news-attribution { margin-top: 8px; font-size: 11px; color: var(--ink-dim); }
+.news-attribution-title { font-weight: 600; margin-bottom: 3px; }
+.news-attribution-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.news-attribution-list li { overflow-wrap: anywhere; }
+.news-attribution-list a { color: inherit; }
+
 /* ---- マイク監視の割り込みトグル / ニュース・話題パネルの自動読み上げトグル ---- */
 .mic-bargein-toggle, .reader-toggle {
   display: flex;
@@ -936,6 +942,18 @@ body.obs.transparent { background: transparent; }
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 .obs-comment .author { color: var(--focus); margin-right: 8px; }
+
+.obs-attribution {
+  font-size: 12px;
+  color: #cdc6ba;
+  background: rgba(16, 14, 12, 0.78);
+  border-radius: 2px;
+  padding: 6px 12px;
+  align-self: flex-start;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.obs-attribution-title { font-weight: 700; margin-bottom: 3px; color: var(--ink-dim); }
+.obs-attribution-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 
 .obs-waiting {
   font-family: var(--mono);

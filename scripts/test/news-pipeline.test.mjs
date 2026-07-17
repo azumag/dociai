@@ -45,6 +45,52 @@ test("NewsPipelineCoordinator runs stages in acquire -> select -> research -> ge
   assert.deepEqual(calls, ["acquire", "select", "research", "generate", "quality", "deliver"]);
 });
 
+test("the coordinator passes research/modePolicy/runId through to the deliver stage so an opt-in delivery stage (issue #193) can build attribution/dedup metadata", async () => {
+  const item = { guid: "g1", title: "t1", processingKey: "news:g1", sourceName: "s" };
+  const researchBundle = { candidateId: "news:g1", sources: [{ id: "s1", url: "https://a.example" }] };
+  let deliverInput = null;
+  const { coordinator } = makeHarness({
+    config: baseConfig({ mode: "current" }),
+    impls: {
+      acquire: async () => [item],
+      research: async () => researchBundle,
+      deliver: async (input) => { deliverInput = input; return { queued: { state: "waiting" } }; },
+    },
+  });
+  const result = await coordinator.run({ generation: 1, requestId: "run-42" });
+  assert.equal(result.status, "delivered");
+  assert.ok(deliverInput);
+  assert.equal(deliverInput.research, researchBundle);
+  assert.equal(deliverInput.modePolicy.mode, "current");
+  assert.equal(deliverInput.runId, "run-42");
+});
+
+test("the coordinator's onRead callback (issue #193: News panel / OBS attribution display) always receives an attribution list built from the research bundle, even on the legacy no-op research/deliver stages", async () => {
+  const item = { guid: "g1", title: "t1", processingKey: "news:g1", sourceName: "s" };
+  const researchBundle = { candidateId: "news:g1", sources: [{ id: "s1", url: "https://a.example", sourceName: "A" }] };
+  let onReadPayload = null;
+  const { coordinator } = makeHarness({
+    onRead: (payload) => { onReadPayload = payload; },
+    impls: { acquire: async () => [item], research: async () => researchBundle },
+  });
+  const result = await coordinator.run({ generation: 1 });
+  assert.equal(result.status, "delivered");
+  assert.ok(onReadPayload);
+  assert.equal(onReadPayload.attribution.length, 1);
+  assert.equal(onReadPayload.attribution[0].sourceName, "A");
+
+  // research stage returning null (no grounding research configured) must still fall back to
+  // the candidate's own source rather than crashing or omitting attribution entirely.
+  onReadPayload = null;
+  const { coordinator: fallbackCoordinator } = makeHarness({
+    onRead: (payload) => { onReadPayload = payload; },
+    impls: { acquire: async () => [{ ...item, canonicalUrl: "https://source.example/article", processingKey: "news:g2", guid: "g2" }], research: async () => null },
+  });
+  await fallbackCoordinator.run({ generation: 1 });
+  assert.ok(onReadPayload);
+  assert.equal(onReadPayload.attribution[0].url, "https://source.example/article");
+});
+
 test("history commit reuses the select stage's sourceSuffixPatterns-derived key instead of re-deriving a plain one", async () => {
   const item = { guid: "g1", title: "速報タイトル - Reuters", processingKey: "news:g1", sourceName: "s" };
   const now = { value: 1000 };

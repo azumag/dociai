@@ -23,6 +23,7 @@ export function createAppState(overrides = {}) {
     newsRuntimeEnabled: true,
     topicsRuntimeEnabled: true,
     lastDebug: null,
+    lastNewsAttribution: null,
     obs: null,
     runtime: null,
     generation: 0,

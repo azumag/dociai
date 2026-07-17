@@ -41,6 +41,32 @@ export async function cancelElectronNewsArticleRequest(requestId) {
   return globalThis.dociai.newsArticles.cancel(requestId);
 }
 
+// issue #190: news検索(Google News RSS)とWikipedia調査もElectron Main限定 (fixed hostだけを
+// SafeHttpClientで叩く)。
+export function hasElectronNewsSearchService() {
+  return typeof globalThis.dociai?.newsSearch?.query === "function";
+}
+
+export async function queryNewsSearchThroughElectron(input) {
+  return globalThis.dociai.newsSearch.query(input);
+}
+
+export async function cancelElectronNewsSearchRequest(requestId) {
+  return globalThis.dociai.newsSearch.cancel(requestId);
+}
+
+export function hasElectronWikipediaService() {
+  return typeof globalThis.dociai?.wikipedia?.search === "function";
+}
+
+export async function searchWikipediaThroughElectron(input) {
+  return globalThis.dociai.wikipedia.search(input);
+}
+
+export async function cancelElectronWikipediaRequest(requestId) {
+  return globalThis.dociai.wikipedia.cancel(requestId);
+}
+
 export function hasElectronTopicService() {
   return typeof globalThis.dociai?.topics?.fetch === "function";
 }

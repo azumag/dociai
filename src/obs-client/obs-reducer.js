@@ -8,5 +8,6 @@ export function reduceObsMessage(state, message) {
   if (message.payload.kind === "comment") next.comment = message.payload;
   if (message.payload.kind === "reply") next.reply = message.payload;
   if (message.payload.kind === "speech") next.speech = message.payload;
+  if (message.payload.kind === "news-attribution") next.attribution = message.payload;
   return { state: next, verdict };
 }

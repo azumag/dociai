@@ -375,3 +375,16 @@ test("commentReaderIntervalMs does not delay a persona item queued after a comme
   await Promise.resolve();
   queue.dispose();
 });
+
+test("SpeechQueue.enqueue passes an optional metadata field through to the returned item and its items snapshot, defaulting to null", async () => {
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
+  const metadata = { source: "news", candidateId: "c1", mode: "current" };
+  const item = queue.enqueue({ text: "with metadata", voice: { engine: "webspeech" }, source: "newstalk", metadata });
+  assert.equal(item.metadata, metadata);
+  assert.equal(queue.items.find((entry) => entry.id === item.id)?.metadata, metadata);
+
+  const plain = queue.enqueue({ text: "no metadata", voice: { engine: "webspeech" } });
+  assert.equal(plain.metadata, null);
+  queue.dispose();
+});
