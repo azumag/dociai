@@ -22,6 +22,7 @@ import { createQualityStage } from "./stages/quality-stage.js";
 import { createDeliverStage } from "./stages/deliver-stage.js";
 import { deriveIdentityKeys } from "./selection/dedupe-candidates.js";
 import { MemoryNewsHistoryStore } from "./selection/memory-news-history-store.js";
+import { buildAttributions } from "./delivery/news-attribution.js";
 
 export class NewsPipelineCoordinator {
   constructor({ getConfig, adapter, stages, store = new MemoryItemProcessingStore(), historyStore = new MemoryNewsHistoryStore(), clock = () => Date.now(), log = () => {}, onRead = () => {}, maxRewrites = 1 }) {
@@ -120,7 +121,11 @@ export class NewsPipelineCoordinator {
           // `.parsed` を持たないstageの場合はgenerate結果をそのまま使う (後方互換)。
           const spokenText = quality.parsed?.body ?? generated.text;
           const spokenTitle = quality.parsed?.titleSpoken ?? null;
-          this.onRead({ persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle });
+          // buildAttributions()はresearchがnull (research stageがno-opの旧経路、または
+          // modePolicy.research: "none") でもcandidate自身をfallback sourceとして返す —
+          // 出典表示 (音声本文へはURLを読ませない) はどちらの経路でも常に取れる (issue #193)。
+          const attribution = buildAttributions(research, item);
+          this.onRead({ persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle, attribution });
           guardPipelineContext(context);
           await this.stages.deliver.run({ persona, item, text: spokenText, research, modePolicy, runId: context.requestId ?? null }, context);
           guardPipelineContext(context);

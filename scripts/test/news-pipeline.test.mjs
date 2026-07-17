@@ -65,6 +65,32 @@ test("the coordinator passes research/modePolicy/runId through to the deliver st
   assert.equal(deliverInput.runId, "run-42");
 });
 
+test("the coordinator's onRead callback (issue #193: News panel / OBS attribution display) always receives an attribution list built from the research bundle, even on the legacy no-op research/deliver stages", async () => {
+  const item = { guid: "g1", title: "t1", processingKey: "news:g1", sourceName: "s" };
+  const researchBundle = { candidateId: "news:g1", sources: [{ id: "s1", url: "https://a.example", sourceName: "A" }] };
+  let onReadPayload = null;
+  const { coordinator } = makeHarness({
+    onRead: (payload) => { onReadPayload = payload; },
+    impls: { acquire: async () => [item], research: async () => researchBundle },
+  });
+  const result = await coordinator.run({ generation: 1 });
+  assert.equal(result.status, "delivered");
+  assert.ok(onReadPayload);
+  assert.equal(onReadPayload.attribution.length, 1);
+  assert.equal(onReadPayload.attribution[0].sourceName, "A");
+
+  // research stage returning null (no grounding research configured) must still fall back to
+  // the candidate's own source rather than crashing or omitting attribution entirely.
+  onReadPayload = null;
+  const { coordinator: fallbackCoordinator } = makeHarness({
+    onRead: (payload) => { onReadPayload = payload; },
+    impls: { acquire: async () => [{ ...item, canonicalUrl: "https://source.example/article", processingKey: "news:g2", guid: "g2" }], research: async () => null },
+  });
+  await fallbackCoordinator.run({ generation: 1 });
+  assert.ok(onReadPayload);
+  assert.equal(onReadPayload.attribution[0].url, "https://source.example/article");
+});
+
 test("history commit reuses the select stage's sourceSuffixPatterns-derived key instead of re-deriving a plain one", async () => {
   const item = { guid: "g1", title: "速報タイトル - Reuters", processingKey: "news:g1", sourceName: "s" };
   const now = { value: 1000 };

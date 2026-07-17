@@ -5,7 +5,7 @@ import { connectionState } from "./obs-connection-state.js";
 export class ObsClient {
   constructor({ transport, clientId = crypto.randomUUID(), clock = () => Date.now(), handshakeTimeoutMs = 5_000, onState = () => {}, onSnapshot = () => {} } = {}) {
     this.transport = transport; this.clientId = clientId; this.clock = clock; this.handshakeTimeoutMs = handshakeTimeoutMs; this.onState = onState; this.onSnapshot = onSnapshot;
-    this.status = "waiting"; this.snapshot = { serverInstanceId: null, generation: 0, sequence: 0, comment: null, reply: null, speech: null }; this.deadline = 0;
+    this.status = "waiting"; this.snapshot = { serverInstanceId: null, generation: 0, sequence: 0, comment: null, reply: null, speech: null, attribution: null }; this.deadline = 0;
   }
   start() { this.transport.start((message) => this.receive(message)); this.requestSnapshot(); return true; }
   stop() { return this.transport.stop(); }

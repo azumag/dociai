@@ -385,7 +385,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     contextBuilder,
     speechQueue,
     log: deps.log,
-    onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText }); },
+    onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
     ...(deps.newsHistoryStore ? { historyStore: deps.newsHistoryStore } : {}),
   }));
 
@@ -396,7 +396,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     contextBuilder,
     speechQueue,
     log: deps.log,
-    onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText }); },
+    onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
     isRuntimeEnabled: deps.isNewsRuntimeEnabled,
     pipeline: newsPipeline,
   }));
