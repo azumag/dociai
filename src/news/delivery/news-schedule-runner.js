@@ -14,8 +14,16 @@ const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const HOUR_MS = 60 * 60 * 1000;
 const KEEP_FIRED_KEYS_MS = 2 * 24 * HOUR_MS; // 日付境界をまたいでもprune漏れが無いよう2日分保持
 
+// setInterval/clearIntervalはWindowのbranded methodであり、`this.setIntervalFn(...)`の
+// ようにinstance property経由で呼ぶとreceiverがNewsScheduleRunnerインスタンスになって
+// しまい、ブラウザの内部brand checkに落ちて "TypeError: Illegal invocation" になる
+// (bareな`setInterval(...)`呼び出しなら問題ない)。既定値を素の関数参照ではなく、内部で
+// bare呼び出しをするarrow関数でラップして防ぐ。
+const defaultSetInterval = (fn, ms) => setInterval(fn, ms);
+const defaultClearInterval = (id) => clearInterval(id);
+
 export class NewsScheduleRunner {
-  constructor({ getConfig, automationCoordinator, getReader, isCurrent = () => true, clock = () => Date.now(), log = () => {}, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS, setIntervalFn = setInterval, clearIntervalFn = clearInterval }) {
+  constructor({ getConfig, automationCoordinator, getReader, isCurrent = () => true, clock = () => Date.now(), log = () => {}, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS, setIntervalFn = defaultSetInterval, clearIntervalFn = defaultClearInterval }) {
     this.getConfig = getConfig;
     this.automationCoordinator = automationCoordinator;
     this.getReader = getReader;
