@@ -4,6 +4,7 @@
 
 import { searchWikipediaThroughElectron, cancelElectronWikipediaRequest, hasElectronWikipediaService } from "../../../platform/electron-services.js";
 import { createProviderResult } from "../research-provider.js";
+import { callElectronResearchIpc } from "./electron-ipc-provider.js";
 
 export function createWikipediaProvider() {
   return {
@@ -14,17 +15,14 @@ export function createWikipediaProvider() {
     async research(input, context) {
       const query = input.queries?.[0];
       if (!query) return null;
-      const requestId = `${context?.requestId ?? "news"}:wikipedia:${query}`;
-      const cancel = () => { void cancelElectronWikipediaRequest(requestId); };
-      context?.signal?.addEventListener("abort", cancel, { once: true });
-      let result;
-      try {
-        result = await searchWikipediaThroughElectron({ query, language: input.language ?? "ja", requestId, generation: context?.generation });
-      } finally {
-        context?.signal?.removeEventListener("abort", cancel);
-      }
-      if (!result?.ok) throw new Error(result?.error?.message ?? "Wikipedia調査に失敗しました");
-      const summary = result.value.summary;
+      const value = await callElectronResearchIpc({
+        prefix: "wikipedia",
+        query,
+        context,
+        call: (requestId) => searchWikipediaThroughElectron({ query, language: input.language ?? "ja", requestId }),
+        cancel: cancelElectronWikipediaRequest,
+      });
+      const summary = value.summary;
       if (!summary?.extract) return null;
       return createProviderResult("wikipedia", {
         facts: [{ text: summary.extract.slice(0, input.maxCharsPerSource ?? 1200), sourceUrl: summary.url, sourceName: `Wikipedia: ${summary.title}`, confidence: "medium", kind: "background" }],

@@ -26,8 +26,9 @@ export function createResearchCoordinator({ providers, cache = null, clock = () 
 
       const queries = buildQueries(candidate.title);
       const input = { candidate, mode, maxSources, maxCharsPerSource, language, queries };
+      const candidateId = candidate.processingKey ?? candidate.guid ?? candidate.canonicalUrl ?? candidate.link ?? "unknown";
 
-      const cacheKey = cache && queries[0] ? buildResearchCacheKey({ query: queries[0], mode, now: clock() }) : null;
+      const cacheKey = cache && queries[0] ? buildResearchCacheKey({ query: queries[0], mode, now: clock(), researchMode, candidateId }) : null;
       if (cacheKey) {
         const cached = cache.get(cacheKey);
         if (cached) return cached;

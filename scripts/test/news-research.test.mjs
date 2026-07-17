@@ -108,16 +108,72 @@ test("mergeProviderResults handles a single source without inflating confidence 
   assert.deepEqual(merged.unresolved, []);
 });
 
-test("mergeProviderResults carries forward provider-reported unresolved entries", () => {
+test("mergeProviderResults carries forward provider-reported unresolved entries without flagging them as a conflicting claim", () => {
   const results = [createProviderResult("llm", { facts: [], sources: [], unresolved: ["情報源間で発表時刻が食い違う"] })];
   const merged = mergeProviderResults("c3", "見出し3", results);
   assert.deepEqual(merged.unresolved, ["情報源間で発表時刻が食い違う"]);
+  assert.equal(merged.coverage.hasConflictingClaims, false, "a provider note is not itself a detected numeric conflict");
 });
 
-test("buildResearchCacheKey buckets by hour and createResearchCache expires entries by TTL", () => {
+test("mergeProviderResults does not promote confidence when the only 2 corroborating sources share the same publisher host", () => {
+  const results = [
+    createProviderResult("article", {
+      facts: [{ text: "同じ主張です", sourceUrl: "https://news.example/a/1", sourceName: "Example" }],
+      sources: [{ url: "https://news.example/a/1", sourceName: "Example" }],
+    }),
+    createProviderResult("news-search", {
+      facts: [{ text: "同じ主張です", sourceUrl: "https://news.example/a/2", sourceName: "Example" }],
+      sources: [{ url: "https://news.example/a/2", sourceName: "Example" }],
+    }),
+  ];
+  const merged = mergeProviderResults("c4", "見出し4", results);
+  const fact = merged.facts.find((f) => f.text === "同じ主張です");
+  assert.equal(fact.sourceIds.length, 2, "still records both source citations");
+  assert.equal(fact.confidence, "medium", "same-host reprints must not count as independent corroboration");
+  assert.equal(merged.coverage.independentPublisherCount, 1);
+});
+
+test("mergeProviderResults does not treat a numeric superset as a conflict, but does flag genuinely different numbers", () => {
+  const supersetResults = [
+    createProviderResult("article", { facts: [{ text: "この事故で死者12人が確認された", sourceUrl: "https://a.example/1", sourceName: "A" }], sources: [{ url: "https://a.example/1", sourceName: "A" }] }),
+    createProviderResult("news-search", { facts: [{ text: "この事故で死者12人、負傷者3人が確認された", sourceUrl: "https://b.example/2", sourceName: "B" }], sources: [{ url: "https://b.example/2", sourceName: "B" }] }),
+  ];
+  const supersetMerged = mergeProviderResults("c5", "見出し5", supersetResults);
+  assert.equal(supersetMerged.coverage.hasConflictingClaims, false, "additional non-contradicting numbers must not be flagged as a conflict");
+
+  const genuineConflict = [
+    createProviderResult("article", { facts: [{ text: "この事故で死者12人が確認された", sourceUrl: "https://a.example/1", sourceName: "A" }], sources: [{ url: "https://a.example/1", sourceName: "A" }] }),
+    createProviderResult("news-search", { facts: [{ text: "この事故で死者15人が確認された", sourceUrl: "https://b.example/2", sourceName: "B" }], sources: [{ url: "https://b.example/2", sourceName: "B" }] }),
+  ];
+  assert.equal(mergeProviderResults("c6", "見出し6", genuineConflict).coverage.hasConflictingClaims, true);
+});
+
+test("mergeProviderResults normalizes full-width digits so half-width/full-width duplicate facts dedupe and conflict-detect correctly", () => {
+  const dedupeAcrossWidths = [
+    createProviderResult("article", { facts: [{ text: "死者は12人と発表された", sourceUrl: "https://a.example/1", sourceName: "A" }], sources: [{ url: "https://a.example/1", sourceName: "A" }] }),
+    createProviderResult("news-search", { facts: [{ text: "死者は１２人と発表された", sourceUrl: "https://b.example/2", sourceName: "B" }], sources: [{ url: "https://b.example/2", sourceName: "B" }] }),
+  ];
+  const merged = mergeProviderResults("c7", "見出し7", dedupeAcrossWidths);
+  assert.equal(merged.facts.length, 1, "full-width and half-width digit variants of the same fact must dedupe to one entry");
+  assert.equal(merged.facts[0].confidence, "high");
+
+  const fullWidthConflict = [
+    createProviderResult("article", { facts: [{ text: "この事故で死者12人が確認された", sourceUrl: "https://a.example/1", sourceName: "A" }], sources: [{ url: "https://a.example/1", sourceName: "A" }] }),
+    createProviderResult("news-search", { facts: [{ text: "この事故で死者１５人が確認された", sourceUrl: "https://b.example/2", sourceName: "B" }], sources: [{ url: "https://b.example/2", sourceName: "B" }] }),
+  ];
+  assert.equal(mergeProviderResults("c8", "見出し8", fullWidthConflict).coverage.hasConflictingClaims, true, "a full-width digit must still be recognized as a genuinely conflicting number");
+});
+
+test("buildResearchCacheKey buckets by hour, includes researchMode/candidateId to avoid cross-candidate leakage, and createResearchCache expires entries by TTL", () => {
   const now = Date.parse("2026-07-17T10:30:00Z");
-  const key = buildResearchCacheKey({ query: "テスト", mode: "current", now });
-  assert.equal(key, "current:2026-07-17T10:テスト");
+  const key = buildResearchCacheKey({ query: "テスト", mode: "current", now, researchMode: "multi_source", candidateId: "c1" });
+  assert.equal(key, "current:multi_source:c1:2026-07-17T10:テスト");
+
+  const other = buildResearchCacheKey({ query: "テスト", mode: "current", now, researchMode: "multi_source", candidateId: "c2" });
+  assert.notEqual(key, other, "different candidates sharing a cleaned query must not collide");
+
+  const differentResearchMode = buildResearchCacheKey({ query: "テスト", mode: "current", now, researchMode: "article", candidateId: "c1" });
+  assert.notEqual(key, differentResearchMode, "different researchMode must not collide even for the same candidate/query");
 
   let time = 1000;
   const cache = createResearchCache({ ttlMs: 500, clock: () => time });

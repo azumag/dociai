@@ -6,8 +6,12 @@ function dateBucket(now) {
   return new Date(now).toISOString().slice(0, 13); // 時間単位のbucket
 }
 
-export function buildResearchCacheKey({ query, mode, now = Date.now() }) {
-  return `${mode}:${dateBucket(now)}:${query}`;
+// mode/researchMode/candidateIdをすべてkeyへ含める。queryだけをkeyにすると、cleanした
+// headlineが同じ2つの別candidateが互いのbundle (candidateId/headlineを内包する) を受け取って
+// しまい、また同じ時間帯にresearchMode ("article"⇔"multi_source") がconfig差し替えで変わった
+// requestが古いbundleを誤って再利用してしまう (issue #190 review指摘)。
+export function buildResearchCacheKey({ query, mode, now = Date.now(), researchMode = "unknown", candidateId = "unknown" }) {
+  return `${mode}:${researchMode}:${candidateId}:${dateBucket(now)}:${query}`;
 }
 
 export function createResearchCache({ ttlMs = 30 * 60 * 1000, clock = () => Date.now() } = {}) {

@@ -65,7 +65,7 @@ test("NewsSearchService.cancel aborts an in-flight search", async () => {
     const pending = service.search({ query: "テスト", requestId: "req-1" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(service.cancel("req-1"), true);
-    await assert.rejects(pending, (error) => error.code === "CANCELLED" || error.retryable === false);
+    await assert.rejects(pending, (error) => error.code === "CANCELLED");
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
