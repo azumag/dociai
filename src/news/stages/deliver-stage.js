@@ -29,6 +29,7 @@ import { PipelineStageError } from "../contracts.js";
 import { buildAttributions } from "../delivery/news-attribution.js";
 import { createNewsSpeechMetadata } from "../delivery/news-delivery-contract.js";
 import { decideQueueAcceptance } from "../delivery/news-queue-policy.js";
+import { TERMINAL_SPEECH_STATES } from "../../speech/speech-item.js";
 
 export function createNewsDeliveryStage({ speechQueue, sourceLabel = "newstalk", deferWhenQueueAbove = null, priority, log = () => {} }) {
   return {
@@ -45,10 +46,15 @@ export function createNewsDeliveryStage({ speechQueue, sourceLabel = "newstalk",
         attribution,
       });
 
-      const pendingSameSource = (speechQueue.items ?? []).filter((entry) => entry.source === sourceLabel && entry.state === "waiting");
+      // 「waiting」だけでなく、今まさに読み上げ中 (state: "speaking") のitemも重複/congestion
+      // 判定へ含める。current itemを取りこぼすと、cancel直後の再試行で同じ候補が二重に
+      // enqueueされ得る (issue #193レビュー指摘)。
+      const pendingSameSource = (speechQueue.items ?? []).filter((entry) => entry.source === sourceLabel && !TERMINAL_SPEECH_STATES.has(entry.state));
       const decision = decideQueueAcceptance({ pendingItems: pendingSameSource, candidateId: metadata.candidateId, mode: metadata.mode, deferWhenQueueAbove });
       if (!decision.accept) {
-        throw new PipelineStageError(`ニュース配信をキューへ投入できませんでした (${decision.reason})`, { stage: "deliver", kind: decision.reason === "queue-congested" ? "server" : "empty" });
+        // 重複はretryしても解消しない (同じcandidateが既に読み上げ中/待機中なだけ) ため
+        // permanent扱いにする。congestionだけがretry対象。
+        throw new PipelineStageError(`ニュース配信をキューへ投入できませんでした (${decision.reason})`, { stage: "deliver", kind: decision.reason === "queue-congested" ? "server" : "duplicate" });
       }
 
       const queued = speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: sourceLabel, priority, metadata });

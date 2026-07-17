@@ -122,7 +122,7 @@ export class NewsPipelineCoordinator {
           const spokenTitle = quality.parsed?.titleSpoken ?? null;
           this.onRead({ persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle });
           guardPipelineContext(context);
-          await this.stages.deliver.run({ persona, item, text: spokenText }, context);
+          await this.stages.deliver.run({ persona, item, text: spokenText, research, modePolicy, runId: context.requestId ?? null }, context);
           guardPipelineContext(context);
           this.store.markRead(item.processingKey, this.generation, this.clock());
           this.lastRunResult.succeeded++;

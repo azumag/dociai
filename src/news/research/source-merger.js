@@ -14,8 +14,11 @@ function canonicalHost(url) {
   }
 }
 
+// 桁区切りcomma ("1,000") を取り除いてから比較する。取り除かないと同じ値の
+// "1,000"と"1000"が別の数値集合として扱われ、detectConflictsが誤って対立検出する
+// (issue #193レビュー指摘、全角数字正規化と同種の問題)。
 function extractNumbers(text) {
-  return [...text.matchAll(/\d+(?:[.,]\d+)?/g)].map((match) => match[0]);
+  return [...text.matchAll(/\d+(?:[.,]\d+)*/g)].map((match) => match[0].replace(/,/g, ""));
 }
 
 // ひらがな/カタカナ/漢字/英字の連続をtokenとみなす軽量heuristic (形態素解析はしない)。

@@ -16,7 +16,10 @@ function toAttribution(entry, fallbackLicense) {
 
 export function buildAttributions(researchBundle, candidate = {}) {
   const sources = researchBundle?.sources ?? [];
-  if (sources.length) return sources.map((source) => toAttribution(source, candidate.license));
+  // candidate.licenseはcandidate自身の取得元にのみ適用されるfallbackであり、research
+  // bundleの (candidateとは無関係な) 各sourceへ持ち込んではいけない — 持ち込むと
+  // 無関係な third-party source がcandidateのlicenseを騙ることになる。
+  if (sources.length) return sources.map((source) => toAttribution(source, null));
 
   const url = candidate.canonicalUrl ?? candidate.link ?? null;
   if (!url && !candidate.sourceName) return [];

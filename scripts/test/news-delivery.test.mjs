@@ -30,6 +30,15 @@ test("buildAttributions falls back to the candidate's own source when there is n
   assert.deepEqual(buildAttributions({ sources: [] }, {}), []);
 });
 
+test("buildAttributions never leaks the candidate's own license onto unrelated research-bundle sources", () => {
+  const research = { sources: [{ id: "s1", url: "https://wikipedia.org/x", sourceName: "Wikipedia" }] };
+  const candidate = { sourceName: "CC-licensed feed", license: { name: "CC BY 4.0", attributionRequired: true } };
+  const attributions = buildAttributions(research, candidate);
+  assert.equal(attributions.length, 1);
+  assert.equal(attributions[0].licenseName, null, "a third-party research source must not inherit the candidate feed's own license");
+  assert.equal(attributions[0].attributionRequired, false);
+});
+
 test("hasUnattributableRequiredSource flags a required source with neither name nor URL", () => {
   assert.equal(hasUnattributableRequiredSource([{ attributionRequired: true, url: null, sourceName: "" }]), true);
   assert.equal(hasUnattributableRequiredSource([{ attributionRequired: true, url: "https://x.example", sourceName: "" }]), false);
@@ -131,8 +140,20 @@ test("createNewsDeliveryStage throws a retryable PipelineStageError on queue-lim
   );
 });
 
-test("createNewsDeliveryStage throws before enqueueing a duplicate (mode, candidate) already pending", async () => {
+test("createNewsDeliveryStage throws a non-retryable PipelineStageError before enqueueing a duplicate (mode, candidate) already pending", async () => {
   const speechQueue = fakeSpeechQueue({ items: [{ source: "newstalk", state: "waiting", metadata: { candidateId: "p1", mode: "current" } }] });
+  const stage = createNewsDeliveryStage({ speechQueue });
+  const item = { processingKey: "p1", title: "見出し" };
+  const persona = { id: "persona-1", name: "P", voice: {} };
+  await assert.rejects(
+    stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" }),
+    (error) => error instanceof PipelineStageError && error.retryable === false,
+  );
+  assert.equal(speechQueue.enqueued.length, 0);
+});
+
+test("createNewsDeliveryStage also treats the currently-speaking item (not just waiting ones) as a duplicate, so a post-cancellation retry doesn't double-read", async () => {
+  const speechQueue = fakeSpeechQueue({ items: [{ source: "newstalk", state: "speaking", metadata: { candidateId: "p1", mode: "current" } }] });
   const stage = createNewsDeliveryStage({ speechQueue });
   const item = { processingKey: "p1", title: "見出し" };
   const persona = { id: "persona-1", name: "P", voice: {} };

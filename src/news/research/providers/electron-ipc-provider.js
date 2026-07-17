@@ -10,6 +10,11 @@ import { RequestCancelledError } from "../../../runtime/request-registry.js";
 // this.runtime.generation`が常に成立し、毎回CANCELLEDとして失敗する
 // (legacy-news-adapter.jsのfeed取得がgenerationを渡さないのと同じ理由)。
 export async function callElectronResearchIpc({ prefix, query, context, call, cancel }) {
+  // signalが呼び出し時点で既にabort済みだと"abort"イベントは二度と発火しないため、ここで
+  // 明示的にチェックする — 前段のproviderがcancellationで抜けた直後に後段providerが
+  // 呼ばれた場合、この早期returnが無いとMain process側の完全なHTTP呼び出しが無駄に走る
+  // (issue #193レビュー指摘)。
+  if (context?.signal?.aborted) throw new RequestCancelledError();
   const requestId = `${context?.requestId ?? "news"}:${prefix}:${query}`;
   const onAbort = () => { void cancel(requestId); };
   context?.signal?.addEventListener("abort", onAbort, { once: true });

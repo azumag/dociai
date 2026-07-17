@@ -23,6 +23,23 @@ test("callElectronResearchIpc builds a prefixed requestId, resolves the ok value
   assert.deepEqual(cancelled, [], "abort after settle must not fire cancel (listener was removed)");
 });
 
+test("callElectronResearchIpc short-circuits without calling `call` when the signal is already aborted (an 'abort' event never fires on an already-aborted signal)", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let called = false;
+  await assert.rejects(
+    callElectronResearchIpc({
+      prefix: "search",
+      query: "テスト",
+      context: { requestId: "run-1", signal: controller.signal },
+      call: async () => { called = true; return { ok: true, value: {} }; },
+      cancel: async () => {},
+    }),
+    (error) => isCancellation(error),
+  );
+  assert.equal(called, false, "must not spend a real Main-process call on a request that was already cancelled before it started");
+});
+
 test("callElectronResearchIpc maps error.code === CANCELLED to a recognizable cancellation, and other failures to a plain Error", async () => {
   await assert.rejects(
     callElectronResearchIpc({ prefix: "search", query: "q", context: {}, call: async () => ({ ok: false, error: { code: "CANCELLED" } }), cancel: async () => {} }),

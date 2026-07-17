@@ -164,6 +164,14 @@ test("mergeProviderResults normalizes full-width digits so half-width/full-width
   assert.equal(mergeProviderResults("c8", "見出し8", fullWidthConflict).coverage.hasConflictingClaims, true, "a full-width digit must still be recognized as a genuinely conflicting number");
 });
 
+test("mergeProviderResults strips thousands-separator commas before comparing numbers, so '1,000' and '1000' are recognized as the same value", () => {
+  const sameValueDifferentGrouping = [
+    createProviderResult("article", { facts: [{ text: "現場からの報道によると死者数は1,000人に上るとみられている", sourceUrl: "https://a.example/1", sourceName: "A" }], sources: [{ url: "https://a.example/1", sourceName: "A" }] }),
+    createProviderResult("news-search", { facts: [{ text: "現場からの報道によると死者数は1000人に上るとみられている", sourceUrl: "https://b.example/2", sourceName: "B" }], sources: [{ url: "https://b.example/2", sourceName: "B" }] }),
+  ];
+  assert.equal(mergeProviderResults("c9", "見出し9", sameValueDifferentGrouping).coverage.hasConflictingClaims, false, "'1,000' and '1000' are the same number and must not be flagged as a conflict");
+});
+
 test("buildResearchCacheKey buckets by hour, includes researchMode/candidateId to avoid cross-candidate leakage, and createResearchCache expires entries by TTL", () => {
   const now = Date.parse("2026-07-17T10:30:00Z");
   const key = buildResearchCacheKey({ query: "テスト", mode: "current", now, researchMode: "multi_source", candidateId: "c1" });
@@ -276,6 +284,37 @@ test("createResearchCoordinator caches bundles by query+mode+hour bucket", async
   const third = await coordinator.research({ candidate, mode: "current", modePolicy: { research: "article" } });
   assert.equal(calls, 2);
   assert.notEqual(third.facts[0].text, first.facts[0].text);
+});
+
+test("createResearchCoordinator's cache does not leak one candidate's bundle to a different candidate that cleans to the same query, nor across a researchMode change for the same candidate", async () => {
+  let calls = 0;
+  const provider = {
+    id: "article",
+    supports: () => true,
+    async research() {
+      calls += 1;
+      return createProviderResult("article", { facts: [{ text: `事実${calls}` }] });
+    },
+  };
+  const time = Date.parse("2026-07-17T10:00:00Z");
+  const cache = createResearchCache({ clock: () => time });
+  const coordinator = createResearchCoordinator({ providers: [provider], cache, clock: () => time });
+
+  const candidateA = { title: "首相が辞任", processingKey: "cand-a" };
+  const candidateB = { title: "首相が辞任", processingKey: "cand-b" };
+  const first = await coordinator.research({ candidate: candidateA, mode: "current", modePolicy: { research: "article" } });
+  const second = await coordinator.research({ candidate: candidateB, mode: "current", modePolicy: { research: "article" } });
+  assert.equal(calls, 2, "two different candidates sharing a cleaned query must each trigger their own provider call");
+  assert.equal(first.candidateId, "cand-a");
+  assert.equal(second.candidateId, "cand-b");
+
+  const cachedAgain = await coordinator.research({ candidate: candidateA, mode: "current", modePolicy: { research: "article" } });
+  assert.equal(calls, 2, "the same candidate/mode/researchMode must still hit the cache");
+  assert.equal(cachedAgain.candidateId, "cand-a");
+
+  const changedResearchMode = await coordinator.research({ candidate: candidateA, mode: "current", modePolicy: { research: "multi_source" } });
+  assert.ok(changedResearchMode);
+  assert.equal(calls, 3, "a researchMode change for the same candidate/mode/query must not reuse a stale cache entry");
 });
 
 test("createResearchStage (legacy no-op default) always returns null", async () => {
