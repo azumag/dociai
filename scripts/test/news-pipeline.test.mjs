@@ -291,3 +291,142 @@ test("createNewsPipelineCoordinator wires the legacy adapter end-to-end for mock
   assert.equal(spoken.length, 3, "mock news minus the duplicate title must all be delivered");
   assert.equal(coordinator.status().counts.read, 3);
 });
+
+test("random news persona is resolved once per item and stays identical across connector, prompt, onRead, speech, and diagnostics", async () => {
+  const personas = {
+    a: { id: "a", name: "A", connector: "connector-a", enabled: true, systemPrompt: "tone-a", voice: { engine: "webspeech", rate: 0.8 } },
+    b: { id: "b", name: "B", connector: "connector-b", enabled: true, systemPrompt: "tone-b", voice: { engine: "voicevox", speaker: 7 } },
+    disabled: { id: "disabled", name: "Disabled", connector: "connector-a", enabled: false, voice: {} },
+  };
+  const config = { news: { enabled: true, mode: "simple", maxItems: 2, randomPersona: true, personas: ["missing", "disabled", "a", "b"], sources: [] } };
+  const connectorCalls = [];
+  const promptPersonas = [];
+  const reads = [];
+  const speech = [];
+  const sequence = [0, 0.99];
+  let randomIndex = 0;
+  const coordinator = createNewsPipelineCoordinator({
+    getConfig: () => config,
+    getConnector: (connectorId) => ({ chat: async () => { connectorCalls.push(connectorId); return { text: `text-${connectorId}` }; } }),
+    personaRouter: { get: (id) => personas[id] ?? null, defaultPersona: () => personas.a },
+    contextBuilder: { build: ({ persona }) => { promptPersonas.push(persona.id); return { messages: [{ role: "user", content: persona.systemPrompt }], debugText: persona.id }; } },
+    speechQueue: { enqueue: (item) => { speech.push(item); return { ...item, state: "waiting" }; } },
+    onRead: ({ persona, debugText }) => reads.push({ personaId: persona.id, debugText }),
+    random: () => sequence[randomIndex++],
+    fetchAll: async () => [
+      { guid: "one", processingKey: "news:one", title: "one", sourceName: "source" },
+      { guid: "two", processingKey: "news:two", title: "two", sourceName: "source" },
+    ],
+  });
+
+  const result = await coordinator.run({ generation: 1, requestId: "random-persona" });
+  assert.equal(result.status, "delivered");
+  assert.deepEqual(promptPersonas, ["a", "b"]);
+  assert.deepEqual(connectorCalls, ["connector-a", "connector-b"]);
+  assert.deepEqual(reads, [{ personaId: "a", debugText: "a" }, { personaId: "b", debugText: "b" }]);
+  assert.deepEqual(speech.map(({ personaId, voice }) => ({ personaId, voice })), [
+    { personaId: "a", voice: personas.a.voice },
+    { personaId: "b", voice: personas.b.voice },
+  ]);
+  assert.deepEqual(result.diagnostics.personaSelections, [
+    { candidateId: "news:one", personaId: "a" },
+    { candidateId: "news:two", personaId: "b" },
+  ]);
+  assert.equal(randomIndex, 2, "selection must consume exactly one random sample per item attempt");
+});
+
+test("random news persona works in topic/current/simple modes without changing each mode policy", async () => {
+  for (const mode of ["topic", "current", "simple"]) {
+    const item = { guid: mode, processingKey: `news:${mode}`, title: mode, sourceName: "source" };
+    const persona = { id: "p", name: "P", connector: "mock", enabled: true, voice: {} };
+    let seenMode = null;
+    const seenPersonas = [];
+    const coordinator = createNewsPipelineCoordinator({
+      getConfig: () => baseConfig({ mode, randomPersona: true, personas: ["p"] }),
+      getConnector: () => ({ chat: async () => ({ text: "ok" }) }),
+      personaRouter: { get: (id) => id === "p" ? persona : null, defaultPersona: () => persona },
+      contextBuilder: { build: ({ persona: selected }) => { seenPersonas.push(selected.id); return { messages: [], debugText: selected.id }; } },
+      speechQueue: { enqueue: () => ({ state: "waiting" }) },
+      fetchAll: async () => [item],
+      stages: {
+        research: { id: "research", run: async ({ modePolicy }) => { seenMode = modePolicy; return null; } },
+      },
+    });
+    const result = await coordinator.run({ generation: 1 });
+    assert.equal(result.status, "delivered", mode);
+    assert.deepEqual(seenPersonas, ["p"], `${mode} must use the shared random-persona adapter path`);
+    assert.equal(seenMode.mode, mode);
+    assert.equal(seenMode.allowOpinion, mode !== "simple");
+  }
+});
+
+test("a retry is a new item attempt and re-resolves the random news persona", async () => {
+  const item = { guid: "retry", processingKey: "news:retry", title: "retry", sourceName: "source" };
+  const personas = {
+    a: { id: "a", name: "A", connector: "connector-a", enabled: true, voice: {} },
+    b: { id: "b", name: "B", connector: "connector-b", enabled: true, voice: {} },
+  };
+  const now = { value: 1000 };
+  const store = new MemoryItemProcessingStore({ clock: () => now.value });
+  const connectorCalls = [];
+  const reads = [];
+  const speech = [];
+  const samples = [0, 0.99];
+  let randomIndex = 0;
+  const coordinator = createNewsPipelineCoordinator({
+    getConfig: () => baseConfig({ randomPersona: true, personas: ["a", "b"], maxItems: 1, retry: { maxAttempts: 3, initialDelaySeconds: 1, maxDelaySeconds: 1 } }),
+    getConnector: (connectorId) => ({ chat: async () => {
+      connectorCalls.push(connectorId);
+      if (connectorId === "connector-a") throw Object.assign(new Error("temporary"), { kind: "server" });
+      return { text: "recovered" };
+    } }),
+    personaRouter: { get: (id) => personas[id] ?? null, defaultPersona: () => personas.a },
+    contextBuilder: { build: ({ persona }) => ({ messages: [], debugText: persona.id }) },
+    speechQueue: { enqueue: (entry) => { speech.push(entry); return { state: "waiting" }; } },
+    onRead: ({ persona }) => reads.push(persona.id),
+    random: () => samples[randomIndex++],
+    fetchAll: async () => [item],
+    store,
+    clock: () => now.value,
+  });
+
+  const first = await coordinator.run({ generation: 1, requestId: "first" });
+  assert.deepEqual(first.diagnostics.personaSelections, [{ candidateId: "news:retry", personaId: "a" }]);
+  assert.equal(store.get(item.processingKey).state, "retry_wait");
+  now.value = 2000;
+  const second = await coordinator.run({ generation: 1, requestId: "second" });
+  assert.equal(second.status, "delivered");
+  assert.deepEqual(second.diagnostics.personaSelections, [{ candidateId: "news:retry", personaId: "b" }]);
+  assert.deepEqual(connectorCalls, ["connector-a", "connector-b"]);
+  assert.deepEqual(reads, ["b"]);
+  assert.deepEqual(speech.map((entry) => entry.personaId), ["b"]);
+  assert.equal(randomIndex, 2);
+});
+
+test("stale random-persona generation never reaches onRead or speech delivery", async () => {
+  const item = { guid: "stale", processingKey: "news:stale", title: "stale", sourceName: "source" };
+  const persona = { id: "p", name: "P", connector: "mock", enabled: true, voice: {} };
+  const store = new MemoryItemProcessingStore({ clock: () => 1000 });
+  let current = true;
+  let randomCalls = 0;
+  let readCalls = 0;
+  let speechCalls = 0;
+  const coordinator = createNewsPipelineCoordinator({
+    getConfig: () => baseConfig({ randomPersona: true, personas: ["p"] }),
+    getConnector: () => ({ chat: async () => { current = false; return { text: "stale text" }; } }),
+    personaRouter: { get: () => persona, defaultPersona: () => persona },
+    contextBuilder: { build: () => ({ messages: [], debugText: "p" }) },
+    speechQueue: { enqueue: () => { speechCalls++; return { state: "waiting" }; } },
+    onRead: () => { readCalls++; },
+    random: () => { randomCalls++; return 0; },
+    fetchAll: async () => [item],
+    store,
+    clock: () => 1000,
+  });
+
+  await assert.rejects(coordinator.run({ generation: 1, isCurrent: () => current }), isCancellation);
+  assert.equal(store.get(item.processingKey)?.state, "unread");
+  assert.equal(randomCalls, 1);
+  assert.equal(readCalls, 0);
+  assert.equal(speechCalls, 0);
+});

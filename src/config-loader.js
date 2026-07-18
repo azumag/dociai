@@ -208,6 +208,21 @@ export function validateConfig(cfg) {
     if (cfg.news.persona && !(cfg.personas ?? []).some((p) => p?.id === cfg.news.persona)) {
       errors.push(`news.persona "${cfg.news.persona}" が personas に存在しません`);
     }
+    if (cfg.news.randomPersona !== undefined && typeof cfg.news.randomPersona !== "boolean") {
+      errors.push("news.randomPersona は真偽値で指定してください");
+    }
+    if (cfg.news.personas !== undefined && !Array.isArray(cfg.news.personas)) {
+      errors.push("news.personas はペルソナIDの配列で指定してください");
+    } else {
+      for (const pid of cfg.news.personas ?? []) {
+        const persona = (cfg.personas ?? []).find((p) => p?.id === pid);
+        if (pid && !persona) warnings.push(`news.personas の "${pid}" が personas に存在しないため抽選対象外です`);
+        else if (persona?.enabled === false) warnings.push(`news.personas の "${pid}" は無効化されているため抽選対象外です`);
+      }
+    }
+    if (cfg.news.randomPersona && !(cfg.news.personas ?? []).length) {
+      warnings.push("news.randomPersona が true ですが news.personas が空です。news.persona / router.defaultPersona にフォールバックします");
+    }
     // news.schedule (issue #193): 時刻slot起動。既存configには存在しない完全にoptionalな
     // 追加field — 未指定ならNewsScheduleRunnerは何もしない (既存挙動に影響しない)。
     if (cfg.news.schedule !== undefined) {
@@ -265,9 +280,16 @@ export function validateConfig(cfg) {
     if (cfg.topics.persona && !(cfg.personas ?? []).some((p) => p?.id === cfg.topics.persona)) {
       errors.push(`topics.persona "${cfg.topics.persona}" が personas に存在しません`);
     }
-    for (const pid of cfg.topics.personas ?? []) {
-      if (pid && !(cfg.personas ?? []).some((p) => p?.id === pid)) {
-        errors.push(`topics.personas の "${pid}" が personas に存在しません`);
+    if (cfg.topics.randomPersona !== undefined && typeof cfg.topics.randomPersona !== "boolean") {
+      errors.push("topics.randomPersona は真偽値で指定してください");
+    }
+    if (cfg.topics.personas !== undefined && !Array.isArray(cfg.topics.personas)) {
+      errors.push("topics.personas はペルソナIDの配列で指定してください");
+    } else {
+      for (const pid of cfg.topics.personas ?? []) {
+        if (pid && !(cfg.personas ?? []).some((p) => p?.id === pid)) {
+          warnings.push(`topics.personas の "${pid}" が personas に存在しないため抽選対象外です`);
+        }
       }
     }
     if (cfg.topics.randomPersona && !(cfg.topics.personas ?? []).length) {
@@ -476,6 +498,8 @@ export function applyDefaults(cfg) {
           maxItems: 3,
           mode: "topic",
           dedupe: true,
+          randomPersona: false,
+          personas: [],
           ...newsRest,
           retry: { ...DEFAULT_READER_RETRY, ...(newsRest.retry ?? {}) },
           enabled: newsSources.length ? !!cfg.news.enabled : false,
@@ -485,6 +509,8 @@ export function applyDefaults(cfg) {
           enabled: false,
           mode: "topic",
           dedupe: true,
+          randomPersona: false,
+          personas: [],
           retry: { ...DEFAULT_READER_RETRY },
           sources: [],
         },

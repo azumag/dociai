@@ -6,7 +6,8 @@ import { CONFIG_REGISTRY, registryIds } from "../../src/config/config-registry.j
 import { CURRENT_CONFIG_SCHEMA } from "../../src/config/config-schema.js";
 import { CONFIG_UI_METADATA } from "../../src/config/config-ui-metadata.js";
 import { validateConfigStructure } from "../../src/config/config-validation.js";
-import { commentReaderDefaults } from "../../src/config/config-defaults.js";
+import { applyConfigDefaults, commentReaderDefaults } from "../../src/config/config-defaults.js";
+import { normalizeConfig } from "../../src/config/config-normalize.js";
 
 test("current example validates with the shared pure schema", async () => {
   const config = JSON.parse(await fs.readFile(new URL("../../config.local.example.json", import.meta.url), "utf8"));
@@ -14,6 +15,15 @@ test("current example validates with the shared pure schema", async () => {
   assert.equal(result.ok, true);
   assert.equal(config.schemaVersion, CURRENT_SCHEMA_VERSION);
   assert.equal(CURRENT_CONFIG_SCHEMA.version, CURRENT_SCHEMA_VERSION);
+});
+
+test("news random persona defaults preserve legacy behavior and candidate IDs normalize deterministically", () => {
+  const defaulted = applyConfigDefaults({ personas: [], news: { persona: "fixed" } });
+  assert.equal(defaulted.news.randomPersona, false);
+  assert.deepEqual(defaulted.news.personas, []);
+  assert.equal(defaulted.news.persona, "fixed");
+  const normalized = normalizeConfig({ personas: [], news: { personas: [" b ", "a", "b", ""] } });
+  assert.deepEqual(normalized.news.personas, ["a", "b"]);
 });
 
 test("structured issues carry path, code, severity, source, and immutable metadata", () => {

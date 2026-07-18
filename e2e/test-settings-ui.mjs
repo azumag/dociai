@@ -128,6 +128,7 @@ try {
   );
   const personaText = await visibleText(page);
   check("ペルソナ一覧に相棒AI が表示される", personaText.includes("相棒AI"), personaText.slice(0, 120).replace(/\n/g, " "));
+  await page.click('[data-config-path="personas.1.enabled"]');
 
   // 5. トリガータブ
   await page.click('.settings-sidebar button[data-tab="triggers"]');
@@ -185,6 +186,26 @@ try {
     collapseEmoji.click();
   });
 
+  // ニュースitem単位のランダムペルソナ設定。無効personaは保存候補として残せるが、
+  // UI上で抽選対象外と明示される。
+  await page.click('.settings-sidebar button[data-tab="news"]');
+  await page.waitForFunction(() => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "news", { timeout: 2000 });
+  await page.click('[data-config-path="news.randomPersona"]');
+  await page.waitForSelector('.persona-candidate-pool[data-persona-section="news"]');
+  const newsPoolText = await page.$eval('.persona-candidate-pool[data-persona-section="news"]', (element) => element.textContent);
+  check("ニュースのランダム候補UIは無効personaを抽選対象外と表示する", newsPoolText.includes("ツッコミAI") && newsPoolText.includes("無効・抽選対象外"), newsPoolText.slice(0, 180));
+  check("ニュースのランダム候補UIは削除済みpersonaを保持して明示する", newsPoolText.includes("deleted_ai") && newsPoolText.includes("存在しません・抽選対象外"), newsPoolText.slice(0, 180));
+  await page.click('.persona-candidate-pool[data-persona-section="news"] input[value="deleted_ai"]');
+  const emptyWarning = await page.$eval('.persona-candidate-pool[data-persona-section="news"] .settings-inline-warning', (element) => ({ hidden: element.hidden, text: element.textContent }));
+  check("ニュースのランダム候補が0件ならフォールバック警告を表示する", !emptyWarning.hidden && emptyWarning.text.includes("候補が0件"), JSON.stringify(emptyWarning));
+  await page.click('.persona-candidate-pool[data-persona-section="news"] input[value="partner_ai"]');
+  await page.click('.persona-candidate-pool[data-persona-section="news"] input[value="tsukkomi_ai"]');
+  const newsPoolState = await page.evaluate(() => ({
+    selected: [...document.querySelectorAll('.persona-candidate-pool[data-persona-section="news"] input:checked')].map((input) => input.value),
+    warningHidden: document.querySelector('.persona-candidate-pool[data-persona-section="news"] .settings-inline-warning')?.hidden,
+  }));
+  check("ニュースのランダム候補を複数選択できる", newsPoolState.selected.includes("partner_ai") && newsPoolState.selected.includes("tsukkomi_ai") && newsPoolState.warningHidden, JSON.stringify(newsPoolState));
+
   // 8. コネクタタブに戻して新規コネクタを追加
   await page.click('.settings-sidebar button[data-tab="connectors"]');
   await page.waitForFunction(
@@ -229,6 +250,7 @@ try {
   check("config.local.json に connector maxTokens が保存される", diskConfig.connectors?.mock_main?.maxTokens === 32768);
   check("commentReaderの3エンジン別音声設定が保存される", diskConfig.commentReader?.webspeech?.rate === 0.8 && diskConfig.commentReader?.voicevox?.speed === 1.3 && diskConfig.commentReader?.bouyomi?.speed === 140);
   check("commentReaderの絵文字連投抑制が保存される", diskConfig.commentReader?.collapseConsecutiveEmoji === true);
+  check("ニュースのランダムペルソナ設定が保存される", diskConfig.news?.randomPersona === true && diskConfig.news?.personas?.includes("partner_ai") && diskConfig.news?.personas?.includes("tsukkomi_ai"));
 
   // 11c. ページを再読み込みしても編集内容が残る (ダウンロード→手動コピー不要であることの確認)
   await page.reload({ waitUntil: "networkidle0" });
@@ -251,6 +273,13 @@ try {
     bouyomi: document.querySelector('[data-config-path="commentReader.bouyomi.speed"]')?.value,
   }));
   check("再読み込み後も3エンジン別音声設定が再表示される", reloadedCommentVoices.webspeech === "0.8" && reloadedCommentVoices.voicevox === "1.3" && reloadedCommentVoices.bouyomi === "140", JSON.stringify(reloadedCommentVoices));
+  await page.click('.settings-sidebar button[data-tab="news"]');
+  await page.waitForFunction(() => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "news", { timeout: 2000 });
+  const reloadedNewsPersonas = await page.evaluate(() => ({
+    random: document.querySelector('[data-config-path="news.randomPersona"]')?.checked,
+    selected: [...document.querySelectorAll('.persona-candidate-pool[data-persona-section="news"] input:checked')].map((input) => input.value),
+  }));
+  check("再読み込み後もニュースのランダム候補が復元される", reloadedNewsPersonas.random && reloadedNewsPersonas.selected.includes("partner_ai") && reloadedNewsPersonas.selected.includes("tsukkomi_ai"), JSON.stringify(reloadedNewsPersonas));
   const client = await page.target().createCDPSession();
   await client.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: DOWNLOAD_DIR });
   // 既存のダウンロードファイルがあれば掃除

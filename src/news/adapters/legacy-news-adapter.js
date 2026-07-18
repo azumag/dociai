@@ -10,6 +10,7 @@ import { RequestCancelledError, isCancellation } from "../../runtime/request-reg
 import { createReaderItemKey } from "../../readers/reader-runner.js";
 import { buildOutputLimitWarning, isOutputLimitFinishReason } from "../../ai-finish-reason.js";
 import { guardPipelineContext } from "../contracts.js";
+import { resolvePersona as selectPersona } from "../../personas/persona-selection-policy.js";
 
 const MOCK_NEWS = [
   { title: "ローカルPoCが初起動", description: "配信AIコンパニオンのローカルPoCが初めて起動し、コメントへの音声応答に成功した。", guid: "mock-1", publishedAt: "2026-07-01T09:00:00+09:00", sourceName: "mock" },
@@ -37,7 +38,7 @@ function parseDate(value) {
   return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
 
-export function createLegacyNewsAdapter({ getConfig, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {} }) {
+export function createLegacyNewsAdapter({ getConfig, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, random = Math.random }) {
   async function fetchSource(src, sourceIndex, context = {}) {
     if (src.type === "mock") return [...MOCK_NEWS];
     if (src.type !== "rss") throw new Error(`未対応のソース種別 "${src.type}"`);
@@ -118,7 +119,13 @@ export function createLegacyNewsAdapter({ getConfig, getConnector, personaRouter
 
   function resolvePersona() {
     const news = getConfig().news ?? {};
-    return (news.persona && personaRouter.get(news.persona)) || personaRouter.defaultPersona();
+    return selectPersona({
+      fixedPersonaId: news.persona,
+      randomEnabled: news.randomPersona,
+      candidatePersonaIds: news.personas,
+      personaRouter,
+      random,
+    });
   }
 
   function resolveConnector(persona) {

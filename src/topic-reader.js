@@ -7,6 +7,7 @@ import { MemoryItemProcessingStore } from "./readers/item-processing-store.js";
 import { createReaderItemKey, readerStatus, retryOptions } from "./readers/reader-runner.js";
 import { retryDecision } from "./readers/retry-policy.js";
 import { buildOutputLimitWarning, isOutputLimitFinishReason } from "./ai-finish-reason.js";
+import { resolvePersona } from "./personas/persona-selection-policy.js";
 
 function normalizeTitle(title) {
   return (title ?? "")
@@ -22,7 +23,7 @@ function parseDate(value) {
 }
 
 export class TopicReader {
-  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, webResearcher = null, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now(), isRuntimeEnabled = () => true }) {
+  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, webResearcher = null, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now(), random = Math.random, isRuntimeEnabled = () => true }) {
     this.config = config;
     this.getConnector = getConnector;
     this.personaRouter = personaRouter;
@@ -33,6 +34,7 @@ export class TopicReader {
     this.onRead = onRead;
     this.store = store;
     this.clock = clock;
+    this.random = random;
     this.isRuntimeEnabled = isRuntimeEnabled;
     this.generation = 0;
     this.busy = false;
@@ -88,7 +90,7 @@ export class TopicReader {
       for (const item of picks) {
         this.#guard(context);
         const persona = this.#resolvePersona(topics);
-        if (!persona || !persona.enabled) {
+        if (!persona || persona.enabled === false) {
           if (persona) this.log(`話題担当ペルソナ「${persona.name}」が無効化中のためスキップしました`);
           continue;
         }
@@ -278,19 +280,26 @@ export class TopicReader {
   // 実行前の設定不備チェック用。乱数は消費せず「そもそも解決しうるペルソナ設定があるか」だけを見る
   // (有効/無効の判定はitemごとの#resolvePersonaに任せる)。
   #hasUsablePersonaConfig(topics) {
-    if (topics.randomPersona && Array.isArray(topics.personas) && topics.personas.length) return true;
-    return !!((topics.persona && this.personaRouter.get(topics.persona)) || this.personaRouter.defaultPersona());
+    return !!resolvePersona({
+      fixedPersonaId: topics.persona,
+      randomEnabled: topics.randomPersona,
+      candidatePersonaIds: topics.personas,
+      personaRouter: this.personaRouter,
+      random: () => 0,
+    });
   }
 
   // topics.randomPersona が有効な場合、topics.personas (有効なものだけ) から毎item抽選する。
   // これにより同じ実行内でも話題ごとに担当ペルソナが変わりうる。無効時/候補が尽きた場合は
   // 従来通り topics.persona → router.defaultPersona の順にフォールバックする。
   #resolvePersona(topics) {
-    if (topics.randomPersona && Array.isArray(topics.personas) && topics.personas.length) {
-      const candidates = topics.personas.map((id) => this.personaRouter.get(id)).filter((p) => p?.enabled);
-      if (candidates.length) return candidates[Math.floor(Math.random() * candidates.length)];
-    }
-    return (topics.persona && this.personaRouter.get(topics.persona)) || this.personaRouter.defaultPersona();
+    return resolvePersona({
+      fixedPersonaId: topics.persona,
+      randomEnabled: topics.randomPersona,
+      candidatePersonaIds: topics.personas,
+      personaRouter: this.personaRouter,
+      random: this.random,
+    });
   }
 
   #getConnector(persona) {
