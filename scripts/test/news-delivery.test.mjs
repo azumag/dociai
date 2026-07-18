@@ -130,6 +130,43 @@ test("createNewsDeliveryStage accepts, tags metadata, and reflects a mic-hold as
   assert.deepEqual(result.attribution[0].sourceName, "A");
 });
 
+test("createNewsDeliveryStage blocks delivery (non-retryable) when a required-attribution source has no displayable name/URL", async () => {
+  const speechQueue = fakeSpeechQueue();
+  const stage = createNewsDeliveryStage({ speechQueue });
+  const research = { sources: [{ id: "s1", url: null, sourceName: "", license: { name: "CC BY 4.0", attributionRequired: true } }] };
+  const item = { processingKey: "p1", title: "見出し" };
+  const persona = { id: "persona-1", name: "P", voice: {} };
+  await assert.rejects(
+    stage.run({ persona, item, text: "本文", research, modePolicy: { mode: "current" }, runId: "run-1" }),
+    (error) => error instanceof PipelineStageError && error.retryable === false,
+  );
+  assert.equal(speechQueue.enqueued.length, 0, "must not enqueue before the block check");
+});
+
+test("createNewsDeliveryStage downgrades to a warning log (and still delivers) when blockOnUnattributableRequiredSource is false", async () => {
+  const speechQueue = fakeSpeechQueue();
+  const logs = [];
+  const stage = createNewsDeliveryStage({ speechQueue, blockOnUnattributableRequiredSource: false, log: (message, level) => logs.push({ message, level }) });
+  const research = { sources: [{ id: "s1", url: null, sourceName: "", license: { name: "CC BY 4.0", attributionRequired: true } }] };
+  const item = { processingKey: "p1", title: "見出し" };
+  const persona = { id: "persona-1", name: "P", voice: {} };
+  const result = await stage.run({ persona, item, text: "本文", research, modePolicy: { mode: "current" }, runId: "run-1" });
+  assert.equal(result.status, "accepted");
+  assert.equal(speechQueue.enqueued.length, 1);
+  assert.ok(logs.some((entry) => entry.level === "warn" && entry.message.includes("attribution")));
+});
+
+test("createNewsDeliveryStage delivers normally when a required-attribution source DOES have a displayable name/URL", async () => {
+  const speechQueue = fakeSpeechQueue();
+  const stage = createNewsDeliveryStage({ speechQueue });
+  const research = { sources: [{ id: "s1", url: "https://a.example", sourceName: "A", license: { name: "CC BY 4.0", attributionRequired: true } }] };
+  const item = { processingKey: "p1", title: "見出し" };
+  const persona = { id: "persona-1", name: "P", voice: {} };
+  const result = await stage.run({ persona, item, text: "本文", research, modePolicy: { mode: "current" }, runId: "run-1" });
+  assert.equal(result.status, "accepted");
+  assert.equal(speechQueue.enqueued.length, 1);
+});
+
 test("createNewsDeliveryStage throws a retryable PipelineStageError on queue-limit drop", async () => {
   const speechQueue = fakeSpeechQueue({ dropNext: true });
   const stage = createNewsDeliveryStage({ speechQueue });

@@ -26,16 +26,26 @@ export function createDeliverStage({ adapter }) {
 // なら SpeechQueue へ subscribe() を足す専用の変更として別途行う。既定の"on-queue-accept"
 // (受理した時点でcommit可) だけをこの回で提供する。
 import { PipelineStageError } from "../contracts.js";
-import { buildAttributions } from "../delivery/news-attribution.js";
+import { buildAttributions, hasUnattributableRequiredSource } from "../delivery/news-attribution.js";
 import { createNewsSpeechMetadata } from "../delivery/news-delivery-contract.js";
 import { decideQueueAcceptance } from "../delivery/news-queue-policy.js";
 import { TERMINAL_SPEECH_STATES } from "../../speech/speech-item.js";
 
-export function createNewsDeliveryStage({ speechQueue, sourceLabel = "newstalk", deferWhenQueueAbove = null, priority, log = () => {} }) {
+export function createNewsDeliveryStage({ speechQueue, sourceLabel = "newstalk", deferWhenQueueAbove = null, priority, log = () => {}, blockOnUnattributableRequiredSource = true }) {
   return {
     id: "deliver",
     async run({ persona, item, text, research, modePolicy, runId }, _context) {
       const attribution = buildAttributions(research, item);
+      // CC等attributionRequiredなsourceの出典を実際に表示できない (name/URLどちらも無い)
+      // 場合、warningで済ませず配信自体を止める (issue #193「delivery failureまたは
+      // 設定に応じたblocking」)。データ不備は再試行しても直らないためnon-retryable。
+      // blockOnUnattributableRequiredSource: falseで警告ログのみへ緩和できる。
+      if (hasUnattributableRequiredSource(attribution)) {
+        if (blockOnUnattributableRequiredSource) {
+          throw new PipelineStageError(`attribution requiredな出典を表示できないため配信をblockしました [${item.title}]`, { stage: "deliver", kind: "unattributable" });
+        }
+        log(`attribution requiredな出典の名前/URLが不足しています [${item.title}]`, "warn");
+      }
       const metadata = createNewsSpeechMetadata({
         runId: runId ?? null,
         candidateId: item.processingKey ?? item.guid ?? null,
