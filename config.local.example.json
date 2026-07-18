@@ -182,6 +182,8 @@
     "enabled": true,
     "trigger": "news_every_30min",
     "persona": "partner_ai",
+    "randomPersona": false,
+    "personas": ["partner_ai", "tsukkomi_ai"],
     "mode": "topic",
     "sources": [
       {

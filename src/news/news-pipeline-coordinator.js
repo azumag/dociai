@@ -78,14 +78,6 @@ export class NewsPipelineCoordinator {
       this.log(`ニュース候補 ${items.length}件 (再処理可能 ${eligibleCount}件、読み上げ ${picks.length}件)`);
       if (!picks.length) return { status: PIPELINE_STATUS.NO_CANDIDATE, diagnostics };
 
-      const persona = this.adapter.resolvePersona();
-      if (!persona) throw new Error("ニュース読み上げに使えるペルソナがありません");
-      if (!persona.enabled) {
-        this.log(`ニュース担当ペルソナ「${persona.name}」が無効化中のためスキップしました`);
-        return { status: PIPELINE_STATUS.SKIPPED, diagnostics };
-      }
-      const connector = this.adapter.resolveConnector(persona);
-      if (!connector) return { status: PIPELINE_STATUS.FAILED, stage: "generate", diagnostics };
       if (!this.adapter.canDeliver()) {
         this.log("ニュース音声キューが利用できません。item は未読のままです", "error");
         return { status: PIPELINE_STATUS.FAILED, stage: "deliver", diagnostics };
@@ -95,6 +87,24 @@ export class NewsPipelineCoordinator {
       let lastCandidateId = null;
       for (const item of picks) {
         guardPipelineContext(context);
+        // attempt開始時に1度だけ解決し、生成・rewrite・表示・deliveryの全stageで同じ
+        // personaを使う。次回retryではこの地点へ戻るため、話題側と同じく再抽選される。
+        const persona = this.adapter.resolvePersona();
+        if (!persona) {
+          this.log("ニュース読み上げに使えるペルソナがありません", "error");
+          diagnostics.errorCode = "persona_unavailable";
+          return { status: PIPELINE_STATUS.FAILED, stage: "generate", candidateId: item.processingKey, diagnostics };
+        }
+        diagnostics.personaSelections.push({ candidateId: item.processingKey, personaId: persona.id });
+        if (persona.enabled === false) {
+          this.log(`ニュース担当ペルソナ「${persona.name}」が無効化中のためスキップしました`);
+          return { status: PIPELINE_STATUS.SKIPPED, candidateId: item.processingKey, diagnostics };
+        }
+        const connector = this.adapter.resolveConnector(persona);
+        if (!connector) {
+          diagnostics.errorCode = "connector_unavailable";
+          return { status: PIPELINE_STATUS.FAILED, stage: "generate", candidateId: item.processingKey, diagnostics };
+        }
         const record = this.store.begin(item.processingKey, this.generation, this.clock());
         if (!record) continue;
         lastCandidateId = item.processingKey;
@@ -205,8 +215,9 @@ export function createNewsPipelineCoordinator({
   fetchAll: fetchAllOverride,
   stages: stageOverrides = {},
   maxRewrites = 1,
+  random = Math.random,
 }) {
-  const adapter = createLegacyNewsAdapter({ getConfig, getConnector, personaRouter, contextBuilder, speechQueue, log });
+  const adapter = createLegacyNewsAdapter({ getConfig, getConnector, personaRouter, contextBuilder, speechQueue, log, random });
   const stages = {
     acquire: stageOverrides.acquire ?? createAcquireStage({ fetchAll: fetchAllOverride ?? adapter.fetchAll }),
     select: stageOverrides.select ?? createSelectStage({ store, clock, historyStore }),

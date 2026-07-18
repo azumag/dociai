@@ -1423,6 +1423,15 @@ body.obs.transparent { background: transparent; }
   color: var(--cue);
   background: rgba(255, 176, 0, 0.07);
 }
+.chip-check.is-unavailable {
+  border-style: dashed;
+  color: var(--ink-dim);
+}
+.settings-inline-warning {
+  margin: 8px 0 0;
+  color: var(--cue);
+  font-size: 12px;
+}
 
 /* ---- レスポンシブ ---- */
 @media (max-width: 899px) {

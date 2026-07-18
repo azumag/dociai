@@ -214,16 +214,10 @@ test("TopicReader randomPersona picks per item from the enabled candidate pool",
     { guid: "2", title: "t2", sourceName: "todoist" },
     { guid: "3", title: "t3", sourceName: "todoist" },
   ]);
-  // candidates = [a, b] (c is filtered out for being disabled); floor(random*2) selects the index.
   const sequence = [0, 0.9, 0.4];
   let i = 0;
-  const originalRandom = Math.random;
-  Math.random = () => sequence[i++ % sequence.length];
-  try {
-    await reader.run({ generation: 1 });
-  } finally {
-    Math.random = originalRandom;
-  }
+  reader.random = () => sequence[i++ % sequence.length];
+  await reader.run({ generation: 1 });
   assert.deepEqual(seenPersonas, ["a", "b", "a"]);
   assert.equal(reader.status().counts.read, 3);
 });

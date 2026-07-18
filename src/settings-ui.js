@@ -487,12 +487,15 @@ export class SettingsUI {
     return this.#attachFieldInput(shell, sel, path);
   }
 
-  #pathCheckbox(label, path, { value = false } = {}) {
+  #pathCheckbox(label, path, { value = false, onChange = null } = {}) {
     const shell = this.#fieldShell(label, path, { inline: true });
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = !!value;
-    cb.addEventListener("change", () => this.#setPath(this.draft, path, cb.checked));
+    cb.addEventListener("change", () => {
+      this.#setPath(this.draft, path, cb.checked);
+      onChange?.(cb.checked);
+    });
     return this.#attachFieldInput(shell, cb, path);
   }
 
@@ -1111,9 +1114,69 @@ export class SettingsUI {
   }
 
   // ---- news ----
+  #personaCandidatePool(section, selectedIds = []) {
+    const selected = new Set(Array.isArray(selectedIds) ? selectedIds : []);
+    const personas = this.draft.personas ?? [];
+    const personasById = new Map(personas.map((persona) => [persona.id, persona]));
+    const candidateIds = [...new Set([...personas.map((persona) => persona.id), ...selected])].filter(Boolean);
+    const poolWrap = document.createElement("div");
+    poolWrap.className = "field persona-candidate-pool";
+    poolWrap.dataset.personaSection = section;
+    const poolLab = document.createElement("span");
+    poolLab.className = "field-label";
+    poolLab.textContent = "personas (ランダム候補)";
+    const poolBox = document.createElement("div");
+    poolBox.className = "checkbox-group";
+    const warning = document.createElement("p");
+    warning.className = "settings-inline-warning";
+    warning.setAttribute("role", "status");
+
+    const refreshWarning = () => {
+      const validCount = [...selected].filter((id) => personasById.get(id)?.enabled !== false && personasById.has(id)).length;
+      warning.textContent = selected.size === 0
+        ? "候補が0件です。固定ペルソナ、またはdefaultペルソナへフォールバックします。"
+        : validCount === 0
+          ? "有効な候補がありません。固定ペルソナ、またはdefaultペルソナへフォールバックします。"
+          : "";
+      warning.hidden = !warning.textContent;
+    };
+
+    for (const pid of candidateIds) {
+      const persona = personasById.get(pid);
+      const unavailable = !persona || persona.enabled === false;
+      const lab = document.createElement("label");
+      lab.className = `chip-check${unavailable ? " is-unavailable" : ""}`;
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = pid;
+      cb.checked = selected.has(pid);
+      cb.addEventListener("change", () => {
+        if (cb.checked) selected.add(pid); else selected.delete(pid);
+        this.draft[section].personas = [...selected];
+        refreshWarning();
+      });
+      const description = !persona
+        ? `${pid} (存在しません・抽選対象外)`
+        : `${persona.name ?? pid} (${pid})${persona.enabled === false ? " — 無効・抽選対象外" : ""}`;
+      lab.append(cb, document.createTextNode(description));
+      poolBox.append(lab);
+    }
+    if (!candidateIds.length) {
+      const empty = document.createElement("span");
+      empty.className = "muted";
+      empty.textContent = "(ペルソナがありません)";
+      poolBox.append(empty);
+    }
+    refreshWarning();
+    poolWrap.append(poolLab, poolBox, warning);
+    return poolWrap;
+  }
+
   #renderNews() {
     const n = this.draft.news ?? { enabled: false, sources: [], mode: "topic" };
     if (!this.draft.news) this.draft.news = n;
+    if (!Array.isArray(n.sources)) n.sources = [];
+    if (!Array.isArray(n.personas)) n.personas = [];
     const triggerIds = Object.keys(this.draft.triggers ?? {});
     const personaIds = (this.draft.personas ?? []).map((p) => p.id);
 
@@ -1125,11 +1188,19 @@ export class SettingsUI {
     g.className = "card-grid";
     g.append(this.#pathCheckbox("news.enabled", "news.enabled", { value: n.enabled }));
     g.append(this.#pathSelect("trigger", ["", ...triggerIds], "news.trigger", { value: n.trigger ?? "" }));
-    g.append(this.#pathSelect("persona", ["", ...personaIds], "news.persona", { value: n.persona ?? "" }));
+    g.append(this.#pathSelect("persona (固定/フォールバック)", ["", ...personaIds], "news.persona", { value: n.persona ?? "" }));
     g.append(this.#pathSelect("mode", NEWS_MODES, "news.mode", { value: n.mode ?? "topic" }));
     g.append(this.#pathField("maxItems", "news.maxItems", { type: "number", value: n.maxItems ?? 3 }));
     g.append(this.#pathCheckbox("dedupe", "news.dedupe", { value: n.dedupe ?? true }));
+    g.append(this.#pathCheckbox("ペルソナをランダムに選ぶ", "news.randomPersona", {
+      value: !!n.randomPersona,
+      onChange: () => {
+        this._pendingFocusSelector = '[data-config-path="news.randomPersona"]';
+        this.#render();
+      },
+    }));
     cardBody.append(g);
+    if (n.randomPersona) cardBody.append(this.#personaCandidatePool("news", n.personas));
     cardBody.append(this.#pathField("corsProxy", "news.corsProxy", { value: n.corsProxy ?? "", attrs: { spellcheck: "false" } }));
     cardBody.append(this.#pathField("style", "news.style", { value: n.style ?? "", textarea: true, rows: 2 }));
     this._body.append(card);
@@ -1182,37 +1253,9 @@ export class SettingsUI {
     g.append(this.#pathCheckbox("dedupe", "topics.dedupe", { value: t.dedupe ?? true }));
     g.append(this.#pathCheckbox("ランダムに複数ペルソナで読む", "topics.randomPersona", { value: !!t.randomPersona }));
     cardBody.append(g);
-    // personas: ランダム選択の候補プール (randomPersona時、topics.personaの代わりにここから毎回抽選する)
-    const poolWrap = document.createElement("div");
-    poolWrap.className = "field";
-    const poolLab = document.createElement("span");
-    poolLab.className = "field-label";
-    poolLab.textContent = "personas (ランダム候補)";
-    poolWrap.append(poolLab);
-    const poolBox = document.createElement("div");
-    poolBox.className = "checkbox-group";
-    for (const pid of personaIds) {
-      const lab = document.createElement("label");
-      lab.className = "chip-check";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = (t.personas ?? []).includes(pid);
-      cb.addEventListener("change", () => {
-        const set = new Set(this.draft.topics.personas ?? []);
-        if (cb.checked) set.add(pid); else set.delete(pid);
-        this.draft.topics.personas = [...set];
-      });
-      lab.append(cb, document.createTextNode(pid));
-      poolBox.append(lab);
-    }
-    if (!personaIds.length) {
-      const m = document.createElement("span");
-      m.className = "muted";
-      m.textContent = "(ペルソナがありません)";
-      poolBox.append(m);
-    }
-    poolWrap.append(poolBox);
-    cardBody.append(poolWrap);
+    // ニュースと共通の候補UI。削除済み/無効化中の保存済みIDも可視化し、
+    // runtimeの共通selection policyと同じフォールバック条件を伝える。
+    cardBody.append(this.#personaCandidatePool("topics", t.personas));
     cardBody.append(this.#pathField("intro", "topics.intro", { value: t.intro ?? "", textarea: true, rows: 2 }));
     cardBody.append(this.#pathField("style", "topics.style", { value: t.style ?? "", textarea: true, rows: 2 }));
     this._body.append(card);

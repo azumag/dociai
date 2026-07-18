@@ -72,6 +72,10 @@
     "enabled": true,
     "trigger": "news_manual",
     "persona": "partner_ai",
+    "randomPersona": false,
+    "personas": [
+      "deleted_ai"
+    ],
     "mode": "topic",
     "sources": [
       {
