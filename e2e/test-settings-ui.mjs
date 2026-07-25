@@ -138,6 +138,15 @@ try {
   );
   const trigText = await visibleText(page);
   check("トリガー一覧に mention_ai が表示される", trigText.includes("mention_ai"), trigText.slice(0, 120).replace(/\n/g, " "));
+  const triggersAddState = await page.evaluate(() => {
+    const panel = document.querySelector("#settings-panel-triggers");
+    const add = panel.querySelector('[aria-label="トリガーを追加"]');
+    const cardNodes = [...panel.querySelectorAll(":scope > .card")];
+    const addIndex = add ? [...panel.children].indexOf(add) : -1;
+    const cardIndex = cardNodes.length ? [...panel.children].indexOf(cardNodes.at(-1)) : -1;
+    return { hasAdd: !!add, addImmediatelyAfterLastCard: addIndex === cardIndex + 1 && cardIndex >= 0 };
+  });
+  check("トリガー追加ボタンは最後のトリガーカードの直後にある", triggersAddState.hasAdd && triggersAddState.addImmediatelyAfterLastCard, JSON.stringify(triggersAddState));
   const globalShortcutField = await page.evaluate(() => {
     const keyField = [...document.querySelectorAll("[data-config-path]")].find((element) => element.getAttribute("data-config-path").endsWith(".keys") && element.value === "Alt+1");
     const path = keyField?.getAttribute("data-config-path");
@@ -212,9 +221,30 @@ try {
     () => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "connectors",
     { timeout: 2000 },
   );
-  await page.click(".list-header button");
+  const connectorsAddState = await page.evaluate(() => {
+    const panel = document.querySelector("#settings-panel-connectors");
+    const add = panel.querySelector('[aria-label="コネクタを追加"]');
+    const cardNodes = [...panel.querySelectorAll(":scope > .card")];
+    const addIndex = add ? [...panel.children].indexOf(add) : -1;
+    const cardIndex = cardNodes.length ? [...panel.children].indexOf(cardNodes.at(-1)) : -1;
+    return { hasAdd: !!add, addImmediatelyAfterLastCard: addIndex === cardIndex + 1 && cardIndex >= 0 };
+  });
+  check("コネクタ追加ボタンは最後のコネクタカードの直後にある", connectorsAddState.hasAdd && connectorsAddState.addImmediatelyAfterLastCard, JSON.stringify(connectorsAddState));
+  await page.click('#settings-panel-connectors .btn-add[aria-label="コネクタを追加"]');
   const connText2 = await visibleText(page);
   check("新規コネクタ new_connector_1 が追加される", connText2.includes("new_connector_1"), connText2.slice(0, 120).replace(/\n/g, " "));
+  await page.waitForFunction(() => document.activeElement?.getAttribute("data-config-path")?.includes("connectors.new_connector_1.id"), { timeout: 2000 });
+  const connectorFocusState = await page.evaluate(() => {
+    const target = document.querySelector('[data-config-path="connectors.new_connector_1.id"]');
+    const panel = document.querySelector("#settings-panel-connectors");
+    const targetRect = target?.getBoundingClientRect();
+    const panelRect = panel?.getBoundingClientRect();
+    return {
+      focused: document.activeElement === target,
+      visible: !!targetRect && !!panelRect && targetRect.top >= panelRect.top && targetRect.bottom <= panelRect.bottom,
+    };
+  });
+  check("新規コネクタ追加後、ID入力欄へフォーカスし表示される", connectorFocusState.focused && connectorFocusState.visible, JSON.stringify(connectorFocusState));
 
   // 9. ペルソナを1つ追加
   await page.click('.settings-sidebar button[data-tab="personas"]');
@@ -222,9 +252,73 @@ try {
     () => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "personas",
     { timeout: 2000 },
   );
-  await page.click(".list-header button");
+  const personasAddState = await page.evaluate(() => {
+    const panel = document.querySelector("#settings-panel-personas");
+    const add = panel.querySelector('[aria-label="ペルソナを追加"]');
+    const cardNodes = [...panel.querySelectorAll(":scope > .card")];
+    const addIndex = add ? [...panel.children].indexOf(add) : -1;
+    const cardIndex = cardNodes.length ? [...panel.children].indexOf(cardNodes.at(-1)) : -1;
+    return { hasAdd: !!add, addImmediatelyAfterLastCard: addIndex === cardIndex + 1 && cardIndex >= 0 };
+  });
+  check("ペルソナ追加ボタンは最後のペルソナカードの直後にある", personasAddState.hasAdd && personasAddState.addImmediatelyAfterLastCard, JSON.stringify(personasAddState));
+  await page.click('#settings-panel-personas .btn-add[aria-label="ペルソナを追加"]');
   const pText2 = await visibleText(page);
   check("新規ペルソナ new_persona_1 が追加される", pText2.includes("new_persona_1"), pText2.slice(0, 120).replace(/\n/g, " "));
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute("data-config-path")?.includes("personas.2.id"),
+    { timeout: 2000 },
+  );
+  const personaFocusState = await page.evaluate(() => {
+    const target = document.querySelector('[data-config-path="personas.2.id"]');
+    const panel = document.querySelector("#settings-panel-personas");
+    const targetRect = target?.getBoundingClientRect();
+    const panelRect = panel?.getBoundingClientRect();
+    return {
+      focused: document.activeElement === target,
+      visible: !!targetRect && !!panelRect && targetRect.top >= panelRect.top && targetRect.bottom <= panelRect.bottom,
+    };
+  });
+  check("新規ペルソナ追加後、ID入力欄へフォーカスし表示される", personaFocusState.focused && personaFocusState.visible, JSON.stringify(personaFocusState));
+
+  // 9b. ニュースソース追加ボタンを確認（末尾配置）
+  await page.click('.settings-sidebar button[data-tab="news"]');
+  await page.waitForFunction(() => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "news", { timeout: 2000 });
+  const newsAddState = await page.evaluate(() => {
+    const panel = document.querySelector("#settings-panel-news");
+    const add = panel.querySelector('[aria-label="ニュースソースを追加"]');
+    const cardNodes = [...panel.querySelectorAll(':scope > .card')];
+    const sourceCards = cardNodes.slice(1); // 先頭カードはニュース設定本体
+    const addIndex = add ? [...panel.children].indexOf(add) : -1;
+    const sourceLastIndex = sourceCards.length ? [...panel.children].indexOf(sourceCards.at(-1)) : -1;
+    return {
+      hasAdd: !!add,
+      hasNewsSources: sourceCards.length > 0,
+      isAddImmediatelyAfterSources: sourceCards.length > 0 && addIndex === sourceLastIndex + 1,
+      sourceCount: sourceCards.length,
+    };
+  });
+  check("ニュースソース追加ボタンは既存ニュースソースの末尾直後にある", newsAddState.hasAdd && newsAddState.hasNewsSources && newsAddState.isAddImmediatelyAfterSources, JSON.stringify(newsAddState));
+
+  // 9c. 話題ソース（初期空配列）は空状態メッセージの直後に追加先ボタンがある
+  await page.click('.settings-sidebar button[data-tab="topics"]');
+  await page.waitForFunction(
+    () => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "topics",
+    { timeout: 2000 },
+  );
+  const topicAddState = await page.evaluate(() => {
+    const panel = document.querySelector("#settings-panel-topics");
+    const sectionHeader = [...panel.querySelectorAll(":scope > .list-header")].find((h) => h.textContent.includes("話題ソース"));
+    const emptyMessage = panel.querySelector(":scope > .list-empty");
+    const add = panel.querySelector('[aria-label="話題ソースを追加"]');
+    return {
+      hasAdd: !!add,
+      headerExists: !!sectionHeader,
+      emptyMessageText: emptyMessage?.textContent,
+      messageAfterHeader: !!sectionHeader && emptyMessage === sectionHeader.nextElementSibling,
+      addAfterMessage: !!emptyMessage && add === emptyMessage.nextElementSibling,
+    };
+  });
+  check("話題ソース追加ボタンは空状態メッセージの直後にある", topicAddState.hasAdd && topicAddState.headerExists && topicAddState.emptyMessageText?.includes("話題ソースがありません") && topicAddState.messageAfterHeader && topicAddState.addAfterMessage, JSON.stringify(topicAddState));
 
   // 10. 適用ボタン → 設定が再読み込みされる
   await page.click('.settings-footer .btn-primary');
@@ -349,15 +443,20 @@ try {
   );
   check("ESC でモーダルが閉じる", true);
 
-  // 14b. 閉じた状態から開き直せることも確認
+  // 14b. 追加操作だけでもdirtyになり、破棄確認を経由する
   await page.click("#btn-settings");
   await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === true, { timeout: 3000 });
+  await page.click('.settings-sidebar button[data-tab="connectors"]');
+  await page.waitForFunction(() => document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tab === "connectors", { timeout: 2000 });
+  await page.click('#settings-panel-connectors .btn-add[aria-label="コネクタを追加"]');
   await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.querySelector(".discard-changes-dialog")?.open === true, { timeout: 2000 });
+  await page.click('.discard-changes-dialog button:nth-of-type(2)');
   await page.waitForFunction(
     () => document.querySelector("dialog.settings-modal")?.open === false,
     { timeout: 2000 },
   );
-  check("閉じた後に開き直せる", true);
+  check("追加操作だけでもdirty状態の破棄確認を経由する", true);
 
   // 15. 320px相当でも modal/footer が画面外へ固定されず、主要操作を横スクロールさせない
   await page.setViewport({ width: 320, height: 640 });

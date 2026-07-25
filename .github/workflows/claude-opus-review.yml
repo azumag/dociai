@@ -1,0 +1,48 @@
+name: Claude Opus 5 PR Review
+
+# Read-only Claude Opus 5 review for internal pull requests. The `opus` alias
+# resolves to the current supported Opus model without hardcoding a dated ID.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: dociai-claude-opus-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Do not expose the Anthropic credential to untrusted fork pull requests.
+    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned action SHAs keep the review credentials out of mutable action tags.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+      - name: Run read-only Claude Opus 5 review
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The job-scoped token limits Claude to reading contents and posting PR comments.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Perform a read-only Claude Opus 5 pull request review. Inspect the PR diff and
+            relevant repository context. Identify only actionable correctness, security,
+            accessibility, performance, or test-coverage issues introduced by this PR.
+
+            Do not edit files, change workflow configuration, commit, push, create branches,
+            merge, approve, or change GitHub issue state. You may only post review feedback:
+            use inline comments for specific findings and one top-level PR comment for a concise
+            summary or "No findings." Prefix the top-level comment with "Claude Opus 5 review".
+          claude_args: |
+            --model opus
+            --max-turns 12
+            --allowedTools "Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
