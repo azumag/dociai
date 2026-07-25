@@ -61,6 +61,49 @@ try {
   page.on("console", (m) => {
     if (m.type() === "error") pageErrors.push(`console.error: ${m.text()}`);
   });
+  const addListItemAndAssert = async ({ tab, panel, label, name, fillUrl = false }) => {
+    await page.click(`.settings-sidebar button[data-tab="${tab}"]`);
+    await page.waitForFunction((expectedTab) => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === expectedTab, {}, tab);
+    const before = await page.$$eval(`${panel} .card`, (cards) => cards.length);
+    await page.click(`${panel} [aria-label="${label}"]`);
+    await page.waitForFunction(({ panelSelector, count }) => {
+      const root = document.querySelector(panelSelector);
+      const cards = [...root.querySelectorAll(".card")];
+      return cards.length === count + 1 && document.activeElement?.closest(".card") === cards.at(-1);
+    }, {}, { panelSelector: panel, count: before });
+    const state = await page.evaluate((panelSelector) => {
+      const root = document.querySelector(panelSelector);
+      const last = [...root.querySelectorAll(".card")].at(-1);
+      const target = document.activeElement;
+      const bodyRect = document.querySelector(".settings-body")?.getBoundingClientRect();
+      const targetRect = target?.getBoundingClientRect();
+      return {
+        focused: !!target && last?.contains(target),
+        visible: !!targetRect && !!bodyRect && targetRect.top >= bodyRect.top && targetRect.bottom <= bodyRect.bottom,
+      };
+    }, panel);
+    check(`${name}追加後、末尾カードの入力欄へフォーカスし表示される`, state.focused && state.visible, JSON.stringify(state));
+    if (fillUrl) {
+      await page.evaluate((panelSelector) => {
+        const card = [...document.querySelector(panelSelector).querySelectorAll(".card")].at(-1);
+        const input = card.querySelector('[data-config-path$=".url"]');
+        input.value = "https://example.com/generated-feed.xml";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }, panel);
+    }
+  };
+  const assertAddMarksDirty = async ({ tab, panel, label, name }) => {
+    await page.click("#btn-settings");
+    await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === true, { timeout: 3000 });
+    await page.click(`.settings-sidebar button[data-tab="${tab}"]`);
+    await page.waitForFunction((expectedTab) => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === expectedTab, {}, tab);
+    await page.click(`${panel} [aria-label="${label}"]`);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.querySelector(".discard-changes-dialog")?.open === true, { timeout: 2000 });
+    await page.click('.discard-changes-dialog button:nth-of-type(2)');
+    await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === false, { timeout: 2000 });
+    check(`${name}の追加だけでclean状態からdirtyとなり破棄確認を経由する`, true);
+  };
 
   await page.goto(`${BASE}/`, { waitUntil: "networkidle0" });
   await page.waitForFunction(
@@ -147,6 +190,7 @@ try {
     return { hasAdd: !!add, addImmediatelyAfterLastCard: addIndex === cardIndex + 1 && cardIndex >= 0 };
   });
   check("トリガー追加ボタンは最後のトリガーカードの直後にある", triggersAddState.hasAdd && triggersAddState.addImmediatelyAfterLastCard, JSON.stringify(triggersAddState));
+  await addListItemAndAssert({ tab: "triggers", panel: "#settings-panel-triggers", label: "トリガーを追加", name: "トリガー" });
   const globalShortcutField = await page.evaluate(() => {
     const keyField = [...document.querySelectorAll("[data-config-path]")].find((element) => element.getAttribute("data-config-path").endsWith(".keys") && element.value === "Alt+1");
     const path = keyField?.getAttribute("data-config-path");
@@ -318,6 +362,7 @@ try {
     };
   });
   check("ニュースソース追加ボタンは既存ニュースソースの末尾直後にある", newsAddState.hasAdd && newsAddState.hasNewsSources && newsAddState.isAddImmediatelyAfterSources, JSON.stringify(newsAddState));
+  await addListItemAndAssert({ tab: "news", panel: "#settings-panel-news", label: "ニュースソースを追加", name: "ニュースソース", fillUrl: true });
 
   // 9c. 話題ソース（初期空配列）は空状態メッセージの直後に追加先ボタンがある
   await page.click('.settings-sidebar button[data-tab="topics"]');
@@ -339,6 +384,7 @@ try {
     };
   });
   check("話題ソース追加ボタンは空状態メッセージの直後にある", topicAddState.hasAdd && topicAddState.headerExists && topicAddState.emptyMessageText?.includes("話題ソースがありません") && topicAddState.messageAfterHeader && topicAddState.addAfterMessage, JSON.stringify(topicAddState));
+  await addListItemAndAssert({ tab: "topics", panel: "#settings-panel-topics", label: "話題ソースを追加", name: "話題ソース" });
 
   // 10. 適用ボタン → 設定が再読み込みされる
   await page.click('.settings-footer .btn-primary');
@@ -353,6 +399,11 @@ try {
   // 11. コネクタ一覧パネルに new_connector_1 が出る
   const listText = await page.$eval("#connector-list", (el) => el.textContent);
   check("適用後のコネクタ一覧に new_connector_1 が反映される", listText.includes("new_connector_1"), listText.slice(0, 120));
+
+  // 11a. 各リストはclean状態の追加だけでdirtyになり、破棄確認を表示する
+  await assertAddMarksDirty({ tab: "triggers", panel: "#settings-panel-triggers", label: "トリガーを追加", name: "トリガー" });
+  await assertAddMarksDirty({ tab: "news", panel: "#settings-panel-news", label: "ニュースソースを追加", name: "ニュースソース" });
+  await assertAddMarksDirty({ tab: "topics", panel: "#settings-panel-topics", label: "話題ソースを追加", name: "話題ソース" });
   // ペルソナ一覧パネルは表示名で出る (新規ペルソナ1)
   const personaListText = await page.$eval("#persona-list", (el) => el.textContent);
   check("適用後のペルソナ一覧に新規ペルソナ1 が反映される", personaListText.includes("新規ペルソナ1"), personaListText.slice(0, 120));

@@ -9,7 +9,6 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  id-token: write
 
 concurrency:
   group: dociai-claude-opus-review-${{ github.event.pull_request.number }}
@@ -28,11 +27,10 @@ jobs:
           persist-credentials: false
       - name: Run read-only Claude Opus 5 review
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
-        env:
-          # Keep GitHub CLI calls inside the review on the job's read/comment-scoped token.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Limit Claude to repository reads and pull-request comments with this job-scoped token.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
