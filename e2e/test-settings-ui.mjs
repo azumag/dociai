@@ -418,7 +418,7 @@ try {
   check("ニュースのランダムペルソナ設定が保存される", diskConfig.news?.randomPersona === true && diskConfig.news?.personas?.includes("partner_ai") && diskConfig.news?.personas?.includes("tsukkomi_ai"));
 
   // 11c. ページを再読み込みしても編集内容が残る (ダウンロード→手動コピー不要であることの確認)
-  await page.reload({ waitUntil: "networkidle0" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForFunction(
     () => document.querySelector("#config-status")?.textContent.includes("読込済"),
     { timeout: 8000 },
