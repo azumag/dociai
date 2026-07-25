@@ -153,6 +153,8 @@ export class SpeechQueue {
     const item = this.scheduler.pending.find((entry) => entry.id === itemId);
     if (!item) return false;
     const removed = this.scheduler.removePending(item, "cancelled");
+    this.#clearPumpRetry();
+    this.#pump();
     this.onUpdate(this.items, this);
     return removed;
   }

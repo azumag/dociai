@@ -48,6 +48,7 @@ export class SpeechScheduler {
   // SpeechQueue が「このアイテムを今始めてよいか (例: コメント読み上げの間隔)」を
   // 判断してから実際に take() するために使う。
   peekNext(preferPending = null) {
+    this.expire();
     return this.resumeNext ?? this.#nextPending(preferPending);
   }
 
