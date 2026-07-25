@@ -376,6 +376,81 @@ test("commentReaderIntervalMs does not delay a persona item queued after a comme
   queue.dispose();
 });
 
+test("SpeechQueue plays waiting comments before higher-priority AI and returns to AI when comments are exhausted", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({
+    webSpeech: { synthesis, Utterance: FakeUtterance },
+    isCommentReaderItem: (item) => item.personaId === "reader",
+  });
+
+  const firstAi = queue.enqueue({ personaId: "ai", personaName: "AI", text: "first", priority: 0, voice: { engine: "webspeech" } });
+  const waitingAi = queue.enqueue({ personaId: "ai", personaName: "AI", text: "later", priority: 100, voice: { engine: "webspeech" } });
+  const comment = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "comment", priority: 0, voice: { engine: "webspeech" } });
+  assert.equal(firstAi.state, "speaking");
+
+  FakeUtterance.items.at(-1).onend();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(comment.state, "speaking", "waiting comments take precedence over AI priority");
+  assert.equal(waitingAi.state, "waiting");
+
+  FakeUtterance.items.at(-1).onend();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(waitingAi.state, "speaking", "AI continues once no comments are waiting");
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  queue.dispose();
+});
+
+test("SpeechQueue drops an expired waiting comment before applying the comment interval", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({
+    webSpeech: { synthesis, Utterance: FakeUtterance },
+    commentReaderIntervalMs: 1_000,
+    isCommentReaderItem: (item) => item.personaId === "reader",
+  });
+
+  const first = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "first", voice: { engine: "webspeech" } });
+  const stale = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "stale", deadlineAt: Date.now() + 1, voice: { engine: "webspeech" } });
+  const ai = queue.enqueue({ personaId: "ai", personaName: "AI", text: "AI", priority: 100, voice: { engine: "webspeech" } });
+  assert.equal(first.state, "speaking");
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  FakeUtterance.items.at(-1).onend();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(stale.state, "dropped");
+  assert.equal(ai.state, "speaking", "an expired comment must not keep AI waiting for the comment interval");
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  queue.dispose();
+});
+
+test("SpeechQueue immediately plays AI when the interval-waiting comment is cancelled", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({
+    webSpeech: { synthesis, Utterance: FakeUtterance },
+    commentReaderIntervalMs: 1_000,
+    isCommentReaderItem: (item) => item.personaId === "reader",
+  });
+
+  const first = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "first", voice: { engine: "webspeech" } });
+  const waitingComment = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "waiting", voice: { engine: "webspeech" } });
+  const ai = queue.enqueue({ personaId: "ai", personaName: "AI", text: "AI", priority: 100, voice: { engine: "webspeech" } });
+  assert.equal(first.state, "speaking");
+
+  FakeUtterance.items.at(-1).onend();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(waitingComment.state, "waiting");
+  assert.equal(queue.cancelItem(waitingComment.id), true);
+  assert.equal(waitingComment.state, "cancelled");
+  assert.equal(ai.state, "speaking", "AI must not wait for a cancelled comment's interval timer");
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  queue.dispose();
+});
+
 test("SpeechQueue.enqueue passes an optional metadata field through to the returned item and its items snapshot, defaulting to null", async () => {
   const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
   const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });

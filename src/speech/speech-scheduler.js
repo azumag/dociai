@@ -30,12 +30,13 @@ export class SpeechScheduler {
     return item;
   }
 
-  take() {
+  take(preferPending = null) {
     if (this.current || this.held) return null;
     this.expire();
-    const item = this.resumeNext ?? this.pending.shift() ?? null;
+    const item = this.resumeNext ?? this.#nextPending(preferPending);
     if (!item) return null;
-    this.resumeNext = null;
+    if (this.resumeNext) this.resumeNext = null;
+    else this.pending.splice(this.pending.indexOf(item), 1);
     item.resumeNext = false;
     this.current = item;
     transitionSpeechItem(item, "speaking", { now: this.now() });
@@ -46,8 +47,9 @@ export class SpeechScheduler {
   // 次に take() されるはずのアイテムを、キューから取り除かずに覗き見る。
   // SpeechQueue が「このアイテムを今始めてよいか (例: コメント読み上げの間隔)」を
   // 判断してから実際に take() するために使う。
-  peekNext() {
-    return this.resumeNext ?? this.pending[0] ?? null;
+  peekNext(preferPending = null) {
+    this.expire();
+    return this.resumeNext ?? this.#nextPending(preferPending);
   }
 
   complete(item, state, details = {}) {
@@ -166,5 +168,10 @@ export class SpeechScheduler {
     this.metrics.terminal++;
     this.metrics.recordDrop(reason);
     return item;
+  }
+
+  #nextPending(preferPending) {
+    if (!preferPending) return this.pending[0] ?? null;
+    return this.pending.find(preferPending) ?? this.pending[0] ?? null;
   }
 }

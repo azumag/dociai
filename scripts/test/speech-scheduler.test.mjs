@@ -64,6 +64,17 @@ test("peekNext looks at the next item without dequeuing it", () => {
   assert.equal(resumed.peekNext()?.text, "resumed", "resumeNext takes priority over pending");
 });
 
+test("scheduler can prefer a matching pending item over higher numeric priority", () => {
+  const scheduler = new SpeechScheduler();
+  const ai = scheduler.enqueue({ text: "AI", priority: 100, source: "ai" });
+  const comment = scheduler.enqueue({ text: "comment", priority: 0, source: "comment" });
+  const isComment = (item) => item.source === "comment";
+  assert.equal(scheduler.peekNext(isComment), comment);
+  assert.equal(scheduler.take(isComment), comment);
+  scheduler.complete(comment, "done");
+  assert.equal(scheduler.take(isComment), ai, "AI resumes when no comment is waiting");
+});
+
 test("expiry policy handles deadlines, max age, and held queues", () => {
   let now = 1_000;
   const scheduler = new SpeechScheduler({ maxAgeMs: 1_000, expireWhileHeld: false }, { now: () => now });
