@@ -12,6 +12,8 @@ test("dirty returns false after undo and close guard shares every close reason",
   assert.equal(await controller.requestClose("escape"), "continued");
   choice = "discard";
   assert.equal(await controller.requestClose("config-reload"), "closed");
+  assert.equal(controller.state.dirty, false);
+  assert.deepEqual(controller.state.draft, base);
 });
 
 test("save requests coalesce and preserve draft on failure", async () => {
