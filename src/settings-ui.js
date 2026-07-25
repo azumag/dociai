@@ -380,7 +380,12 @@ export class SettingsUI {
     if (this._pendingFocusSelector) {
       const target = this._body.querySelector(this._pendingFocusSelector);
       this._pendingFocusSelector = null;
-      (target?.closest(".card") ?? target)?.scrollIntoView({ block: "nearest" });
+      const card = target?.closest(".card");
+      const body = target?.closest(".settings-body");
+      const block = card && body && card.getBoundingClientRect().height > body.getBoundingClientRect().height
+        ? "start"
+        : "nearest";
+      (card ?? target)?.scrollIntoView({ block });
       deferFocus(target);
     }
   }

@@ -280,6 +280,26 @@ try {
   });
   check("新規ペルソナ追加後、ID入力欄へフォーカスし表示される", personaFocusState.focused && personaFocusState.visible, JSON.stringify(personaFocusState));
 
+  // 9a. 狭い表示域でも、高さのある新規カードの先頭フィールドを表示したままフォーカスする
+  await page.setViewport({ width: 320, height: 640 });
+  await page.click('#settings-panel-personas .btn-add[aria-label="ペルソナを追加"]');
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute("data-config-path")?.includes("personas.3.id"),
+    { timeout: 2000 },
+  );
+  const compactPersonaFocusState = await page.evaluate(() => {
+    const target = document.querySelector('[data-config-path="personas.3.id"]');
+    const body = document.querySelector(".settings-body");
+    const targetRect = target?.getBoundingClientRect();
+    const bodyRect = body?.getBoundingClientRect();
+    return {
+      focused: document.activeElement === target,
+      visible: !!targetRect && !!bodyRect && targetRect.top >= bodyRect.top && targetRect.bottom <= bodyRect.bottom,
+    };
+  });
+  check("狭い表示域でも新規ペルソナの先頭入力欄が表示されたままフォーカスされる", compactPersonaFocusState.focused && compactPersonaFocusState.visible, JSON.stringify(compactPersonaFocusState));
+  await page.setViewport({ width: 1280, height: 720 });
+
   // 9b. ニュースソース追加ボタンを確認（末尾配置）
   await page.click('.settings-sidebar button[data-tab="news"]');
   await page.waitForFunction(() => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === "news", { timeout: 2000 });

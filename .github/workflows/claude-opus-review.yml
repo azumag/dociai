@@ -45,8 +45,5 @@ jobs:
           claude_args: |
             --model opus
             --max-turns 12
-            --tools "Read,Glob,Grep,Bash"
             --allowedTools "Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
-            --permission-mode dontAsk
-            --setting-sources user
-            --strict-mcp-config
+            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
