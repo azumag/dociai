@@ -1,6 +1,6 @@
 {
   "name": "dociai",
-  "version": "0.1.38",
+  "version": "0.1.39",
   "private": true,
   "type": "module",
   "packageManager": "npm@11.4.2",
