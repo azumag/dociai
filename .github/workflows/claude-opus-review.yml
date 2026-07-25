@@ -24,10 +24,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 2
+          persist-credentials: false
       - name: Run read-only Claude Opus 5 review
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # The job-scoped token limits Claude to reading contents and posting PR comments.
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
@@ -45,4 +46,8 @@ jobs:
           claude_args: |
             --model opus
             --max-turns 12
+            --tools "Read,Glob,Grep,Bash"
             --allowedTools "Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --permission-mode dontAsk
+            --setting-sources user
+            --strict-mcp-config
