@@ -236,11 +236,12 @@ export class SpeechQueue {
 
   #pump() {
     if (this.current || this.paused) return;
-    const next = this.scheduler.peekNext();
+    const preferComment = (item) => this.isCommentReaderItem(item);
+    const next = this.scheduler.peekNext(preferComment);
     if (!next) return;
     const waitMs = this.#commentReaderWaitMs(next);
     if (waitMs > 0) { this.#scheduleRetry(waitMs); return; }
-    const item = this.scheduler.take();
+    const item = this.scheduler.take(preferComment);
     if (!item) return;
     if (item.voice?.enabled === false) {
       this.scheduler.complete(item, "done", { error: "音声OFFのペルソナのため読み上げなし" });

@@ -376,6 +376,32 @@ test("commentReaderIntervalMs does not delay a persona item queued after a comme
   queue.dispose();
 });
 
+test("SpeechQueue plays waiting comments before higher-priority AI and returns to AI when comments are exhausted", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({
+    webSpeech: { synthesis, Utterance: FakeUtterance },
+    isCommentReaderItem: (item) => item.personaId === "reader",
+  });
+
+  const firstAi = queue.enqueue({ personaId: "ai", personaName: "AI", text: "first", priority: 0, voice: { engine: "webspeech" } });
+  const waitingAi = queue.enqueue({ personaId: "ai", personaName: "AI", text: "later", priority: 100, voice: { engine: "webspeech" } });
+  const comment = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "comment", priority: 0, voice: { engine: "webspeech" } });
+  assert.equal(firstAi.state, "speaking");
+
+  FakeUtterance.items.at(-1).onend();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(comment.state, "speaking", "waiting comments take precedence over AI priority");
+  assert.equal(waitingAi.state, "waiting");
+
+  FakeUtterance.items.at(-1).onend();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(waitingAi.state, "speaking", "AI continues once no comments are waiting");
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  queue.dispose();
+});
+
 test("SpeechQueue.enqueue passes an optional metadata field through to the returned item and its items snapshot, defaulting to null", async () => {
   const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
   const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
