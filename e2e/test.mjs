@@ -153,7 +153,21 @@ try {
   step("disable persona + manual fire");
   // ペルソナパネルは既定で折りたたまれているため、内部のボタンをクリックする前に展開する
   await page.evaluate(() => { document.querySelector("#persona-list").closest("details").open = true; });
+  await page.evaluate(() => {
+    const input = document.querySelector("#persona-list li:nth-child(1) .switch input");
+    input.focus(); globalThis.__firstPersonaInput = input;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 2200));
+  const retainedPersonaControl = await page.evaluate(() => {
+    const input = document.querySelector("#persona-list li:nth-child(1) .switch input");
+    return input === globalThis.__firstPersonaInput && document.activeElement === input && input.checked;
+  });
+  check("周期更新後もペルソナ操作とフォーカスが維持される", retainedPersonaControl);
   await page.click("#persona-list li:nth-child(1) .switch .track");
+  await page.waitForFunction(
+    () => document.querySelector("#persona-list li:nth-child(1) .switch input")?.checked === false,
+    { timeout: 3000 },
+  );
   await page.click("#persona-list li:nth-child(1) button");
   await page.waitForFunction(
     () => document.querySelector("#event-log")?.textContent.includes("無効化中"),
@@ -161,6 +175,10 @@ try {
   );
   check("無効化ペルソナは手動発話でもスキップ", true);
   await page.click("#persona-list li:nth-child(1) .switch .track"); // 元に戻す
+  await page.waitForFunction(
+    () => document.querySelector("#persona-list li:nth-child(1) .switch input")?.checked === true,
+    { timeout: 3000 },
+  );
 
   // ---- issue #7: 手動トリガー発火 (トリガー一覧の発火ボタン = mention_ai) ----
   step("manual trigger fire");

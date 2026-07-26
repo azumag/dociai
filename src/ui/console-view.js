@@ -67,20 +67,31 @@ export class ConsoleView {
     this.element("#connector-summary").textContent = connectors.length ? `${connectors.length}件${failed ? ` · 要確認 ${failed}` : ""}` : "未設定";
   }
   renderPersonas(personas, actions) {
-    const list = this.element("#persona-list"); list.replaceChildren();
-    for (const persona of personas) {
-      const li = this.document.createElement("li");
-      const dot = this.document.createElement("span"); dot.className = `persona-dot is-${persona.state}`; dot.style.background = persona.dotColor;
-      const grow = this.document.createElement("div"); grow.className = "grow"; grow.innerHTML = `<div class="name"></div><div class="detail"></div>`;
-      grow.querySelector(".name").textContent = persona.name; grow.querySelector(".detail").textContent = persona.detail;
-      const switchLabel = this.document.createElement("label"); switchLabel.className = "switch"; switchLabel.title = "ペルソナのON/OFF";
-      const checkbox = this.document.createElement("input"); checkbox.type = "checkbox"; checkbox.checked = persona.enabled;
-      checkbox.addEventListener("change", () => actions.setPersonaEnabled(persona.id, checkbox.checked));
-      const track = this.document.createElement("span"); track.className = "track"; switchLabel.append(checkbox, track);
-      const fire = this.document.createElement("button"); fire.type = "button"; fire.textContent = "発話"; fire.title = "このペルソナを手動で発話させる";
-      fire.addEventListener("click", () => actions.firePersona(persona.id));
-      li.append(dot, grow, switchLabel, fire); list.append(li);
+    const list = this.element("#persona-list");
+    if (personas.length) for (const item of [...list.children]) if (!item.dataset.personaId) item.remove();
+    const existing = new Map([...list.querySelectorAll("li[data-persona-id]")].map((item) => [item.dataset.personaId, item]));
+    for (const [index, persona] of personas.entries()) {
+      let li = existing.get(persona.id);
+      if (!li) {
+        li = this.document.createElement("li"); li.dataset.personaId = persona.id;
+        const dot = this.document.createElement("span"); dot.className = "persona-dot";
+        const grow = this.document.createElement("div"); grow.className = "grow"; grow.innerHTML = `<div class="name"></div><div class="detail"></div>`;
+        const switchLabel = this.document.createElement("label"); switchLabel.className = "switch"; switchLabel.title = "ペルソナのON/OFF";
+        const checkbox = this.document.createElement("input"); checkbox.type = "checkbox";
+        checkbox.addEventListener("change", () => li._personaActions.setPersonaEnabled(li.dataset.personaId, checkbox.checked));
+        const track = this.document.createElement("span"); track.className = "track"; switchLabel.append(checkbox, track);
+        const fire = this.document.createElement("button"); fire.type = "button"; fire.textContent = "発話"; fire.title = "このペルソナを手動で発話させる";
+        fire.addEventListener("click", () => li._personaActions.firePersona(li.dataset.personaId));
+        li.append(dot, grow, switchLabel, fire);
+      }
+      li._personaActions = actions;
+      const dot = li.querySelector(".persona-dot"); dot.className = `persona-dot is-${persona.state}`; dot.style.background = persona.dotColor;
+      li.querySelector(".name").textContent = persona.name; li.querySelector(".detail").textContent = persona.detail;
+      li.querySelector(".switch input").checked = persona.enabled;
+      if (list.children[index] !== li) list.insertBefore(li, list.children[index] ?? null);
+      existing.delete(persona.id);
     }
+    for (const li of existing.values()) li.remove();
     if (!list.children.length) list.innerHTML = `<li class="detail">設定を読み込むと表示されます</li>`;
     const enabled = personas.filter((persona) => persona.enabled).length;
     const active = personas.filter((persona) => persona.state === "speaking" || persona.state === "thinking").length;
