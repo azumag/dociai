@@ -19,6 +19,8 @@ jobs:
     # Do not expose the Anthropic credential to untrusted fork pull requests.
     if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    # A wedged SDK call would otherwise hold a runner for the 6-hour default.
+    timeout-minutes: 20
     steps:
       # Pinned action SHAs keep the review credentials out of mutable action tags.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -79,7 +81,7 @@ jobs:
           claude_args: |
             --model opus
             --max-turns 60
-            --allowedTools "Read,Glob,Grep,TodoWrite,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api repos/:owner/:repo/pulls/*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*)"
+            --allowedTools "Read,Glob,Grep,TodoWrite,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*)"
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
       # The action hides Claude's output, so a failed review otherwise reports only is_error:true
       # with no reason. Print just the SDK's final result message (secrets stay masked); this is the

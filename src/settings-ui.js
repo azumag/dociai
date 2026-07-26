@@ -1241,7 +1241,7 @@ export class SettingsUI {
       this.#render();
       this._announcer?.announce("ニュースソースを追加しました");
     });
-    const sources = n.sources ?? [];
+    const sources = asArray(n.sources);
     if (!sources.length) this._body.append(this.#emptyListMessage("ニュースソース"));
     for (const [i, s] of sources.entries()) {
       const headEls = [
@@ -1300,7 +1300,7 @@ export class SettingsUI {
       this.#render();
       this._announcer?.announce("話題ソースを追加しました");
     });
-    const sources = t.sources ?? [];
+    const sources = asArray(t.sources);
     if (!sources.length) this._body.append(this.#emptyListMessage("話題ソース"));
     for (const [i, s] of sources.entries()) {
       const headEls = [
