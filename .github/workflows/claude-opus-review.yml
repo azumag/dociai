@@ -72,9 +72,13 @@ jobs:
             Do not edit files, change workflow configuration, commit, push, create branches,
             merge, approve, or change GitHub issue state. You may only post one top-level PR
             comment with a concise summary or "No findings." Prefix it with "Claude Opus 5 review".
+
+            You have a hard limit of 60 tool calls and the review is lost if you hit it. Read the
+            PR diff first, open only the files that diff touches, and post the comment while you
+            still have turns left rather than exploring further.
           claude_args: |
             --model opus
-            --max-turns 30
+            --max-turns 60
             --allowedTools "Read,Glob,Grep,TodoWrite,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api repos/:owner/:repo/pulls/*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*)"
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
       # The action hides Claude's output, so a failed review otherwise reports only is_error:true
