@@ -44,7 +44,14 @@ jobs:
           echo "token=$token" >> "$GITHUB_OUTPUT"
           # Shape only, never the value: enough to tell a mangled or wrong-kind secret apart from a
           # rejected-but-well-formed one. `sk-ant-oat01-` is the fixed setup-token prefix.
-          case "$token" in sk-ant-oat01-*) kind="oauth-token";; sk-ant-api*) kind="console-api-key";; *) kind="unrecognized";; esac
+          case "$token" in
+            sk-ant-oat01-*) kind="setup-token (expected)";;
+            sk-ant-api*) kind="console-api-key (wrong kind)";;
+            sk-ant-sid*) kind="session-key (wrong kind)";;
+            sk-ant-*) kind="other sk-ant-* credential (wrong kind)";;
+            ghp_*|gho_*|ghs_*|github_pat_*) kind="github-token (wrong kind)";;
+            *) kind="unrecognized, starts with '$(printf '%s' "$token" | cut -c1-4)'";;
+          esac
           printf 'credential shape: raw_bytes=%s clean_bytes=%s kind=%s ascii_only=%s\n' \
             "${#RAW_TOKEN}" "${#token}" "$kind" \
             "$(printf '%s' "$token" | LC_ALL=C grep -q '[^ -~]' && echo no || echo yes)"
