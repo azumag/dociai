@@ -42,6 +42,12 @@ jobs:
           fi
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
+          # Shape only, never the value: enough to tell a mangled or wrong-kind secret apart from a
+          # rejected-but-well-formed one. `sk-ant-oat01-` is the fixed setup-token prefix.
+          case "$token" in sk-ant-oat01-*) kind="oauth-token";; sk-ant-api*) kind="console-api-key";; *) kind="unrecognized";; esac
+          printf 'credential shape: raw_bytes=%s clean_bytes=%s kind=%s ascii_only=%s\n' \
+            "${#RAW_TOKEN}" "${#token}" "$kind" \
+            "$(printf '%s' "$token" | LC_ALL=C grep -q '[^ -~]' && echo no || echo yes)"
       - name: Run read-only Claude Opus 5 review
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
@@ -64,3 +70,17 @@ jobs:
             --max-turns 12
             --allowedTools "Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
+      # The action hides Claude's output, so a failed review otherwise reports only is_error:true
+      # with no reason. Print just the SDK's final result message (secrets stay masked); this is the
+      # difference between "credential rejected" and "the review itself failed".
+      - name: Report review failure reason
+        if: failure()
+        run: |
+          log="${RUNNER_TEMP}/claude-execution-output.json"
+          if [ ! -f "$log" ]; then
+            echo "No execution log at $log"
+            exit 0
+          fi
+          jq -r '[.. | objects | select(has("type") and .type == "result")]
+                 | .[]
+                 | (.result // .error // "result message missing")' "$log" | head -40
