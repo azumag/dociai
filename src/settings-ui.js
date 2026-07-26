@@ -735,6 +735,8 @@ export class SettingsUI {
     const body = this._body;
     body.append(this.#listHeader("コネクタ"));
     const addButton = this.#listAddButton("connectors", "コネクタ", () => {
+      // 描画側は `?? {}` で空状態を出すため、connectors キーの無い設定からも押せてしまう。
+      this.draft.connectors ??= {};
       let i = 1;
       while (this.draft.connectors[`new_connector_${i}`]) i++;
       this.draft.connectors[`new_connector_${i}`] = { provider: "mock" };
