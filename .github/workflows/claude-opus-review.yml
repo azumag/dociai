@@ -28,6 +28,9 @@ jobs:
       - name: Run read-only Claude Opus 5 review
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
+          # TEMPORARY (diagnostics only, reverted right after): the action hides the failure reason,
+          # so the job only reports is_error:true with no message.
+          show_full_output: "true"
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Limit Claude to repository reads and pull-request comments with this job-scoped token.
           github_token: ${{ secrets.GITHUB_TOKEN }}
