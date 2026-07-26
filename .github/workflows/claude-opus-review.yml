@@ -25,7 +25,9 @@ jobs:
       # Pinned action SHAs keep the review credentials out of mutable action tags.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 2
+          # The review's allowlisted git log/diff/show tools need real history: a shallow clone
+          # leaves `git diff <base>...HEAD` failing with "unknown revision".
+          fetch-depth: 0
           persist-credentials: false
       # Fail fast with an actionable message instead of the SDK's opaque
       # "Header 'Authorization' has invalid value" (a padded value) or "401 Invalid bearer token"
