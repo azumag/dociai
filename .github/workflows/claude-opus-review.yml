@@ -74,8 +74,8 @@ jobs:
             comment with a concise summary or "No findings." Prefix it with "Claude Opus 5 review".
           claude_args: |
             --model opus
-            --max-turns 12
-            --allowedTools "Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --max-turns 30
+            --allowedTools "Read,Glob,Grep,TodoWrite,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api repos/:owner/:repo/pulls/*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*)"
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
       # The action hides Claude's output, so a failed review otherwise reports only is_error:true
       # with no reason. Print just the SDK's final result message (secrets stay masked); this is the
@@ -88,6 +88,11 @@ jobs:
             echo "No execution log at $log"
             exit 0
           fi
-          jq -r '[.. | objects | select(has("type") and .type == "result")]
-                 | .[]
-                 | (.result // .error // "result message missing")' "$log" | head -40
+          jq -r '[.. | objects | select(has("type") and .type == "result")][0]
+                 | "subtype=\(.subtype // "?") turns=\(.num_turns // "?") denials=\(.permission_denials_count // 0)",
+                   (.result // .error // empty)' "$log" | head -40
+          # Tool names only (never their inputs): a review that dies on max turns is usually one
+          # that burned them on tools missing from --allowedTools.
+          denied="$(jq -r '[.. | objects | select(has("tool_name") and has("tool_use_id"))]
+                           | .[].tool_name' "$log" 2>/dev/null | sort -u | head -20)"
+          [ -n "$denied" ] && printf 'tool calls seen: %s\n' "$(printf '%s' "$denied" | tr '\n' ' ')"
