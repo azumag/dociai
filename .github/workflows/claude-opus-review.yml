@@ -25,13 +25,27 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
+      # The SDK puts the credential straight into the Authorization header, and Node rejects a
+      # header value containing a newline ("Header 'Authorization' has invalid value"), which is how
+      # a secret stored with a stray newline shows up: the job dies before any model call. Strip
+      # newlines and surrounding whitespace here so a cosmetically-mangled secret still works, and
+      # re-mask the cleaned value so it cannot reach the logs.
+      - name: Normalize review credential
+        id: review-credential
+        env:
+          RAW_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          token="$(printf '%s' "$RAW_TOKEN" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          if [ -z "$token" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is empty. Set it from 'claude setup-token'."
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
       - name: Run read-only Claude Opus 5 review
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
-          # The secret must hold the bare `claude setup-token` value with no surrounding whitespace
-          # or newline: the SDK puts it straight into the Authorization header, and Node rejects a
-          # header value containing a newline with "Header 'Authorization' has invalid value".
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ steps.review-credential.outputs.token }}
           # Limit Claude to repository reads and pull-request comments with this job-scoped token.
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
