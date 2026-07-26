@@ -50,7 +50,7 @@ jobs:
             sk-ant-sid*) kind="session-key (wrong kind)";;
             sk-ant-*) kind="other sk-ant-* credential (wrong kind)";;
             ghp_*|gho_*|ghs_*|github_pat_*) kind="github-token (wrong kind)";;
-            *) kind="unrecognized, starts with '$(printf '%s' "$token" | cut -c1-4)'";;
+            *) kind="unrecognized (not an sk-ant-* credential)";;
           esac
           printf 'credential shape: raw_bytes=%s clean_bytes=%s kind=%s ascii_only=%s\n' \
             "${#RAW_TOKEN}" "${#token}" "$kind" \
@@ -88,11 +88,15 @@ jobs:
             echo "No execution log at $log"
             exit 0
           fi
-          jq -r '[.. | objects | select(has("type") and .type == "result")][0]
-                 | "subtype=\(.subtype // "?") turns=\(.num_turns // "?") denials=\(.permission_denials_count // 0)",
-                   (.result // .error // empty)' "$log" | head -40
+          # This step only ever reports; `|| true` on every pipeline keeps `bash -eo pipefail` from
+          # turning a SIGPIPE out of `head`, or an empty match, into a second failed step.
+          { jq -r '[.. | objects | select(has("type") and .type == "result")][0]
+                   | "subtype=\(.subtype // "?") turns=\(.num_turns // "?") denials=\(.permission_denials_count // 0)",
+                     (.result // .error // empty)' "$log" | head -40; } || true
           # Tool names only (never their inputs): a review that dies on max turns is usually one
           # that burned them on tools missing from --allowedTools.
-          denied="$(jq -r '[.. | objects | select(has("tool_name") and has("tool_use_id"))]
-                           | .[].tool_name' "$log" 2>/dev/null | sort -u | head -20)"
-          [ -n "$denied" ] && printf 'tool calls seen: %s\n' "$(printf '%s' "$denied" | tr '\n' ' ')"
+          tools="$({ jq -r '[.. | objects | select(has("tool_name") and has("tool_use_id"))]
+                            | .[].tool_name' "$log" 2>/dev/null | sort -u | head -20; } || true)"
+          if [ -n "$tools" ]; then
+            printf 'tool calls seen: %s\n' "$(printf '%s' "$tools" | tr '\n' ' ')"
+          fi
