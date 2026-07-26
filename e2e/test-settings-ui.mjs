@@ -274,6 +274,17 @@ try {
     return { hasAdd: !!add, addImmediatelyAfterLastCard: addIndex === cardIndex + 1 && cardIndex >= 0 };
   });
   check("コネクタ追加ボタンは最後のコネクタカードの直後にある", connectorsAddState.hasAdd && connectorsAddState.addImmediatelyAfterLastCard, JSON.stringify(connectorsAddState));
+  // 末尾へ移した追加ボタンが列flexのstretchでパネル全幅に伸びていないこと (見た目の退行防止)
+  const connectorsAddSizing = await page.evaluate(() => {
+    const panel = document.querySelector("#settings-panel-connectors");
+    const add = panel.querySelector('[aria-label="コネクタを追加"]');
+    const style = getComputedStyle(panel);
+    return {
+      addWidth: Math.round(add.getBoundingClientRect().width),
+      contentWidth: Math.round(panel.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)),
+    };
+  });
+  check("追加ボタンは内容幅のままでパネル全幅に伸びない", connectorsAddSizing.addWidth > 0 && connectorsAddSizing.addWidth < connectorsAddSizing.contentWidth, JSON.stringify(connectorsAddSizing));
   await page.click('#settings-panel-connectors .btn-add[aria-label="コネクタを追加"]');
   const connText2 = await visibleText(page);
   check("新規コネクタ new_connector_1 が追加される", connText2.includes("new_connector_1"), connText2.slice(0, 120).replace(/\n/g, " "));
