@@ -69,9 +69,15 @@ export class ConsoleView {
   renderPersonas(personas, actions) {
     const list = this.element("#persona-list");
     if (personas.length) for (const item of [...list.children]) if (!item.dataset.personaId) item.remove();
-    const existing = new Map([...list.querySelectorAll("li[data-persona-id]")].map((item) => [item.dataset.personaId, item]));
+    // id ごとに待ち行列で持つ: 設定は同じidのペルソナを複数持てるため、Mapに1件だけ入れると
+    // 取りこぼした側が末尾に残り続け、周期更新のたびにリストが伸びる。
+    const existing = new Map();
+    for (const item of list.querySelectorAll("li[data-persona-id]")) {
+      const queued = existing.get(item.dataset.personaId);
+      if (queued) queued.push(item); else existing.set(item.dataset.personaId, [item]);
+    }
     for (const [index, persona] of personas.entries()) {
-      let li = existing.get(persona.id);
+      let li = existing.get(persona.id)?.shift();
       if (!li) {
         li = this.document.createElement("li"); li.dataset.personaId = persona.id;
         const dot = this.document.createElement("span"); dot.className = "persona-dot";
@@ -89,9 +95,8 @@ export class ConsoleView {
       li.querySelector(".name").textContent = persona.name; li.querySelector(".detail").textContent = persona.detail;
       li.querySelector(".switch input").checked = persona.enabled;
       if (list.children[index] !== li) list.insertBefore(li, list.children[index] ?? null);
-      existing.delete(persona.id);
     }
-    for (const li of existing.values()) li.remove();
+    for (const queued of existing.values()) for (const li of queued) li.remove();
     if (!list.children.length) list.innerHTML = `<li class="detail">設定を読み込むと表示されます</li>`;
     const enabled = personas.filter((persona) => persona.enabled).length;
     const active = personas.filter((persona) => persona.state === "speaking" || persona.state === "thinking").length;

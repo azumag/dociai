@@ -193,6 +193,23 @@ test("added personas append and removed personas detach", () => {
   assert.equal(liB.parentNode, null, "removed persona node is detached");
 });
 
+test("personas sharing an id reuse both nodes instead of leaking one per refresh", () => {
+  const { view, list } = setup();
+  view.renderPersonas([persona("dup"), persona("dup")], noopActions());
+  const [firstLi, secondLi] = list.children;
+
+  view.renderPersonas([persona("dup"), persona("dup")], noopActions());
+  view.renderPersonas([persona("dup"), persona("dup")], noopActions());
+
+  assert.equal(list.children.length, 2, "duplicate ids must not accumulate nodes across refreshes");
+  assert.deepEqual(list.children, [firstLi, secondLi]);
+
+  view.renderPersonas([persona("dup")], noopActions());
+  assert.equal(list.children.length, 1);
+  assert.equal(list.children[0], firstLi);
+  assert.equal(secondLi.parentNode, null, "the surplus duplicate is detached");
+});
+
 test("an empty persona list falls back to the placeholder and recovers from it", () => {
   const { view, list, summary } = setup();
   view.renderPersonas([persona("a")], noopActions());
