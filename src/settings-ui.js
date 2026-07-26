@@ -1236,6 +1236,8 @@ export class SettingsUI {
 
     this._body.append(this.#listHeader("ニュースソース"));
     const addButton = this.#listAddButton("news-sources", "ニュースソース", () => {
+      // 空状態でも「+ 追加」を出すようになったため、sources が配列でない設定から押せてしまう。
+      this.draft.news ??= {}; this.draft.news.sources = asArray(this.draft.news.sources);
       this.draft.news.sources.push({ name: "新規ソース", type: "rss", url: "", enabled: true });
       this._pendingFocusSelector = `[data-config-path="news.sources.${this.draft.news.sources.length - 1}.name"]`;
       this.#render();
@@ -1295,6 +1297,7 @@ export class SettingsUI {
 
     this._body.append(this.#listHeader("話題ソース"));
     const addButton = this.#listAddButton("topics-sources", "話題ソース", () => {
+      this.draft.topics ??= {}; this.draft.topics.sources = asArray(this.draft.topics.sources);
       this.draft.topics.sources.push({ name: "配信ネタ (Todoist)", type: "todoist", enabled: true, token: "", projectId: "" });
       this._pendingFocusSelector = `[data-config-path="topics.sources.${this.draft.topics.sources.length - 1}.name"]`;
       this.#render();

@@ -27,40 +27,28 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
-      # The SDK puts the credential straight into the Authorization header, and Node rejects a
-      # header value containing a newline ("Header 'Authorization' has invalid value"), which is how
-      # a secret stored with a stray newline shows up: the job dies before any model call. Strip
-      # newlines and surrounding whitespace here so a cosmetically-mangled secret still works, and
-      # re-mask the cleaned value so it cannot reach the logs.
-      - name: Normalize review credential
-        id: review-credential
+      # Fail fast with an actionable message instead of the SDK's opaque
+      # "Header 'Authorization' has invalid value" (a padded value) or "401 Invalid bearer token"
+      # (the wrong kind of credential). The value is only read here; it is never exported, so it
+      # stays out of step outputs and out of every later step in the job.
+      - name: Check review credential
         env:
           RAW_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          token="$(printf '%s' "$RAW_TOKEN" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-          if [ -z "$token" ]; then
-            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is empty. Set it from 'claude setup-token'."
-            exit 1
-          fi
-          echo "::add-mask::$token"
-          echo "token=$token" >> "$GITHUB_OUTPUT"
-          # Shape only, never the value: enough to tell a mangled or wrong-kind secret apart from a
-          # rejected-but-well-formed one. `sk-ant-oat01-` is the fixed setup-token prefix.
-          case "$token" in
-            sk-ant-oat01-*) kind="setup-token (expected)";;
-            sk-ant-api*) kind="console-api-key (wrong kind)";;
-            sk-ant-sid*) kind="session-key (wrong kind)";;
-            sk-ant-*) kind="other sk-ant-* credential (wrong kind)";;
-            ghp_*|gho_*|ghs_*|github_pat_*) kind="github-token (wrong kind)";;
-            *) kind="unrecognized (not an sk-ant-* credential)";;
+          case "$RAW_TOKEN" in
+            "") echo "::error::CLAUDE_CODE_OAUTH_TOKEN is empty. Set it from 'claude setup-token'." ; exit 1 ;;
+            sk-ant-oat01-*) ;;
+            sk-ant-*) echo "::error::CLAUDE_CODE_OAUTH_TOKEN is an sk-ant-* credential but not a setup-token (expected sk-ant-oat01-...)." ; exit 1 ;;
+            *) echo "::error::CLAUDE_CODE_OAUTH_TOKEN is not a 'claude setup-token' value (expected sk-ant-oat01-...)." ; exit 1 ;;
           esac
-          printf 'credential shape: raw_bytes=%s clean_bytes=%s kind=%s ascii_only=%s\n' \
-            "${#RAW_TOKEN}" "${#token}" "$kind" \
-            "$(printf '%s' "$token" | LC_ALL=C grep -q '[^ -~]' && echo no || echo yes)"
+          case "$RAW_TOKEN" in
+            *[![:print:]]*) echo "::error::CLAUDE_CODE_OAUTH_TOKEN contains a newline or control character. Re-set it without a trailing newline." ; exit 1 ;;
+          esac
+          echo "Credential looks like a setup-token."
       - name: Run read-only Claude Opus 5 review
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
-          claude_code_oauth_token: ${{ steps.review-credential.outputs.token }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Limit Claude to repository reads and pull-request comments with this job-scoped token.
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
