@@ -529,6 +529,130 @@ try {
   );
   check("追加操作だけでもdirty状態の破棄確認を経由する", true);
 
+  // 14c. リスト項目の削除: map形式(コネクタ)・配列形式(ペルソナ)・空状態(話題ソース)の3系統で、
+  //      削除がリストへ反映され、dirtyになり、意図した追加ボタンへフォーカスが移り、
+  //      破棄すると保存済み設定へ戻ってclean状態になることを確認する。
+  const openSettingsModal = async () => {
+    await page.click("#btn-settings");
+    await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === true, { timeout: 3000 });
+  };
+  const gotoSettingsTab = async (tab) => {
+    await page.click(`.settings-sidebar button[data-tab="${tab}"]`);
+    await page.waitForFunction((expectedTab) => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === expectedTab, { timeout: 2000 }, tab);
+  };
+  // 条件成立を待ち、成立可否を true/false で返す (未成立でも throw せず check() のFAILとして残すため)
+  const waitTrue = async (fn, ...args) => {
+    try { await page.waitForFunction(fn, { timeout: 2000 }, ...args); return true; } catch { return false; }
+  };
+  // dirtyな状態のESCが破棄確認を経由してモーダルを閉じられたかを返す
+  const escapeWithDiscard = async () => {
+    await page.keyboard.press("Escape");
+    if (!await waitTrue(() => document.querySelector(".discard-changes-dialog")?.open === true)) return false;
+    await page.click('.discard-changes-dialog button:nth-of-type(2)');
+    return await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === false);
+  };
+  // clean判定が外れた場合に後続テストへ影響させないための後始末
+  const ensureSettingsClosed = async () => {
+    if (await page.$(".discard-changes-dialog[open]")) await page.click('.discard-changes-dialog button:nth-of-type(2)');
+    if (await page.evaluate(() => document.querySelector("dialog.settings-modal")?.open === true)) await escapeWithDiscard();
+    await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === false);
+  };
+  const readIdValues = (panel) => page.$$eval(`${panel} [data-config-path$=".id"]`, (inputs) => inputs.map((input) => input.value));
+
+  // 14c-1. map形式リスト (コネクタ)
+  await openSettingsModal();
+  await gotoSettingsTab("connectors");
+  const connectorIdsBeforeDelete = await readIdValues("#settings-panel-connectors");
+  await page.click('#settings-panel-connectors [aria-label="コネクタ「new_connector_1」を削除"]');
+  const connectorRemoved = await waitTrue(() => !document.querySelector('[data-config-path="connectors.new_connector_1.id"]'));
+  const connectorIdsAfterDelete = await readIdValues("#settings-panel-connectors");
+  check(
+    "コネクタ(map形式)の削除で対象だけがリストから消える",
+    connectorRemoved && JSON.stringify(connectorIdsAfterDelete) === JSON.stringify(connectorIdsBeforeDelete.filter((id) => id !== "new_connector_1")),
+    JSON.stringify({ before: connectorIdsBeforeDelete, after: connectorIdsAfterDelete }),
+  );
+  check("コネクタ削除後、コネクタ追加ボタンへフォーカスが移る", await waitTrue(() => document.activeElement === document.querySelector('.btn-add[data-list-add="connectors"]')));
+  check("コネクタ削除がライブリージョンへ通知される", await waitTrue(() => document.querySelector("#settings-status-live")?.textContent.includes("new_connector_1 を削除しました")));
+  check("コネクタの削除だけでclean状態からdirtyとなり破棄確認を経由する", await escapeWithDiscard());
+
+  await openSettingsModal();
+  const connectorIdsAfterDiscard = await readIdValues("#settings-panel-connectors");
+  check(
+    "破棄後に再オープンすると削除したコネクタが復元されている",
+    JSON.stringify(connectorIdsAfterDiscard) === JSON.stringify(connectorIdsBeforeDelete),
+    JSON.stringify(connectorIdsAfterDiscard),
+  );
+  await page.keyboard.press("Escape");
+  const closedWithoutDiscardDialog = await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === false);
+  const discardDialogReappeared = await page.evaluate(() => document.querySelector(".discard-changes-dialog")?.open === true);
+  check("破棄直後の再オープンはclean状態でESCが破棄確認なしに閉じる", closedWithoutDiscardDialog && !discardDialogReappeared, JSON.stringify({ closedWithoutDiscardDialog, discardDialogReappeared }));
+  await ensureSettingsClosed();
+
+  // 14c-2. 配列形式リスト (ペルソナ): 削除後に以降の項目が繰り上がって再採番される
+  await openSettingsModal();
+  await gotoSettingsTab("personas");
+  const personaIdsBeforeDelete = await readIdValues("#settings-panel-personas");
+  const personaDeleteIndex = personaIdsBeforeDelete.indexOf("new_persona_1");
+  check("削除対象のペルソナ new_persona_1 が存在する", personaDeleteIndex >= 0, JSON.stringify(personaIdsBeforeDelete));
+  await page.evaluate((index) => {
+    document.querySelector(`[data-config-path="personas.${index}.id"]`).closest(".card").querySelector(".btn-remove").click();
+  }, personaDeleteIndex);
+  const personaRemoved = await waitTrue((count) => document.querySelectorAll('#settings-panel-personas [data-config-path$=".id"]').length === count, personaIdsBeforeDelete.length - 1);
+  const personaIdsAfterDelete = await readIdValues("#settings-panel-personas");
+  check(
+    "ペルソナ(配列形式)の削除で以降の項目が繰り上がって再採番される",
+    personaRemoved && JSON.stringify(personaIdsAfterDelete) === JSON.stringify(personaIdsBeforeDelete.filter((id) => id !== "new_persona_1")),
+    JSON.stringify({ before: personaIdsBeforeDelete, after: personaIdsAfterDelete }),
+  );
+  check("ペルソナ削除後、ペルソナ追加ボタンへフォーカスが移る", await waitTrue(() => document.activeElement === document.querySelector('.btn-add[data-list-add="personas"]')));
+  check("ペルソナの削除だけでclean状態からdirtyとなり破棄確認を経由する", await escapeWithDiscard());
+
+  await openSettingsModal();
+  await gotoSettingsTab("personas");
+  const personaIdsAfterDiscard = await readIdValues("#settings-panel-personas");
+  check(
+    "破棄後に再オープンすると削除したペルソナが復元されている",
+    JSON.stringify(personaIdsAfterDiscard) === JSON.stringify(personaIdsBeforeDelete),
+    JSON.stringify(personaIdsAfterDiscard),
+  );
+  await ensureSettingsClosed();
+
+  // 14c-3. 最後の1件を削除したリスト (話題ソース) は空状態メッセージへ戻る
+  await openSettingsModal();
+  await gotoSettingsTab("topics");
+  const countTopicSources = () => page.$$eval("#settings-panel-topics .btn-remove", (buttons) => buttons.length);
+  const topicSourcesBeforeDelete = await countTopicSources();
+  check("削除対象の話題ソースが存在する", topicSourcesBeforeDelete > 0, `count=${topicSourcesBeforeDelete}`);
+  for (let remaining = topicSourcesBeforeDelete; remaining > 0; remaining--) {
+    await page.click("#settings-panel-topics .btn-remove");
+    await waitTrue((count) => document.querySelectorAll("#settings-panel-topics .btn-remove").length === count, remaining - 1);
+  }
+  const topicsAddFocused = await waitTrue(() => document.activeElement === document.querySelector('.btn-add[data-list-add="topics-sources"]'));
+  const topicsEmptyState = await page.evaluate(() => {
+    const panel = document.querySelector("#settings-panel-topics");
+    const emptyMessage = panel.querySelector(":scope > .list-empty");
+    const add = panel.querySelector('[aria-label="話題ソースを追加"]');
+    const children = [...panel.children];
+    return {
+      remaining: panel.querySelectorAll(".btn-remove").length,
+      emptyMessageText: emptyMessage?.textContent ?? "",
+      addAfterMessage: !!emptyMessage && !!add && children.indexOf(add) > children.indexOf(emptyMessage),
+    };
+  });
+  check(
+    "最後の話題ソースを削除すると空状態メッセージとその後ろの追加ボタンに戻る",
+    topicsEmptyState.remaining === 0 && topicsEmptyState.emptyMessageText.includes("話題ソースがありません") && topicsEmptyState.addAfterMessage,
+    JSON.stringify(topicsEmptyState),
+  );
+  check("話題ソース削除後も話題ソース追加ボタンへフォーカスが移る", topicsAddFocused);
+  check("話題ソースの削除だけでclean状態からdirtyとなり破棄確認を経由する", await escapeWithDiscard());
+
+  await openSettingsModal();
+  await gotoSettingsTab("topics");
+  const topicSourcesAfterDiscard = await countTopicSources();
+  check("破棄後に再オープンすると話題ソースが復元されている", topicSourcesAfterDiscard === topicSourcesBeforeDelete, `before=${topicSourcesBeforeDelete} after=${topicSourcesAfterDiscard}`);
+  await ensureSettingsClosed();
+
   // 15. 320px相当でも modal/footer が画面外へ固定されず、主要操作を横スクロールさせない
   await page.setViewport({ width: 320, height: 640 });
   await page.click("#btn-settings");
