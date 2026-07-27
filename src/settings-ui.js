@@ -787,11 +787,11 @@ export class SettingsUI {
       cardBody.append(row1, row2);
       this._body.append(card);
     }
+    body.append(addButton);
     const note = document.createElement("p");
     note.className = "muted settings-note";
     note.textContent = "AIの長い返答が文の途中で終わる場合は、読み上げではなく生成側のmaxTokens上限に達している可能性があります。未指定時は2048です。システムログに出力上限の警告が出る場合は、この値を増やしてください。";
     body.append(note);
-    body.append(addButton);
   }
 
   // ---- personas ----

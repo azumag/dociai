@@ -283,9 +283,9 @@ try {
     const cardNodes = [...panel.querySelectorAll(":scope > .card")];
     const addIndex = add ? [...panel.children].indexOf(add) : -1;
     const cardIndex = cardNodes.length ? [...panel.children].indexOf(cardNodes.at(-1)) : -1;
-    return { hasAdd: !!add, isPanelTail: add === panel.lastElementChild, addAfterLastCard: addIndex > cardIndex && cardIndex >= 0 };
+    return { hasAdd: !!add, addImmediatelyAfterLastCard: addIndex === cardIndex + 1 && cardIndex >= 0 };
   });
-  check("コネクタ追加ボタンは最後のコネクタカードより後、パネル末尾にある", connectorsAddState.hasAdd && connectorsAddState.isPanelTail && connectorsAddState.addAfterLastCard, JSON.stringify(connectorsAddState));
+  check("コネクタ追加ボタンは最後のコネクタカードの直後にある", connectorsAddState.hasAdd && connectorsAddState.addImmediatelyAfterLastCard, JSON.stringify(connectorsAddState));
   // 末尾へ移した追加ボタンが列flexのstretchでパネル全幅に伸びていないこと (見た目の退行防止)
   const connectorsAddSizing = await page.evaluate(() => {
     const panel = document.querySelector("#settings-panel-connectors");
@@ -573,8 +573,10 @@ try {
   // clean判定が外れた場合に後続テストへ影響させないための後始末
   const ensureSettingsClosed = async () => {
     if (await page.$(".discard-changes-dialog[open]")) await page.click('.discard-changes-dialog button:nth-of-type(2)');
-    if (await page.evaluate(() => document.querySelector("dialog.settings-modal")?.open === true)) await escapeWithDiscard();
-    await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === false);
+    if (await page.evaluate(() => document.querySelector("dialog.settings-modal")?.open === true)) {
+      await escapeWithDiscard();
+      await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === false);
+    }
   };
   const readIdValues = (panel) => page.$$eval(`${panel} [data-config-path$=".id"]`, (inputs) => inputs.map((input) => input.value));
 

@@ -210,6 +210,17 @@ test("personas sharing an id reuse both nodes instead of leaking one per refresh
   assert.equal(secondLi.parentNode, null, "the surplus duplicate is detached");
 });
 
+test("a persona with an empty string id survives refreshes instead of being treated as the placeholder", () => {
+  const { view, list } = setup();
+  view.renderPersonas([persona(""), persona("b")], noopActions());
+  const [emptyIdLi] = list.children;
+
+  view.renderPersonas([persona(""), persona("b")], noopActions());
+
+  assert.equal(list.children.length, 2, "the empty-id li must not be pruned as the stale placeholder");
+  assert.equal(list.children[0], emptyIdLi, "the empty-id li must be reused, not rebuilt");
+});
+
 test("an empty persona list falls back to the placeholder and recovers from it", () => {
   const { view, list, summary } = setup();
   view.renderPersonas([persona("a")], noopActions());

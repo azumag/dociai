@@ -68,7 +68,7 @@ export class ConsoleView {
   }
   renderPersonas(personas, actions) {
     const list = this.element("#persona-list");
-    if (personas.length) for (const item of [...list.children]) if (!item.dataset.personaId) item.remove();
+    if (personas.length) for (const item of [...list.children]) if (!("personaId" in item.dataset)) item.remove();
     // id ごとに待ち行列で持つ: 設定は同じidのペルソナを複数持てるため、Mapに1件だけ入れると
     // 取りこぼした側が末尾に残り続け、周期更新のたびにリストが伸びる。
     const existing = new Map();
