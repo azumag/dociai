@@ -16,6 +16,18 @@ test("dirty returns false after undo and close guard shares every close reason",
   assert.deepEqual(controller.state.draft, base);
 });
 
+test("discard after a successful save keeps the saved edits, not the pre-save snapshot", async () => {
+  let choice = "discard";
+  const controller = new SettingsController({ confirmDiscard: async () => choice, save: async () => {} });
+  controller.open({ schemaVersion: 2, value: 1 });
+  controller.changed({ schemaVersion: 2, value: 2 });
+  await controller.save();
+  controller.changed({ schemaVersion: 2, value: 3 });
+  assert.equal(await controller.requestClose("escape"), "closed");
+  assert.equal(controller.state.dirty, false);
+  assert.deepEqual(controller.state.draft, { schemaVersion: 2, value: 2 });
+});
+
 test("save requests coalesce and preserve draft on failure", async () => {
   let calls = 0, reject;
   const pending = new Promise((_resolve, no) => { reject = no; });

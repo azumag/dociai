@@ -794,6 +794,8 @@ export class SettingsUI {
     const body = this._body;
     body.append(this.#listHeader("ペルソナ"));
     const addButton = this.#listAddButton("personas", "ペルソナ", () => {
+      // 描画側は `?? []` で空状態を出すため、personas キーの無い設定からも押せてしまう。
+      this.draft.personas ??= [];
       let i = 1;
       while (this.draft.personas.some((p) => p.id === `new_persona_${i}`)) i++;
       this.draft.personas.push({
@@ -902,6 +904,8 @@ export class SettingsUI {
     const body = this._body;
     body.append(this.#listHeader("トリガー"));
     const addButton = this.#listAddButton("triggers", "トリガー", () => {
+      // 描画側は `?? {}` で空状態を出すため、triggers キーの無い設定からも押せてしまう。
+      this.draft.triggers ??= {};
       let i = 1;
       while (this.draft.triggers[`new_trigger_${i}`]) i++;
       this.draft.triggers[`new_trigger_${i}`] = { type: "manual" };
