@@ -380,6 +380,12 @@ export class SettingsUI {
     if (this._pendingFocusSelector) {
       const target = this._body.querySelector(this._pendingFocusSelector);
       this._pendingFocusSelector = null;
+      const card = target?.closest(".card");
+      const body = target?.closest(".settings-body");
+      const block = card && body && card.getBoundingClientRect().height > body.getBoundingClientRect().height
+        ? "start"
+        : "nearest";
+      (card ?? target)?.scrollIntoView({ block });
       deferFocus(target);
     }
   }
@@ -667,22 +673,34 @@ export class SettingsUI {
     return cur;
   }
 
-  #listHeader(title, onAdd) {
+  #listHeader(title) {
     const h = document.createElement("div");
     h.className = "list-header";
     const t = document.createElement("h3");
     t.textContent = title;
     h.append(t);
-    if (onAdd) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "btn-add";
-      b.innerHTML = `<span>+</span> 追加`;
-      b.setAttribute("aria-label", `${title}を追加`);
-      b.addEventListener("click", onAdd);
-      h.append(b);
-    }
     return h;
+  }
+
+  #listAddButton(listId, title, onAdd) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn-add";
+    b.dataset.listAdd = listId;
+    b.innerHTML = `<span>+</span> 追加`;
+    b.setAttribute("aria-label", `${title}を追加`);
+    b.addEventListener("click", () => {
+      onAdd();
+      this.controller.changed(this.draft);
+    });
+    return b;
+  }
+
+  #emptyListMessage(title) {
+    const message = document.createElement("p");
+    message.className = "muted list-empty";
+    message.textContent = `${title}がありません。「+ 追加」で作成してください`;
+    return message;
   }
 
   // カードを作成し、head 部と body 部を分離して返す。body に要素を append する。
@@ -705,29 +723,29 @@ export class SettingsUI {
     b.innerHTML = `<span>&times;</span>`;
     b.title = label;
     b.setAttribute("aria-label", label);
-    b.addEventListener("click", onRemove);
+    b.addEventListener("click", () => {
+      onRemove();
+      this.controller.changed(this.draft);
+    });
     return b;
   }
 
   // ---- connectors ----
   #renderConnectors() {
     const body = this._body;
-    body.append(this.#listHeader("コネクタ", () => {
+    body.append(this.#listHeader("コネクタ"));
+    const addButton = this.#listAddButton("connectors", "コネクタ", () => {
+      // 描画側は `?? {}` で空状態を出すため、connectors キーの無い設定からも押せてしまう。
+      this.draft.connectors ??= {};
       let i = 1;
       while (this.draft.connectors[`new_connector_${i}`]) i++;
       this.draft.connectors[`new_connector_${i}`] = { provider: "mock" };
       this._pendingFocusSelector = `[data-config-path="connectors.new_connector_${i}.id"]`;
       this.#render();
       this._announcer?.announce(`コネクタ new_connector_${i} を追加しました`);
-    }));
+    });
     const entries = Object.entries(this.draft.connectors ?? {});
-    if (!entries.length) {
-      const m = document.createElement("p");
-      m.className = "muted";
-      m.textContent = "コネクタがありません。「+ 追加」で作成してください";
-      body.append(m);
-      return;
-    }
+    if (!entries.length) body.append(this.#emptyListMessage("コネクタ"));
     for (const [id, c] of entries) {
       const { card, body: cardBody } = this.#card(null);
       card.classList.add("compact");
@@ -744,7 +762,6 @@ export class SettingsUI {
           }
           if (this.draft.context?.screenCapture?.connector === id) this.draft.context.screenCapture.connector = "";
           if (this.draft.research?.connector === id) this.draft.research.connector = "";
-          this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
           this._announcer?.announce(`コネクタ ${id} を削除しました`);
         }, `コネクタ「${id}」を削除`),
@@ -760,6 +777,7 @@ export class SettingsUI {
       cardBody.append(row1, row2);
       this._body.append(card);
     }
+    body.append(addButton);
     const note = document.createElement("p");
     note.className = "muted settings-note";
     note.textContent = "AIの長い返答が文の途中で終わる場合は、読み上げではなく生成側のmaxTokens上限に達している可能性があります。未指定時は2048です。システムログに出力上限の警告が出る場合は、この値を増やしてください。";
@@ -769,7 +787,10 @@ export class SettingsUI {
   // ---- personas ----
   #renderPersonas() {
     const body = this._body;
-    body.append(this.#listHeader("ペルソナ", () => {
+    body.append(this.#listHeader("ペルソナ"));
+    const addButton = this.#listAddButton("personas", "ペルソナ", () => {
+      // 描画側は `?? []` で空状態を出すため、personas キーの無い設定からも押せてしまう。
+      this.draft.personas ??= [];
       let i = 1;
       while (this.draft.personas.some((p) => p.id === `new_persona_${i}`)) i++;
       this.draft.personas.push({
@@ -784,17 +805,18 @@ export class SettingsUI {
       this._pendingFocusSelector = `[data-config-path="personas.${this.draft.personas.length - 1}.id"]`;
       this.#render();
       this._announcer?.announce(`ペルソナ new_persona_${i} を追加しました`);
-    }));
+    });
     const connectorIds = Object.keys(this.draft.connectors ?? {});
     const triggerIds = Object.keys(this.draft.triggers ?? {});
-    for (const [i, p] of (this.draft.personas ?? []).entries()) {
+    const personas = this.draft.personas ?? [];
+    if (!personas.length) body.append(this.#emptyListMessage("ペルソナ"));
+    for (const [i, p] of personas.entries()) {
       const headEls = [
         this.#arrField("ID", "personas", i, "id", { value: p.id, attrs: { spellcheck: "false" } }),
         this.#arrField("表示名", "personas", i, "name", { value: p.name }),
         this.#arrCheckbox("有効", "personas", i, "enabled", { value: p.enabled }),
         this.#removeBtn(() => {
           this.draft.personas.splice(i, 1);
-          this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
           this._announcer?.announce(`ペルソナ ${p.name || p.id} を削除しました`);
         }, `ペルソナ「${p.name || p.id}」を削除`),
@@ -868,20 +890,26 @@ export class SettingsUI {
       cardBody.append(voiceGrid);
       this._body.append(card);
     }
+    body.append(addButton);
   }
 
   // ---- triggers ----
   #renderTriggers() {
     const body = this._body;
-    body.append(this.#listHeader("トリガー", () => {
+    body.append(this.#listHeader("トリガー"));
+    const addButton = this.#listAddButton("triggers", "トリガー", () => {
+      // 描画側は `?? {}` で空状態を出すため、triggers キーの無い設定からも押せてしまう。
+      this.draft.triggers ??= {};
       let i = 1;
       while (this.draft.triggers[`new_trigger_${i}`]) i++;
       this.draft.triggers[`new_trigger_${i}`] = { type: "manual" };
       this._pendingFocusSelector = `[data-config-path="triggers.new_trigger_${i}.id"]`;
       this.#render();
       this._announcer?.announce(`トリガー new_trigger_${i} を追加しました`);
-    }));
-    for (const [id, t] of Object.entries(this.draft.triggers ?? {})) {
+    });
+    const entries = Object.entries(this.draft.triggers ?? {});
+    if (!entries.length) body.append(this.#emptyListMessage("トリガー"));
+    for (const [id, t] of entries) {
       const { card, body: cardBody } = this.#card(null);
       card.classList.add("compact");
       const row1 = document.createElement("div");
@@ -895,7 +923,6 @@ export class SettingsUI {
             p.triggers = (p.triggers ?? []).filter((x) => x !== id);
           }
           if (this.draft.news?.trigger === id) this.draft.news.trigger = "";
-          this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
           this._announcer?.announce(`トリガー ${id} を削除しました`);
         }, `トリガー「${id}」を削除`),
@@ -926,6 +953,7 @@ export class SettingsUI {
       cardBody.append(row2);
       this._body.append(card);
     }
+    body.append(addButton);
   }
 
   // ---- context / screenCapture / router ----
@@ -1205,19 +1233,21 @@ export class SettingsUI {
     cardBody.append(this.#pathField("style", "news.style", { value: n.style ?? "", textarea: true, rows: 2 }));
     this._body.append(card);
 
-    this._body.append(this.#listHeader("ニュースソース", () => {
+    this._body.append(this.#listHeader("ニュースソース"));
+    const addButton = this.#listAddButton("news-sources", "ニュースソース", () => {
       this.draft.news.sources.push({ name: "新規ソース", type: "rss", url: "", enabled: true });
       this._pendingFocusSelector = `[data-config-path="news.sources.${this.draft.news.sources.length - 1}.name"]`;
       this.#render();
       this._announcer?.announce("ニュースソースを追加しました");
-    }));
-    for (const [i, s] of (n.sources ?? []).entries()) {
+    });
+    const sources = n.sources;
+    if (!sources.length) this._body.append(this.#emptyListMessage("ニュースソース"));
+    for (const [i, s] of sources.entries()) {
       const headEls = [
         this.#arrField("name", "news.sources", i, "name", { value: s.name ?? "" }),
         this.#arrCheckbox("enabled", "news.sources", i, "enabled", { value: s.enabled ?? true }),
         this.#removeBtn(() => {
           this.draft.news.sources.splice(i, 1);
-          this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
           this._announcer?.announce(`ニュースソース ${s.name || i + 1} を削除しました`);
         }, `ニュースソース「${s.name || i + 1}」を削除`),
@@ -1230,6 +1260,7 @@ export class SettingsUI {
       cBody.append(g2);
       this._body.append(c);
     }
+    this._body.append(addButton);
   }
 
   // ---- topics ----
@@ -1260,19 +1291,21 @@ export class SettingsUI {
     cardBody.append(this.#pathField("style", "topics.style", { value: t.style ?? "", textarea: true, rows: 2 }));
     this._body.append(card);
 
-    this._body.append(this.#listHeader("話題ソース", () => {
+    this._body.append(this.#listHeader("話題ソース"));
+    const addButton = this.#listAddButton("topics-sources", "話題ソース", () => {
       this.draft.topics.sources.push({ name: "配信ネタ (Todoist)", type: "todoist", enabled: true, token: "", projectId: "" });
       this._pendingFocusSelector = `[data-config-path="topics.sources.${this.draft.topics.sources.length - 1}.name"]`;
       this.#render();
       this._announcer?.announce("話題ソースを追加しました");
-    }));
-    for (const [i, s] of t.sources.entries()) {
+    });
+    const sources = t.sources;
+    if (!sources.length) this._body.append(this.#emptyListMessage("話題ソース"));
+    for (const [i, s] of sources.entries()) {
       const headEls = [
         this.#arrField("name", "topics.sources", i, "name", { value: s.name ?? "" }),
         this.#arrCheckbox("enabled", "topics.sources", i, "enabled", { value: s.enabled ?? true }),
         this.#removeBtn(() => {
           this.draft.topics.sources.splice(i, 1);
-          this._pendingFocusSelector = ".list-header .btn-add";
           this.#render();
           this._announcer?.announce(`話題ソース ${s.name || i + 1} を削除しました`);
         }, `話題ソース「${s.name || i + 1}」を削除`),
@@ -1286,6 +1319,7 @@ export class SettingsUI {
       cBody.append(g2);
       this._body.append(c);
     }
+    this._body.append(addButton);
   }
 
   // ---- comment sources ----
@@ -1350,7 +1384,7 @@ export class SettingsUI {
       await this.onApply(clone(this.draft));
       this.log("設定を保存し、適用しました");
       this.controller.changed(this.draft);
-      this.controller.state.dirty = false;
+      this.controller.markSaved(this.draft);
       this._announcer?.announce("設定を保存して適用しました");
       this.close("saved");
     } catch (e) {

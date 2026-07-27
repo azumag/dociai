@@ -1,0 +1,98 @@
+name: Claude Opus 5 PR Review
+
+# Read-only Claude Opus 5 review for internal pull requests. The `opus` alias
+# resolves to the current supported Opus model without hardcoding a dated ID.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: dociai-claude-opus-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Do not expose the Anthropic credential to untrusted fork pull requests.
+    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    # A wedged SDK call would otherwise hold a runner for the 6-hour default.
+    timeout-minutes: 20
+    steps:
+      # Pinned action SHAs keep the review credentials out of mutable action tags.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The review's allowlisted git log/diff/show tools need real history: a shallow clone
+          # leaves `git diff <base>...HEAD` failing with "unknown revision".
+          fetch-depth: 0
+          persist-credentials: false
+      # Fail fast with an actionable message instead of the SDK's opaque
+      # "Header 'Authorization' has invalid value" (a padded value) or "401 Invalid bearer token"
+      # (the wrong kind of credential). The value is only read here; it is never exported, so it
+      # stays out of step outputs and out of every later step in the job.
+      - name: Check review credential
+        env:
+          RAW_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          case "$RAW_TOKEN" in
+            "") echo "::error::CLAUDE_CODE_OAUTH_TOKEN is empty. Set it from 'claude setup-token'." ; exit 1 ;;
+            sk-ant-oat01-*) ;;
+            sk-ant-*) echo "::error::CLAUDE_CODE_OAUTH_TOKEN is an sk-ant-* credential but not a setup-token (expected sk-ant-oat01-...)." ; exit 1 ;;
+            *) echo "::error::CLAUDE_CODE_OAUTH_TOKEN is not a 'claude setup-token' value (expected sk-ant-oat01-...)." ; exit 1 ;;
+          esac
+          case "$RAW_TOKEN" in
+            *[![:print:]]*) echo "::error::CLAUDE_CODE_OAUTH_TOKEN contains a newline or control character. Re-set it without a trailing newline." ; exit 1 ;;
+          esac
+          echo "Credential looks like a setup-token."
+      - name: Run read-only Claude Opus 5 review
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Limit Claude to repository reads and pull-request comments with this job-scoped token.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Perform a read-only Claude Opus 5 pull request review. Inspect the PR diff and
+            relevant repository context. Identify only actionable correctness, security,
+            accessibility, performance, or test-coverage issues introduced by this PR.
+
+            Do not edit files, change workflow configuration, commit, push, create branches,
+            merge, approve, or change GitHub issue state. You may only post one top-level PR
+            comment with a concise summary or "No findings." Prefix it with "Claude Opus 5 review".
+
+            You have a hard limit of 60 turns and the review is lost if you hit it (every tool
+            call and every reply spends one). Read the PR diff first, open only the files that
+            diff touches, and post the comment while turns remain rather than exploring further.
+          claude_args: |
+            --model opus
+            --max-turns 60
+            --allowedTools "Read,Glob,Grep,TodoWrite,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*)"
+            --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
+      # The action hides Claude's output, so a failed review otherwise reports only is_error:true
+      # with no reason. Print just the SDK's final result message (secrets stay masked); this is the
+      # difference between "credential rejected" and "the review itself failed".
+      - name: Report review failure reason
+        if: failure()
+        run: |
+          log="${RUNNER_TEMP}/claude-execution-output.json"
+          if [ ! -f "$log" ]; then
+            echo "No execution log at $log"
+            exit 0
+          fi
+          # This step only ever reports; `|| true` on every pipeline keeps `bash -eo pipefail` from
+          # turning a SIGPIPE out of `head`, or an empty match, into a second failed step.
+          { jq -r '[.. | objects | select(has("type") and .type == "result")][0]
+                   | "subtype=\(.subtype // "?") turns=\(.num_turns // "?") denials=\(.permission_denials_count // 0)",
+                     (.result // .error // empty)' "$log" | head -40; } || true
+          # Tool names only (never their inputs): a review that dies on max turns is usually one
+          # that burned them on tools missing from --allowedTools.
+          tools="$({ jq -r '[.. | objects | select(has("tool_name") and has("tool_use_id"))]
+                            | .[].tool_name' "$log" 2>/dev/null | sort -u | head -20; } || true)"
+          if [ -n "$tools" ]; then
+            printf 'tool calls seen: %s\n' "$(printf '%s' "$tools" | tr '\n' ' ')"
+          fi
