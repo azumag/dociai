@@ -61,16 +61,23 @@ try {
   page.on("console", (m) => {
     if (m.type() === "error") pageErrors.push(`console.error: ${m.text()}`);
   });
+  // 条件成立を待ち、成立可否を true/false で返す (未成立でも throw せず check() のFAILとして残すため)
+  const waitTrue = async (fn, ...args) => {
+    try { await page.waitForFunction(fn, { timeout: 2000 }, ...args); return true; } catch { return false; }
+  };
   const addListItemAndAssert = async ({ tab, panel, label, name, fillUrl = false }) => {
+    const checkName = `${name}追加後、末尾カードの入力欄へフォーカスし表示される`;
     await page.click(`.settings-sidebar button[data-tab="${tab}"]`);
-    await page.waitForFunction((expectedTab) => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === expectedTab, {}, tab);
+    const tabActive = await waitTrue((expectedTab) => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === expectedTab, tab);
+    if (!tabActive) { check(checkName, false, `${tab}タブへ切替できない`); return; }
     const before = await page.$$eval(`${panel} .card`, (cards) => cards.length);
     await page.click(`${panel} [aria-label="${label}"]`);
-    await page.waitForFunction(({ panelSelector, count }) => {
+    const grew = await waitTrue(({ panelSelector, count }) => {
       const root = document.querySelector(panelSelector);
       const cards = [...root.querySelectorAll(".card")];
       return cards.length === count + 1 && document.activeElement?.closest(".card") === cards.at(-1);
-    }, {}, { panelSelector: panel, count: before });
+    }, { panelSelector: panel, count: before });
+    if (!grew) { check(checkName, false, "追加後のカード増加/フォーカスを検出できない"); return; }
     const state = await page.evaluate((panelSelector) => {
       const root = document.querySelector(panelSelector);
       const last = [...root.querySelectorAll(".card")].at(-1);
@@ -82,7 +89,7 @@ try {
         visible: !!targetRect && !!bodyRect && targetRect.top >= bodyRect.top && targetRect.bottom <= bodyRect.bottom,
       };
     }, panel);
-    check(`${name}追加後、末尾カードの入力欄へフォーカスし表示される`, state.focused && state.visible, JSON.stringify(state));
+    check(checkName, state.focused && state.visible, JSON.stringify(state));
     if (fillUrl) {
       await page.evaluate((panelSelector) => {
         const card = [...document.querySelector(panelSelector).querySelectorAll(".card")].at(-1);
@@ -93,16 +100,21 @@ try {
     }
   };
   const assertAddMarksDirty = async ({ tab, panel, label, name }) => {
-    await page.click("#btn-settings");
-    await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === true, { timeout: 3000 });
+    const checkName = `${name}の追加だけでclean状態からdirtyとなり破棄確認を経由する`;
+    const alreadyOpen = await page.evaluate(() => document.querySelector("dialog.settings-modal")?.open === true);
+    if (!alreadyOpen) await page.click("#btn-settings");
+    const opened = alreadyOpen || await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === true);
+    if (!opened) { check(checkName, false, "モーダルが開かない"); return; }
     await page.click(`.settings-sidebar button[data-tab="${tab}"]`);
-    await page.waitForFunction((expectedTab) => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === expectedTab, {}, tab);
+    const tabActive = await waitTrue((expectedTab) => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === expectedTab, tab);
+    if (!tabActive) { check(checkName, false, `${tab}タブへ切替できない`); return; }
     await page.click(`${panel} [aria-label="${label}"]`);
     await page.keyboard.press("Escape");
-    await page.waitForFunction(() => document.querySelector(".discard-changes-dialog")?.open === true, { timeout: 2000 });
+    const discardOpen = await waitTrue(() => document.querySelector(".discard-changes-dialog")?.open === true);
+    if (!discardOpen) { check(checkName, false, "破棄確認ダイアログが開かない"); return; }
     await page.click('.discard-changes-dialog button:nth-of-type(2)');
-    await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === false, { timeout: 2000 });
-    check(`${name}の追加だけでclean状態からdirtyとなり破棄確認を経由する`, true);
+    const closed = await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === false);
+    check(checkName, closed, closed ? "" : "モーダルが閉じない");
   };
 
   await page.goto(`${BASE}/`, { waitUntil: "networkidle0" });
@@ -271,9 +283,9 @@ try {
     const cardNodes = [...panel.querySelectorAll(":scope > .card")];
     const addIndex = add ? [...panel.children].indexOf(add) : -1;
     const cardIndex = cardNodes.length ? [...panel.children].indexOf(cardNodes.at(-1)) : -1;
-    return { hasAdd: !!add, addImmediatelyAfterLastCard: addIndex === cardIndex + 1 && cardIndex >= 0 };
+    return { hasAdd: !!add, isPanelTail: add === panel.lastElementChild, addAfterLastCard: addIndex > cardIndex && cardIndex >= 0 };
   });
-  check("コネクタ追加ボタンは最後のコネクタカードの直後にある", connectorsAddState.hasAdd && connectorsAddState.addImmediatelyAfterLastCard, JSON.stringify(connectorsAddState));
+  check("コネクタ追加ボタンは最後のコネクタカードより後、パネル末尾にある", connectorsAddState.hasAdd && connectorsAddState.isPanelTail && connectorsAddState.addAfterLastCard, JSON.stringify(connectorsAddState));
   // 末尾へ移した追加ボタンが列flexのstretchでパネル全幅に伸びていないこと (見た目の退行防止)
   const connectorsAddSizing = await page.evaluate(() => {
     const panel = document.querySelector("#settings-panel-connectors");
@@ -551,10 +563,6 @@ try {
     await page.click(`.settings-sidebar button[data-tab="${tab}"]`);
     await page.waitForFunction((expectedTab) => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === expectedTab, { timeout: 2000 }, tab);
   };
-  // 条件成立を待ち、成立可否を true/false で返す (未成立でも throw せず check() のFAILとして残すため)
-  const waitTrue = async (fn, ...args) => {
-    try { await page.waitForFunction(fn, { timeout: 2000 }, ...args); return true; } catch { return false; }
-  };
   // dirtyな状態のESCが破棄確認を経由してモーダルを閉じられたかを返す
   const escapeWithDiscard = async () => {
     await page.keyboard.press("Escape");
@@ -582,7 +590,11 @@ try {
     connectorRemoved && JSON.stringify(connectorIdsAfterDelete) === JSON.stringify(connectorIdsBeforeDelete.filter((id) => id !== "new_connector_1")),
     JSON.stringify({ before: connectorIdsBeforeDelete, after: connectorIdsAfterDelete }),
   );
-  check("コネクタ削除後、コネクタ追加ボタンへフォーカスが移る", await waitTrue(() => document.activeElement === document.querySelector('.btn-add[data-list-add="connectors"]')));
+  check("コネクタ削除後、繰り上がった直前のコネクタの削除ボタンへフォーカスが移る", await waitTrue(() => {
+    const panel = document.querySelector("#settings-panel-connectors");
+    const lastCard = [...panel.querySelectorAll(":scope > .card")].at(-1);
+    return !!lastCard && document.activeElement === lastCard.querySelector(".btn-remove");
+  }));
   check("コネクタ削除がライブリージョンへ通知される", await waitTrue(() => document.querySelector("#settings-status-live")?.textContent.includes("new_connector_1 を削除しました")));
   check("コネクタの削除だけでclean状態からdirtyとなり破棄確認を経由する", await escapeWithDiscard());
 
@@ -615,7 +627,11 @@ try {
     personaRemoved && JSON.stringify(personaIdsAfterDelete) === JSON.stringify(personaIdsBeforeDelete.filter((id) => id !== "new_persona_1")),
     JSON.stringify({ before: personaIdsBeforeDelete, after: personaIdsAfterDelete }),
   );
-  check("ペルソナ削除後、ペルソナ追加ボタンへフォーカスが移る", await waitTrue(() => document.activeElement === document.querySelector('.btn-add[data-list-add="personas"]')));
+  check("ペルソナ削除後、繰り上がった次のペルソナの削除ボタンへフォーカスが移る", await waitTrue(() => {
+    const panel = document.querySelector("#settings-panel-personas");
+    const targetCard = panel.querySelector('.card[data-item-index="2"]');
+    return !!targetCard && document.activeElement === targetCard.querySelector(".btn-remove");
+  }));
   check("ペルソナの削除だけでclean状態からdirtyとなり破棄確認を経由する", await escapeWithDiscard());
 
   await openSettingsModal();

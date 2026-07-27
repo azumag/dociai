@@ -682,6 +682,14 @@ export class SettingsUI {
     return h;
   }
 
+  // 削除直後のフォーカス先を決める: 繰り上がって同じ位置に来た項目 (無ければ直前の項目) の削除ボタン。
+  // リストが空になった場合のみ、末尾の追加ボタンへフォールバックする。
+  #focusSelectorAfterRemove(index, remainingCount, addSelector) {
+    if (remainingCount === 0) return addSelector;
+    const targetIndex = Math.min(index, remainingCount - 1);
+    return `.card[data-item-index="${targetIndex}"] .btn-remove`;
+  }
+
   #listAddButton(listId, title, onAdd) {
     const b = document.createElement("button");
     b.type = "button";
@@ -745,14 +753,11 @@ export class SettingsUI {
       this._announcer?.announce(`コネクタ new_connector_${i} を追加しました`);
     });
     const entries = Object.entries(this.draft.connectors ?? {});
-    if (!entries.length) {
-      body.append(this.#emptyListMessage("コネクタ"));
-      body.append(addButton);
-      return;
-    }
-    for (const [id, c] of entries) {
+    if (!entries.length) body.append(this.#emptyListMessage("コネクタ"));
+    for (const [idx, [id, c]] of entries.entries()) {
       const { card, body: cardBody } = this.#card(null);
       card.classList.add("compact");
+      card.dataset.itemIndex = String(idx);
       const row1 = document.createElement("div");
       row1.className = "compact-row";
       row1.append(
@@ -766,7 +771,7 @@ export class SettingsUI {
           }
           if (this.draft.context?.screenCapture?.connector === id) this.draft.context.screenCapture.connector = "";
           if (this.draft.research?.connector === id) this.draft.research.connector = "";
-          this._pendingFocusSelector = '.btn-add[data-list-add="connectors"]';
+          this._pendingFocusSelector = this.#focusSelectorAfterRemove(idx, entries.length - 1, '.btn-add[data-list-add="connectors"]');
           this.#render();
           this._announcer?.announce(`コネクタ ${id} を削除しました`);
         }, `コネクタ「${id}」を削除`),
@@ -782,11 +787,11 @@ export class SettingsUI {
       cardBody.append(row1, row2);
       this._body.append(card);
     }
-    body.append(addButton);
     const note = document.createElement("p");
     note.className = "muted settings-note";
     note.textContent = "AIの長い返答が文の途中で終わる場合は、読み上げではなく生成側のmaxTokens上限に達している可能性があります。未指定時は2048です。システムログに出力上限の警告が出る場合は、この値を増やしてください。";
     body.append(note);
+    body.append(addButton);
   }
 
   // ---- personas ----
@@ -814,6 +819,7 @@ export class SettingsUI {
     const connectorIds = Object.keys(this.draft.connectors ?? {});
     const triggerIds = Object.keys(this.draft.triggers ?? {});
     const personas = this.draft.personas ?? [];
+    const personaCount = personas.length;
     if (!personas.length) body.append(this.#emptyListMessage("ペルソナ"));
     for (const [i, p] of personas.entries()) {
       const headEls = [
@@ -822,12 +828,13 @@ export class SettingsUI {
         this.#arrCheckbox("有効", "personas", i, "enabled", { value: p.enabled }),
         this.#removeBtn(() => {
           this.draft.personas.splice(i, 1);
-          this._pendingFocusSelector = '.btn-add[data-list-add="personas"]';
+          this._pendingFocusSelector = this.#focusSelectorAfterRemove(i, personaCount - 1, '.btn-add[data-list-add="personas"]');
           this.#render();
           this._announcer?.announce(`ペルソナ ${p.name || p.id} を削除しました`);
         }, `ペルソナ「${p.name || p.id}」を削除`),
       ];
       const { card, body: cardBody } = this.#card(headEls);
+      card.dataset.itemIndex = String(i);
       const grid = document.createElement("div");
       grid.className = "card-grid";
       grid.append(this.#arrSelect("connector", connectorIds, "personas", i, "connector", { value: p.connector }));
@@ -915,9 +922,10 @@ export class SettingsUI {
     });
     const entries = Object.entries(this.draft.triggers ?? {});
     if (!entries.length) body.append(this.#emptyListMessage("トリガー"));
-    for (const [id, t] of entries) {
+    for (const [idx, [id, t]] of entries.entries()) {
       const { card, body: cardBody } = this.#card(null);
       card.classList.add("compact");
+      card.dataset.itemIndex = String(idx);
       const row1 = document.createElement("div");
       row1.className = "compact-row";
       row1.append(
@@ -929,7 +937,7 @@ export class SettingsUI {
             p.triggers = (p.triggers ?? []).filter((x) => x !== id);
           }
           if (this.draft.news?.trigger === id) this.draft.news.trigger = "";
-          this._pendingFocusSelector = '.btn-add[data-list-add="triggers"]';
+          this._pendingFocusSelector = this.#focusSelectorAfterRemove(idx, entries.length - 1, '.btn-add[data-list-add="triggers"]');
           this.#render();
           this._announcer?.announce(`トリガー ${id} を削除しました`);
         }, `トリガー「${id}」を削除`),
@@ -1250,6 +1258,7 @@ export class SettingsUI {
       this._announcer?.announce("ニュースソースを追加しました");
     });
     const sources = asArray(n.sources);
+    const sourceCount = sources.length;
     if (!sources.length) this._body.append(this.#emptyListMessage("ニュースソース"));
     for (const [i, s] of sources.entries()) {
       const headEls = [
@@ -1257,12 +1266,13 @@ export class SettingsUI {
         this.#arrCheckbox("enabled", "news.sources", i, "enabled", { value: s.enabled ?? true }),
         this.#removeBtn(() => {
           this.draft.news.sources.splice(i, 1);
-          this._pendingFocusSelector = '.btn-add[data-list-add="news-sources"]';
+          this._pendingFocusSelector = this.#focusSelectorAfterRemove(i, sourceCount - 1, '.btn-add[data-list-add="news-sources"]');
           this.#render();
           this._announcer?.announce(`ニュースソース ${s.name || i + 1} を削除しました`);
         }, `ニュースソース「${s.name || i + 1}」を削除`),
       ];
       const { card: c, body: cBody } = this.#card(headEls);
+      c.dataset.itemIndex = String(i);
       const g2 = document.createElement("div");
       g2.className = "card-grid";
       g2.append(this.#arrSelect("type", NEWS_SOURCE_TYPES, "news.sources", i, "type", { value: s.type ?? "rss" }));
@@ -1310,6 +1320,7 @@ export class SettingsUI {
       this._announcer?.announce("話題ソースを追加しました");
     });
     const sources = asArray(t.sources);
+    const sourceCount = sources.length;
     if (!sources.length) this._body.append(this.#emptyListMessage("話題ソース"));
     for (const [i, s] of sources.entries()) {
       const headEls = [
@@ -1317,12 +1328,13 @@ export class SettingsUI {
         this.#arrCheckbox("enabled", "topics.sources", i, "enabled", { value: s.enabled ?? true }),
         this.#removeBtn(() => {
           this.draft.topics.sources.splice(i, 1);
-          this._pendingFocusSelector = '.btn-add[data-list-add="topics-sources"]';
+          this._pendingFocusSelector = this.#focusSelectorAfterRemove(i, sourceCount - 1, '.btn-add[data-list-add="topics-sources"]');
           this.#render();
           this._announcer?.announce(`話題ソース ${s.name || i + 1} を削除しました`);
         }, `話題ソース「${s.name || i + 1}」を削除`),
       ];
       const { card: c, body: cBody } = this.#card(headEls);
+      c.dataset.itemIndex = String(i);
       const g2 = document.createElement("div");
       g2.className = "card-grid";
       g2.append(this.#arrSelect("type", TOPIC_SOURCE_TYPES, "topics.sources", i, "type", { value: s.type ?? "todoist" }));
@@ -1396,6 +1408,8 @@ export class SettingsUI {
       await this.onApply(clone(this.draft));
       this.log("設定を保存し、適用しました");
       this.controller.changed(this.draft);
+      this.controller.dirty.reset(this.draft);
+      this.controller.state.base = clone(this.draft);
       this.controller.state.dirty = false;
       this._announcer?.announce("設定を保存して適用しました");
       this.close("saved");
