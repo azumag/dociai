@@ -1235,9 +1235,6 @@ export class SettingsUI {
 
     this._body.append(this.#listHeader("ニュースソース"));
     const addButton = this.#listAddButton("news-sources", "ニュースソース", () => {
-      // 空状態でも「+ 追加」を出すようになったため、sources の無い設定から押せてしまう。
-      // 非配列の既存値は (null/undefined ではない限り) 壊れたまま残し、[] で上書きして失わせない。
-      this.draft.news ??= {}; this.draft.news.sources ??= [];
       this.draft.news.sources.push({ name: "新規ソース", type: "rss", url: "", enabled: true });
       this._pendingFocusSelector = `[data-config-path="news.sources.${this.draft.news.sources.length - 1}.name"]`;
       this.#render();
@@ -1296,8 +1293,6 @@ export class SettingsUI {
 
     this._body.append(this.#listHeader("話題ソース"));
     const addButton = this.#listAddButton("topics-sources", "話題ソース", () => {
-      // 非配列の既存値は (null/undefined ではない限り) 壊れたまま残し、[] で上書きして失わせない。
-      this.draft.topics ??= {}; this.draft.topics.sources ??= [];
       this.draft.topics.sources.push({ name: "配信ネタ (Todoist)", type: "todoist", enabled: true, token: "", projectId: "" });
       this._pendingFocusSelector = `[data-config-path="topics.sources.${this.draft.topics.sources.length - 1}.name"]`;
       this.#render();
