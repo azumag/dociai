@@ -105,13 +105,22 @@ try {
     if (!alreadyOpen) await page.click("#btn-settings");
     const opened = alreadyOpen || await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === true);
     if (!opened) { check(checkName, false, "モーダルが開かない"); return; }
+    // 「clean状態から」を主張の通り検証するため、追加前に一度ESCで閉じられることを確認する。
+    // 破棄確認ダイアログが出たらこの時点で既にdirtyであり、後段のアサーションが空振りで
+    // 通ってしまうので、その場で FAIL として打ち切る。
+    await page.keyboard.press("Escape");
+    const closedCleanly = await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === false);
+    if (!closedCleanly) { check(checkName, false, "追加前の時点で既にdirtyだった (前提が崩れている)"); return; }
+    await page.click("#btn-settings");
+    const reopened = await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === true);
+    if (!reopened) { check(checkName, false, "再オープンできない"); return; }
     await page.click(`.settings-sidebar button[data-tab="${tab}"]`);
     const tabActive = await waitTrue((expectedTab) => document.querySelector('.settings-sidebar button.is-active')?.dataset.tab === expectedTab, tab);
     if (!tabActive) { check(checkName, false, `${tab}タブへ切替できない`); return; }
     await page.click(`${panel} [aria-label="${label}"]`);
     await page.keyboard.press("Escape");
     const discardOpen = await waitTrue(() => document.querySelector(".discard-changes-dialog")?.open === true);
-    if (!discardOpen) { check(checkName, false, "破棄確認ダイアログが開かない"); return; }
+    if (!discardOpen) { check(checkName, false, "追加後に破棄確認ダイアログが開かない"); return; }
     await page.click('.discard-changes-dialog button:nth-of-type(2)');
     const closed = await waitTrue(() => document.querySelector("dialog.settings-modal")?.open === false);
     check(checkName, closed, closed ? "" : "モーダルが閉じない");
@@ -424,6 +433,7 @@ try {
   check("適用後のコネクタ一覧に new_connector_1 が反映される", listText.includes("new_connector_1"), listText.slice(0, 120));
 
   // 11a. 各リストはclean状態の追加だけでdirtyになり、破棄確認を表示する
+  await assertAddMarksDirty({ tab: "personas", panel: "#settings-panel-personas", label: "ペルソナを追加", name: "ペルソナ" });
   await assertAddMarksDirty({ tab: "triggers", panel: "#settings-panel-triggers", label: "トリガーを追加", name: "トリガー" });
   await assertAddMarksDirty({ tab: "news", panel: "#settings-panel-news", label: "ニュースソースを追加", name: "ニュースソース" });
   await assertAddMarksDirty({ tab: "topics", panel: "#settings-panel-topics", label: "話題ソースを追加", name: "話題ソース" });
