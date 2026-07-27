@@ -553,8 +553,9 @@ try {
   check("追加操作だけでもdirty状態の破棄確認を経由する", true);
 
   // 14c. リスト項目の削除: map形式(コネクタ)・配列形式(ペルソナ)・空状態(話題ソース)の3系統で、
-  //      削除がリストへ反映され、dirtyになり、意図した追加ボタンへフォーカスが移り、
-  //      破棄すると保存済み設定へ戻ってclean状態になることを確認する。
+  //      削除がリストへ反映され、dirtyになり、フォーカスは特定要素へ誘導せず(削除ボタンが
+  //      DOMから消えるとブラウザ既定の挙動でdocument.bodyへ落ちる)、破棄すると保存済み設定へ
+  //      戻ってclean状態になることを確認する。
   const openSettingsModal = async () => {
     await page.click("#btn-settings");
     await page.waitForFunction(() => document.querySelector("dialog.settings-modal")?.open === true, { timeout: 3000 });
@@ -579,6 +580,16 @@ try {
     }
   };
   const readIdValues = (panel) => page.$$eval(`${panel} [data-config-path$=".id"]`, (inputs) => inputs.map((input) => input.value));
+  // フォーカス移動なしを主張するアサーションは、真である瞬間が一度でもあれば waitForFunction が
+  // 即解決してしまい、その後 requestAnimationFrame で再フォーカスされても検知できない
+  // (以前指摘された固定sleepの空振りと同型)。deferFocus は単発のrAFなので、2フレーム分
+  // 経過させてから判定すれば「rAFで後から奪われていないか」まで見たことになる。
+  const activeElementAfterSettling = () => page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+      tag: document.activeElement?.tagName ?? null,
+      isBody: document.activeElement === document.body,
+    })));
+  }));
 
   // 14c-1. map形式リスト (コネクタ)
   await openSettingsModal();
@@ -592,11 +603,10 @@ try {
     connectorRemoved && JSON.stringify(connectorIdsAfterDelete) === JSON.stringify(connectorIdsBeforeDelete.filter((id) => id !== "new_connector_1")),
     JSON.stringify({ before: connectorIdsBeforeDelete, after: connectorIdsAfterDelete }),
   );
-  check("コネクタ削除後、繰り上がった直前のコネクタの削除ボタンへフォーカスが移る", await waitTrue(() => {
-    const panel = document.querySelector("#settings-panel-connectors");
-    const lastCard = [...panel.querySelectorAll(":scope > .card")].at(-1);
-    return !!lastCard && document.activeElement === lastCard.querySelector(".btn-remove");
-  }));
+  // 削除後はフォーカス管理をしない: 削除ボタンがDOMから消えるとブラウザ既定の挙動で
+  // document.body へ落ちる。追加ボタンへ誘導しないこと自体をアサートする。
+  const connectorsFocusAfterDelete = await activeElementAfterSettling();
+  check("コネクタ削除後は特定要素へフォーカスを移さない", connectorsFocusAfterDelete.isBody, JSON.stringify(connectorsFocusAfterDelete));
   check("コネクタ削除がライブリージョンへ通知される", await waitTrue(() => document.querySelector("#settings-status-live")?.textContent.includes("new_connector_1 を削除しました")));
   check("コネクタの削除だけでclean状態からdirtyとなり破棄確認を経由する", await escapeWithDiscard());
 
@@ -619,9 +629,14 @@ try {
   const personaIdsBeforeDelete = await readIdValues("#settings-panel-personas");
   const personaDeleteIndex = personaIdsBeforeDelete.indexOf("new_persona_1");
   check("削除対象のペルソナ new_persona_1 が存在する", personaDeleteIndex >= 0, JSON.stringify(personaIdsBeforeDelete));
-  await page.evaluate((index) => {
-    document.querySelector(`[data-config-path="personas.${index}.id"]`).closest(".card").querySelector(".btn-remove").click();
-  }, personaDeleteIndex);
+  // page.evaluate(...).click() はDOM APIの合成クリックで、実クリックが伴うネイティブの
+  // フォーカス処理を再現しない。削除後のフォーカス無し挙動を正しく検証するため、他の削除操作と
+  // 同様にPuppeteerの実クリック(ElementHandle.click())を使う。
+  const personaRemoveHandle = await page.evaluateHandle(
+    (index) => document.querySelector(`[data-config-path="personas.${index}.id"]`).closest(".card").querySelector(".btn-remove"),
+    personaDeleteIndex,
+  );
+  await personaRemoveHandle.asElement().click();
   const personaRemoved = await waitTrue((count) => document.querySelectorAll('#settings-panel-personas [data-config-path$=".id"]').length === count, personaIdsBeforeDelete.length - 1);
   const personaIdsAfterDelete = await readIdValues("#settings-panel-personas");
   check(
@@ -629,11 +644,8 @@ try {
     personaRemoved && JSON.stringify(personaIdsAfterDelete) === JSON.stringify(personaIdsBeforeDelete.filter((id) => id !== "new_persona_1")),
     JSON.stringify({ before: personaIdsBeforeDelete, after: personaIdsAfterDelete }),
   );
-  check("ペルソナ削除後、繰り上がった次のペルソナの削除ボタンへフォーカスが移る", await waitTrue(() => {
-    const panel = document.querySelector("#settings-panel-personas");
-    const targetCard = panel.querySelector('.card[data-item-index="2"]');
-    return !!targetCard && document.activeElement === targetCard.querySelector(".btn-remove");
-  }));
+  const personasFocusAfterDelete = await activeElementAfterSettling();
+  check("ペルソナ削除後は特定要素へフォーカスを移さない", personasFocusAfterDelete.isBody, JSON.stringify(personasFocusAfterDelete));
   check("ペルソナの削除だけでclean状態からdirtyとなり破棄確認を経由する", await escapeWithDiscard());
 
   await openSettingsModal();
@@ -656,7 +668,7 @@ try {
     await page.click("#settings-panel-topics .btn-remove");
     await waitTrue((count) => document.querySelectorAll("#settings-panel-topics .btn-remove").length === count, remaining - 1);
   }
-  const topicsAddFocused = await waitTrue(() => document.activeElement === document.querySelector('.btn-add[data-list-add="topics-sources"]'));
+  const topicsFocusAfterDelete = await activeElementAfterSettling();
   const topicsEmptyState = await page.evaluate(() => {
     const panel = document.querySelector("#settings-panel-topics");
     const emptyMessage = panel.querySelector(":scope > .list-empty");
@@ -673,7 +685,7 @@ try {
     topicsEmptyState.remaining === 0 && topicsEmptyState.emptyMessageText.includes("話題ソースがありません") && topicsEmptyState.addAfterMessage,
     JSON.stringify(topicsEmptyState),
   );
-  check("話題ソース削除後も話題ソース追加ボタンへフォーカスが移る", topicsAddFocused);
+  check("話題ソース削除後は特定要素へフォーカスを移さない", topicsFocusAfterDelete.isBody, JSON.stringify(topicsFocusAfterDelete));
   check("話題ソースの削除だけでclean状態からdirtyとなり破棄確認を経由する", await escapeWithDiscard());
 
   await openSettingsModal();
