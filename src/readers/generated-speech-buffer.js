@@ -21,7 +21,9 @@ export class GeneratedSpeechBuffer {
 
   play() {
     const item = this.state.items.shift();
-    return item ? this.speechQueue?.enqueue(item) ?? null : null;
+    if (!item) return null;
+    this.speechQueue?.enqueue(item);
+    return item;
   }
 }
 
