@@ -1,7 +1,7 @@
-name: Claude Opus 5 PR Review
+name: Claude Code PR Review
 
-# Read-only Claude Opus 5 review for internal pull requests. The `opus` alias
-# resolves to the current supported Opus model without hardcoding a dated ID.
+# Read-only Claude Code review for internal pull requests. A model alias is
+# used so the reviewed model can change without hardcoding a dated ID here.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -11,7 +11,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: dociai-claude-opus-review-${{ github.event.pull_request.number }}
+  group: dociai-claude-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -47,7 +47,7 @@ jobs:
             *[![:print:]]*) echo "::error::CLAUDE_CODE_OAUTH_TOKEN contains a newline or control character. Re-set it without a trailing newline." ; exit 1 ;;
           esac
           echo "Credential looks like a setup-token."
-      - name: Run read-only Claude Opus 5 review
+      - name: Run read-only Claude Code review
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -57,19 +57,19 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Perform a read-only Claude Opus 5 pull request review. Inspect the PR diff and
+            Perform a read-only Claude Code pull request review. Inspect the PR diff and
             relevant repository context. Identify only actionable correctness, security,
             accessibility, performance, or test-coverage issues introduced by this PR.
 
             Do not edit files, change workflow configuration, commit, push, create branches,
             merge, approve, or change GitHub issue state. You may only post one top-level PR
-            comment with a concise summary or "No findings." Prefix it with "Claude Opus 5 review".
+            comment with a concise summary or "No findings." Prefix it with "Claude Code review".
 
             You have a hard limit of 60 turns and the review is lost if you hit it (every tool
             call and every reply spends one). Read the PR diff first, open only the files that
             diff touches, and post the comment while turns remain rather than exploring further.
           claude_args: |
-            --model opus
+            --model fable
             --max-turns 60
             --allowedTools "Read,Glob,Grep,TodoWrite,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*)"
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
