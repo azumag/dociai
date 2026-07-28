@@ -70,7 +70,7 @@ export class NewsPipelineCoordinator {
       const items = await this.stages.acquire.run(null, context);
       diagnostics.candidateCounts.acquired = items.length;
 
-      const { picks, eligibleCount, stats: filterStats, keysByProcessingKey } = await this.stages.select.run({ items, generation: this.generation, maxItems: news.maxItems ?? 3 }, context);
+      const { picks, eligibleCount, stats: filterStats, keysByProcessingKey } = await this.stages.select.run({ items, generation: this.generation, maxItems: context.maxItems ?? news.maxItems ?? 3 }, context);
       diagnostics.candidateCounts.filtered = eligibleCount;
       diagnostics.candidateCounts.eligible = picks.length;
       diagnostics.filterStats = filterStats ?? null;

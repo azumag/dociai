@@ -12,6 +12,7 @@ import { NewsReader } from "../news-reader.js";
 import { createNewsPipelineCoordinator } from "../news/news-pipeline-coordinator.js";
 import { NewsScheduleRunner } from "../news/delivery/news-schedule-runner.js";
 import { TopicReader } from "../topic-reader.js";
+import { BufferedReader, GeneratedSpeechBuffer } from "../readers/generated-speech-buffer.js";
 import { TriggerEngine } from "../trigger-engine.js";
 import { ResponseCoordinator } from "./response-coordinator.js";
 import { AutomationCoordinator } from "./automation-coordinator.js";
@@ -378,39 +379,55 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   // dedupe/spam/diversity history survives config reload — a fresh generation's runtime
   // component graph must not reset "have we already delivered this article" memory. Falls back
   // to createNewsPipelineCoordinator's own bounded default when a caller (tests) doesn't supply one.
+  // These plain states live on the long-lived runtime deps object, so prepared speech survives
+  // the configuration reload boundary just like the existing runtime-scoped news history does.
+  const generatedBufferStates = deps.generatedBufferStates ??= new Map();
+  const newsBuffer = new GeneratedSpeechBuffer({ speechQueue, state: generatedBufferStates.get("news") ?? { items: [] } });
+  const topicBuffer = new GeneratedSpeechBuffer({ speechQueue, state: generatedBufferStates.get("topics") ?? { items: [] } });
+  generatedBufferStates.set("news", newsBuffer.state);
+  generatedBufferStates.set("topics", topicBuffer.state);
+
   const newsPipeline = define("newsPipeline", () => createNewsPipelineCoordinator({
     getConfig: () => config,
     getConnector: (id) => connectors.get(id),
     personaRouter,
     contextBuilder,
-    speechQueue,
+    speechQueue: newsBuffer,
     log: deps.log,
     onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
     ...(deps.newsHistoryStore ? { historyStore: deps.newsHistoryStore } : {}),
   }));
 
-  const newsReader = define("newsReader", () => new NewsReader({
-    config,
-    getConnector: (id) => connectors.get(id),
-    personaRouter,
-    contextBuilder,
-    speechQueue,
+  const newsReader = define("newsReader", () => new BufferedReader({
+    reader: new NewsReader({
+      config,
+      getConnector: (id) => connectors.get(id),
+      personaRouter,
+      contextBuilder,
+      speechQueue: newsBuffer,
+      log: deps.log,
+      onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
+      isRuntimeEnabled: deps.isNewsRuntimeEnabled,
+      pipeline: newsPipeline,
+    }),
+    buffer: newsBuffer,
     log: deps.log,
-    onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
-    isRuntimeEnabled: deps.isNewsRuntimeEnabled,
-    pipeline: newsPipeline,
   }));
 
-  const topicReader = define("topicReader", () => new TopicReader({
-    config,
-    getConnector: (id) => connectors.get(id),
-    personaRouter,
-    contextBuilder,
-    speechQueue,
-    webResearcher,
+  const topicReader = define("topicReader", () => new BufferedReader({
+    reader: new TopicReader({
+      config,
+      getConnector: (id) => connectors.get(id),
+      personaRouter,
+      contextBuilder,
+      speechQueue: topicBuffer,
+      webResearcher,
+      log: deps.log,
+      onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },
+      isRuntimeEnabled: deps.isTopicsRuntimeEnabled,
+    }),
+    buffer: topicBuffer,
     log: deps.log,
-    onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },
-    isRuntimeEnabled: deps.isTopicsRuntimeEnabled,
   }));
 
   const handleTrigger = expose("handleTrigger", (triggerId, options = {}) => {

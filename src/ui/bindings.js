@@ -28,7 +28,7 @@ export function bindConsoleUI(elements, actions, { setIntervalImpl = setInterval
     text.value = "";
     text.focus();
   });
-  for (const [name, action] of [["speechStop", "holdSpeech"], ["speechResume", "releaseSpeech"], ["speechSkip", "skipSpeech"], ["speechClear", "clearSpeech"], ["micStart", "startMic"], ["micStop", "stopMic"], ["screenStart", "startScreen"], ["screenStop", "stopScreen"], ["screenRead", "readScreen"], ["newsRead", "readNews"], ["topicRead", "readTopics"], ["twitchReconnect", "reconnectTwitch"]]) {
+  for (const [name, action] of [["speechStop", "holdSpeech"], ["speechResume", "releaseSpeech"], ["speechSkip", "skipSpeech"], ["speechClear", "clearSpeech"], ["micStart", "startMic"], ["micStop", "stopMic"], ["screenStart", "startScreen"], ["screenStop", "stopScreen"], ["screenRead", "readScreen"], ["newsRead", "readNews"], ["newsGenerate", "generateNews"], ["topicRead", "readTopics"], ["topicGenerate", "generateTopics"], ["twitchReconnect", "reconnectTwitch"]]) {
     on(name, "click", () => actions[action]());
   }
   const timer = setIntervalImpl(() => actions.refreshTimedPanels(), 2000);

@@ -40,13 +40,13 @@ class FakeElement {
 }
 
 test("element registry fails loudly and bindings call actions exactly once after remount", () => {
-  const names = ["loadServer", "loadFile", "fileInput", "settings", "commentForm", "commentText", "commentAuthor", "speechStop", "speechResume", "speechSkip", "speechClear", "micStart", "micStop", "screenStart", "screenStop", "screenRead", "newsRead", "topicRead", "twitchReconnect"];
+  const names = ["loadServer", "loadFile", "fileInput", "settings", "commentForm", "commentText", "commentAuthor", "speechStop", "speechResume", "speechSkip", "speechClear", "micStart", "micStop", "screenStart", "screenStop", "screenRead", "newsRead", "newsGenerate", "topicRead", "topicGenerate", "twitchReconnect"];
   const nodes = Object.fromEntries(names.map((name) => [name, new FakeElement()]));
   const document = { querySelector: (selector) => nodes[selector.slice(1)] ?? null };
   assert.throws(() => new ElementRegistry(document, { missing: "#missing" }), /Required DOM element/);
   const registry = new ElementRegistry(document, Object.fromEntries(names.map((name) => [name, `#${name}`])));
   const calls = [];
-  const actionNames = ["loadServer", "loadFile", "openSettings", "submitComment", "holdSpeech", "releaseSpeech", "skipSpeech", "clearSpeech", "startMic", "stopMic", "startScreen", "stopScreen", "readScreen", "readNews", "readTopics", "reconnectTwitch", "refreshTimedPanels"];
+  const actionNames = ["loadServer", "loadFile", "openSettings", "submitComment", "holdSpeech", "releaseSpeech", "skipSpeech", "clearSpeech", "startMic", "stopMic", "startScreen", "stopScreen", "readScreen", "readNews", "generateNews", "readTopics", "generateTopics", "reconnectTwitch", "refreshTimedPanels"];
   const actions = Object.fromEntries(actionNames.map((name) => [name, (...args) => calls.push([name, ...args])]));
   let timerId = 0;
   const timers = new Map();

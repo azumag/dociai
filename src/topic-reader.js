@@ -76,7 +76,7 @@ export class TopicReader {
       const now = this.clock();
       for (const item of items) this.store.ensure({ ...item, key: item.processingKey }, this.generation, now);
       const candidateKeys = new Set(this.store.candidates(this.generation, now).map((record) => record.key));
-      const picks = items.filter((item) => candidateKeys.has(item.processingKey)).slice(0, topics.maxItems ?? 3);
+      const picks = items.filter((item) => candidateKeys.has(item.processingKey)).slice(0, context.maxItems ?? topics.maxItems ?? 3);
       this.lastRunResult = { candidates: candidateKeys.size, processed: 0, succeeded: 0, retryScheduled: 0, failed: 0 };
       this.log(`話題候補 ${items.length}件 (再処理可能 ${candidateKeys.size}件、読み上げ ${picks.length}件)`);
       if (!picks.length) return;

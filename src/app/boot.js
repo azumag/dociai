@@ -536,7 +536,9 @@ function renderNewsPanel() {
   const configEnabled = !!state.config?.news?.enabled;
   toggle.checked = state.newsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
+  const newsStatus = newsReader?.status();
   $("#btn-news-read").disabled = !newsReader?.enabled || newsReader?.busy;
+  $("#btn-news-generate").disabled = !newsReader?.enabled || newsReader?.busy || newsStatus?.bufferedCount >= 1;
   renderNewsAttribution($("#news-last-attribution"));
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
@@ -548,7 +550,7 @@ function renderNewsPanel() {
     failures.replaceChildren();
     return;
   }
-  const s = newsReader.status();
+  const s = newsStatus;
   if (!s.enabled) {
     el.textContent = "操作卓のトグルで一時停止中です";
     failures.replaceChildren();
@@ -567,7 +569,9 @@ function renderTopicPanel() {
   const configEnabled = !!state.config?.topics?.enabled;
   toggle.checked = state.topicsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
+  const topicStatus = topicReader?.status();
   $("#btn-topic-read").disabled = !topicReader?.enabled || topicReader?.busy;
+  $("#btn-topic-generate").disabled = !topicReader?.enabled || topicReader?.busy || topicStatus?.bufferedCount >= 1;
   $("#topic-busy").hidden = !topicReader?.busy;
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
@@ -579,7 +583,7 @@ function renderTopicPanel() {
     failures.replaceChildren();
     return;
   }
-  const s = topicReader.status();
+  const s = topicStatus;
   if (!s.enabled) {
     el.textContent = "操作卓のトグルで一時停止中です";
     failures.replaceChildren();
@@ -841,7 +845,7 @@ function bindUI() {
     speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
     micStart: "#btn-mic-start", micStop: "#btn-mic-stop", micBargeIn: "#chk-mic-bargein", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
     screenSourceRefresh: "#btn-screen-source-refresh", screenSourceSelect: "#screen-source-select",
-    newsRead: "#btn-news-read", topicRead: "#btn-topic-read", newsEnabled: "#chk-news-enabled", topicsEnabled: "#chk-topics-enabled", twitchReconnect: "#btn-twitch-reconnect",
+    newsRead: "#btn-news-read", newsGenerate: "#btn-news-generate", topicRead: "#btn-topic-read", topicGenerate: "#btn-topic-generate", newsEnabled: "#chk-news-enabled", topicsEnabled: "#chk-topics-enabled", twitchReconnect: "#btn-twitch-reconnect",
   });
   const actions = createAppActions({
     appRuntime,

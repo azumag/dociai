@@ -35,6 +35,11 @@ export function createAppActions({
   const component = (name) => appRuntime.getComponent(name);
   const report = (promise) => Promise.resolve(promise).catch(reportConfigError);
   const setManualSpeechHold = (value) => store.dispatch({ type: "set", key: "manualSpeechHold", value });
+  const generateReader = (kind, name, renderPanel) => {
+    renderPanel?.();
+    const reader = component(name);
+    if (reader) component("automationCoordinator")?.run(kind, { run: (context) => reader.generate(context) });
+  };
 
   return {
     loadServer: () => report(loadServer().then(applyLoadedConfig)),
@@ -91,6 +96,8 @@ export function createAppActions({
     },
     readNews: () => { render.news?.(); component("automationCoordinator")?.run("news", component("newsReader")); },
     readTopics: () => { render.topics?.(); component("automationCoordinator")?.run("topics", component("topicReader")); },
+    generateNews: () => generateReader("news", "newsReader", render.news),
+    generateTopics: () => generateReader("topics", "topicReader", render.topics),
     setNewsEnabled: (enabled) => { store.dispatch({ type: "set", key: "newsRuntimeEnabled", value: enabled }); render.news?.(); },
     setTopicsEnabled: (enabled) => { store.dispatch({ type: "set", key: "topicsRuntimeEnabled", value: enabled }); render.topics?.(); },
     reconnectTwitch: () => {
