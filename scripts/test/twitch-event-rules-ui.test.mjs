@@ -315,18 +315,21 @@ test("action-editor: kind switch shows the right fields (ai-response: persona, t
   assert.equal(action.speak, false);
 });
 
-test("action-editor: overlay-cue creates a valid default and edits visual/audio/timing/policy fields", () => {
+test("action-editor: overlay-cue creates a valid default and edits visual/audio/timing/policy fields", async () => {
   const document = createFakeDocument();
   const action = defaultAction("overlay-cue");
+  const imageId = "11111111-1111-4111-8111-111111111111";
+  const overlayAssetsApi = { list: async () => ({ ok: true, value: { assets: [{ id: imageId, kind: "image", displayName: "reward-image.png" }], warnings: [], repairCandidates: [], totalBytes: 1 } }) };
   assert.equal(validateActionConfig(action).ok, true);
   const root = document.createElement("div");
   let structuralChanges = 0;
-  const render = () => renderActionEditor(root, action, { path: "eventTriggers.r1.actions.0", personaOptions: [], onStructuralChange: () => { structuralChanges += 1; render(); }, onRemove: () => {} }, document);
+  const render = () => renderActionEditor(root, action, { path: "eventTriggers.r1.actions.0", personaOptions: [], overlayAssetsApi, onStructuralChange: () => { structuralChanges += 1; render(); }, onRemove: () => {} }, document);
   render();
+  await new Promise((resolve) => setImmediate(resolve));
   const asset = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.visual.assetId"]');
   assert.ok(asset);
-  asset.value = "reward-image";
-  asset.dispatch("input");
+  asset.value = imageId;
+  asset.dispatch("change");
   const hold = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.timing.holdMs"]');
   assert.deepEqual([hold.min, hold.max, hold.step], ["0", "300000", "1"]);
   hold.value = "3000";
@@ -345,7 +348,7 @@ test("action-editor: overlay-cue creates a valid default and edits visual/audio/
   assert.deepEqual([width.min, width.max, width.step], ["1", "3840", "1"]);
   assert.deepEqual([opacity.min, opacity.max, opacity.step], ["0", "1", "0.01"]);
   assert.deepEqual([queue.min, queue.max, queue.step], ["1", "100", "1"]);
-  assert.equal(action.cue.visual.assetId, "reward-image");
+  assert.equal(action.cue.visual.assetId, imageId);
   const visualToggle = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.visual"]');
   visualToggle.checked = false;
   visualToggle.dispatch("change");
@@ -355,6 +358,31 @@ test("action-editor: overlay-cue creates a valid default and edits visual/audio/
   assert.equal(action.cue.policy.channel, "rewards");
   assert.equal(validateActionConfig(action).ok, true);
   assert.equal(root.querySelector('[data-config-path="eventTriggers.r1.actions.0.template"]'), null);
+});
+
+test("action-editor: managed asset UI lists, imports, selects, and removes opaque asset ids", async () => {
+  const document = createFakeDocument();
+  const action = defaultAction("overlay-cue");
+  const root = document.createElement("div");
+  const importedId = "22222222-2222-4222-8222-222222222222";
+  const assets = [];
+  const calls = [];
+  const overlayAssetsApi = {
+    list: async () => ({ ok: true, value: { assets: [...assets], warnings: [], repairCandidates: [], totalBytes: 0 } }),
+    import: async (kind) => { calls.push(["import", kind]); const asset = { id: importedId, kind, displayName: "alert.png" }; assets.push(asset); return { ok: true, value: { asset, deduplicated: false } }; },
+    remove: async ({ assetId }) => { calls.push(["remove", assetId]); assets.splice(0, assets.length); return { ok: true, value: { removed: true } }; },
+  };
+  renderActionEditor(root, action, { path: "eventTriggers.r1.actions.0", personaOptions: [], overlayAssetsApi, onStructuralChange: () => {}, onRemove: () => {} }, document);
+  await new Promise((resolve) => setImmediate(resolve));
+  root.findButtonByText("画像を登録").click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(action.cue.visual.assetId, importedId);
+  const selected = root.querySelector('[data-config-path="eventTriggers.r1.actions.0.cue.visual.assetId"]');
+  assert.equal(selected.value, importedId);
+  root.findButtonByText("選択assetを削除").click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(action.cue.visual.assetId, "");
+  assert.deepEqual(calls, [["import", "image"], ["remove", importedId]]);
 });
 
 test("action-editor: renderActionList add/remove", () => {

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { app, desktopCapturer, dialog, globalShortcut, protocol, safeStorage, session } from "electron";
+import { app, desktopCapturer, dialog, globalShortcut, nativeImage, protocol, safeStorage, session } from "electron";
 import { ensureAppPaths, resolveAppPaths } from "./paths";
 import { createWindowController } from "./windows";
 import { ConfigRepository } from "./config/config-repository";
@@ -30,13 +30,15 @@ import { STREAM_EVENT_APP_EVENT_TYPE } from "../shared/services/stream-event-ipc
 import { UpdateService, type AutoUpdaterLike } from "./services/update/update-service";
 import { UPDATE_APP_EVENT_TYPE } from "../shared/services/update-ipc-contract";
 import { backfillReferencedTriggers } from "./config/seed-merge";
+import { OverlayAssetService } from "./services/overlay-assets/overlay-asset-service";
+import { OverlayAssetUrlResolver } from "./services/overlay-assets/overlay-asset-url-resolver";
 // @ts-expect-error JavaScript config core intentionally has no separate declaration build.
 import { splitConnectorSecrets } from "../../src/config/config-secrets-split.js";
 
-protocol.registerSchemesAsPrivileged([{
-  scheme: "dociai",
-  privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
-}]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: "dociai", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: "dociai-asset", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+]);
 
 type JsonRecord = Record<string, unknown>;
 
@@ -245,6 +247,46 @@ if (!hasLock) {
     // active controller behind it.
     await modelRepository.initializeDownloads();
     const currentConfig = await configRepository.getPublic();
+    const findAssetReferences = async (assetId: string): Promise<string[]> => {
+      const loaded = await configRepository.getPublic(); const found: string[] = [];
+      const visit = (value: unknown, parts: string[]): void => {
+        if (Array.isArray(value)) { value.forEach((entry, index) => visit(entry, [...parts, String(index)])); return; }
+        if (!value || typeof value !== "object") return;
+        for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+          const next = [...parts, key]; if (key === "assetId" && nested === assetId) found.push(next.join(".")); else visit(nested, next);
+        }
+      };
+      visit(loaded.config, []); return found;
+    };
+    const chooseOverlayAssetFile = async (kind?: "image" | "audio"): Promise<string | null> => {
+      const image = { name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] };
+      const audio = { name: "Audio", extensions: ["wav", "mp3", "ogg"] };
+      const options = { title: "Import Overlay Asset", properties: ["openFile" as const], filters: kind === "image" ? [image] : kind === "audio" ? [audio] : [image, audio] };
+      const activeWindow = controller?.getWindows().console;
+      const result = activeWindow ? await dialog.showOpenDialog(activeWindow, options) : await dialog.showOpenDialog(options);
+      return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+    };
+    let overlayAssetService: OverlayAssetService | null = null;
+    let overlayAssetUrlResolver: OverlayAssetUrlResolver | null = null;
+    let overlayAssetProtocolReady = false;
+    try { await protocol.handle("dociai-asset", (request) => overlayAssetUrlResolver ? overlayAssetUrlResolver.handle(request) : Promise.resolve(new Response("Unavailable", { status: 503, headers: { "Cache-Control": "no-store" } }))); overlayAssetProtocolReady = true; }
+    catch (error) { logError("overlay-assets-protocol-unavailable", error); }
+    try {
+      const candidate = new OverlayAssetService({
+        paths,
+        chooseFile: chooseOverlayAssetFile,
+        findReferences: findAssetReferences,
+        withReferenceLock: (task) => configRepository.withExclusive(task),
+        decodeImage: (bytes) => { const image = nativeImage.createFromBuffer(bytes); if (image.isEmpty()) return null; return image.getSize(); },
+        decodeAudio: async (bytes) => {
+          const target = controller?.getWindows().console;
+          if (!target || target.isDestroyed()) return null;
+          const base64 = bytes.toString("base64");
+          return target.webContents.executeJavaScript(`(async()=>{const raw=atob(${JSON.stringify(base64)});const data=new Uint8Array(raw.length);for(let i=0;i<raw.length;i+=1)data[i]=raw.charCodeAt(i);const context=new AudioContext();try{const decoded=await context.decodeAudioData(data.buffer);return {durationMs:Math.round(decoded.duration*1000)}}catch{return null}finally{await context.close()}})()`, true) as Promise<{ durationMs: number } | null>;
+        },
+      });
+      await candidate.initialize(); overlayAssetService = candidate; if (overlayAssetProtocolReady) overlayAssetUrlResolver = new OverlayAssetUrlResolver(candidate);
+    } catch (error) { logError("overlay-assets-unavailable", error); }
     shortcutService.sync((currentConfig.config.triggers ?? {}) as Record<string, unknown>);
     const screenCapture = object(object(currentConfig.config.context).screenCapture);
     captureService.setPreferredSourceName(screenCapture.sourceName);
@@ -291,7 +333,7 @@ if (!hasLock) {
       log: (message, fields) => console.error(`[dociai:twitch-composition] ${message}`, fields ?? {}),
     });
     await twitchComposition.initialize();
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, newsSourceService, newsSearchService, wikipediaService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, streamEventBus, updateService, buildInfo, devServerUrl });
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, newsSourceService, newsSearchService, wikipediaService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, overlayAssetService, overlayAssetUrlResolver, streamEventBus, updateService, buildInfo, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
     app.once("before-quit", () => feedService.dispose());
@@ -305,6 +347,7 @@ if (!hasLock) {
     app.once("before-quit", () => shortcutService.dispose());
     app.once("before-quit", () => { uninstallDisplayMediaHandler(); captureService.dispose(); });
     app.once("before-quit", () => modelRepository.dispose());
+    app.once("before-quit", () => overlayAssetUrlResolver?.clear());
     app.once("before-quit", () => streamEventBus.dispose());
     app.once("before-quit", () => { if (updateCheckInterval) clearInterval(updateCheckInterval); updateService.dispose(); });
     controller.createConsoleWindow();

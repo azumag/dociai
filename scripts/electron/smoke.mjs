@@ -13,10 +13,20 @@ const electronBinary = require("electron");
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const port = await getFreePort();
 const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "dociai-electron-smoke-"));
+const overlayUnavailableMode = process.env.DOCIAI_SMOKE_OVERLAY_UNAVAILABLE === "1";
+const unsafeOverlayTarget = overlayUnavailableMode ? await fs.mkdtemp(path.join(os.tmpdir(), "dociai-electron-overlay-outside-")) : null;
+if (unsafeOverlayTarget) await fs.symlink(unsafeOverlayTarget, path.join(userDataDir, "overlay-assets"), "dir");
 let browser;
 let child;
 let consolePage;
 const logs = [];
+
+function chromiumWavFixture() {
+  const samples = 800;
+  const bytes = Buffer.alloc(44 + samples, 128);
+  bytes.write("RIFF", 0); bytes.writeUInt32LE(36 + samples, 4); bytes.write("WAVEfmt ", 8); bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22); bytes.writeUInt32LE(8000, 24); bytes.writeUInt32LE(8000, 28); bytes.writeUInt16LE(1, 32); bytes.writeUInt16LE(8, 34); bytes.write("data", 36); bytes.writeUInt32LE(samples, 40);
+  return bytes;
+}
 
 async function waitForJson(url, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
@@ -79,14 +89,21 @@ try {
   // BuildInfo(#72) must reach the running app and match what scripts/electron/build.mjs embedded in dist/electron/build-info.json.
   const expectedBuildInfo = JSON.parse(await fs.readFile(path.join(repoRoot, "dist/electron/build-info.json"), "utf8"));
   assert.deepEqual(checks.platform.value.buildInfo, expectedBuildInfo, "dev app buildInfo must match dist/electron/build-info.json");
-  assert.deepEqual(checks.keys, ["ai", "bouyomi", "capture", "config", "events", "feeds", "localLlm", "newsArticles", "newsSearch", "obs", "platform", "secrets", "shortcuts", "speech", "streamEvents", "system", "topics", "twitch", "update", "wikipedia", "windows"]);
+  assert.deepEqual(checks.keys, ["ai", "bouyomi", "capture", "config", "events", "feeds", "localLlm", "newsArticles", "newsSearch", "obs", "overlayAssets", "platform", "secrets", "shortcuts", "speech", "streamEvents", "system", "topics", "twitch", "update", "wikipedia", "windows"]);
   assert.match(checks.csp ?? "", /object-src 'none'/);
   assert.match(checks.csp ?? "", /connect-src 'self'/);
   assert.doesNotMatch(checks.csp ?? "", /connect-src[^;]*(?:https?:|wss?:)/);
+  assert.match(checks.csp ?? "", /img-src[^;]*dociai-asset:/);
+  assert.match(checks.csp ?? "", /media-src[^;]*dociai-asset:/);
   assert.doesNotMatch(checks.rendererConfig, /sk-\.\.\.|or-\.\.\.|smoke-secret/);
   assert.doesNotMatch(checks.rendererConfig, /"(?:apiKey|token)"\s*:/);
   assert.deepEqual(checks.browserGlobals, { require: "undefined", process: "undefined", ipcRenderer: "undefined" });
   assert.equal(checks.invalidExternal.ok, false);
+  const decodedAudioDuration = await consolePage.evaluate(async (base64) => {
+    const raw = atob(base64); const bytes = new Uint8Array(raw.length); for (let index = 0; index < raw.length; index += 1) bytes[index] = raw.charCodeAt(index);
+    const context = new AudioContext(); try { return (await context.decodeAudioData(bytes.buffer)).duration; } finally { await context.close(); }
+  }, chromiumWavFixture().toString("base64"));
+  assert.ok(decodedAudioDuration > 0.09 && decodedAudioDuration < 0.11, `Chromium WAV decode duration=${decodedAudioDuration}`);
   const serviceCancels = await consolePage.evaluate(async () => ({ feed: await window.dociai.feeds.cancel("no-feed-request"), topic: await window.dociai.topics.cancel("no-topic-request") }));
   assert.deepEqual(serviceCancels, { feed: { ok: true, value: { cancelled: false } }, topic: { ok: true, value: { cancelled: false } } });
   // Issue #94: the twitch.auth/eventSub/subscriptions namespace added alongside the pre-existing
@@ -126,6 +143,19 @@ try {
   assert.equal(localLlmChecks.missing.ok, true, JSON.stringify(localLlmChecks.missing));
   assert.deepEqual(localLlmChecks.missing.value, { model: null });
   assert.deepEqual(localLlmChecks.cancel, { ok: true, value: { cancelled: false } });
+  const overlayAssetChecks = await consolePage.evaluate(async () => ({
+    list: await window.dociai.overlayAssets.list(),
+    invalidInspect: await window.dociai.overlayAssets.inspect({ assetId: "../../etc/passwd" }),
+    invalidHandle: await window.dociai.overlayAssets.getPlaybackHandle({ assetId: "file:///etc/passwd" }),
+  }));
+  assert.equal(overlayAssetChecks.list.ok, !overlayUnavailableMode, JSON.stringify(overlayAssetChecks.list));
+  if (overlayUnavailableMode) assert.equal(overlayAssetChecks.list.error.code, "UNAVAILABLE");
+  else assert.deepEqual(overlayAssetChecks.list.value.assets, []);
+  assert.equal(JSON.stringify(overlayAssetChecks.list).includes(userDataDir), false);
+  assert.equal(overlayAssetChecks.invalidInspect.ok, false);
+  assert.equal(overlayAssetChecks.invalidInspect.error.code, overlayUnavailableMode ? "UNAVAILABLE" : "INVALID_INPUT");
+  assert.equal(overlayAssetChecks.invalidHandle.ok, false);
+  assert.equal(overlayAssetChecks.invalidHandle.error.code, overlayUnavailableMode ? "UNAVAILABLE" : "INVALID_INPUT");
   const configResult = await consolePage.evaluate(() => window.dociai.config.get());
   assert.equal(configResult.ok, true, JSON.stringify(configResult));
   assert.equal(typeof configResult.value.revision, "string");
@@ -158,7 +188,7 @@ try {
   const withObs = await browser.pages();
   if (!withObs.some((page) => page.url().includes("obs.html"))) throw new Error("OBS window was not opened");
   await consolePage.evaluate(() => window.dociai.windows.closeObs());
-  console.log(`PASS | Electron smoke | console + secure preload + CSP + OBS open/close (${checks.platform.value.platform}/${checks.platform.value.arch})`);
+  console.log(`PASS | Electron smoke | console + secure preload + CSP + OBS open/close${overlayUnavailableMode ? " + optional overlay failure isolation" : ""} (${checks.platform.value.platform}/${checks.platform.value.arch})`);
 } catch (error) {
   const artifactDirectory = process.env.TEST_ARTIFACTS_DIR;
   if (artifactDirectory) {
@@ -185,4 +215,5 @@ try {
     if (child.exitCode === null) child.kill("SIGKILL");
   }
   await fs.rm(userDataDir, { recursive: true, force: true });
+  if (unsafeOverlayTarget) await fs.rm(unsafeOverlayTarget, { recursive: true, force: true });
 }

@@ -59,6 +59,8 @@ export class ConfigRepository {
 
   async getPublic(): Promise<LoadedConfig> { return this.load(); }
 
+  async withExclusive<T>(task: () => Promise<T>): Promise<T> { return this.#locked(task); }
+
   async save(config: Record<string, unknown>, expectedRevision?: string): Promise<{ saved: true; revision: string }> {
     return this.#locked(async () => {
       assertNoSecrets(config);

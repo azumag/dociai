@@ -449,6 +449,23 @@ plan/event/trigger IDを含む`ResolvedOverlayCue`は分離されています。
 `overlay-cue`を未知Actionとしてvalidation errorにし、そのActionだけを実行計画から除外します。
 現buildでもrenderer runtimeが利用可能になるまでは、安全に`overlay-unavailable`としてskipします。
 
+### Managed overlay assets
+
+Electronはimportした画像・効果音をuser data内の非公開`overlay-assets` directoryへコピーします。
+設定とRenderer向けAPIが保持するのはopaqueな`assetId`だけで、元の絶対pathや`file://` URLは保存・返却しません。
+importは必ずMain processのnative file dialogから開始します。
+
+初期対応画像はPNG、JPEG、WebP、GIF、音声はWAV、MP3、OGG/Vorbisです。SVG、HTML、script、archive、
+video、M4A/AACは拒否します。M4A/AACはpackaged ChromiumとOSによってdecode可否が異なるため初期対象外です。
+
+画像は1件20 MiBかつ8192 × 8192以下、音声は1件50 MiB以下、registryは500件以下です。managed asset合計が
+1 GiB以上になるとwarningを返し、固定hard capの2 GiBを超えるimportは拒否します。これらはcode定数であり、
+configから無制限化できません。
+
+再生にはrole確認済みIPCが発行する短命でopaqueな`dociai-asset:` handleを使います。protocolはregistryとmanaged
+directoryの両方を照合し、symlink/hardlink置換を拒否し、音声向けsingle byte-range requestへ対応します。
+Rendererが指定したpathを読むAPIはありません。
+
 ## Web調査 prepass (MiniMax)
 
 `research.enabled`を有効にすると、コメント・手動依頼への通常回答、および話題（`topics`）の

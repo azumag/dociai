@@ -7,6 +7,7 @@ import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -38,6 +39,16 @@ if (!executablePath || !fsSync.existsSync(executablePath)) {
 
 const port = await getFreePort();
 const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "dociai-packaged-smoke-"));
+const packagedAssetId = "44444444-4444-4444-8444-444444444444";
+const packagedAssetDir = path.join(userDataDir, "overlay-assets");
+const packagedAssetFilesDir = path.join(packagedAssetDir, "files");
+const packagedAssetTmpDir = path.join(packagedAssetDir, "tmp");
+const packagedWav = Buffer.alloc(844, 128);
+packagedWav.write("RIFF", 0); packagedWav.writeUInt32LE(836, 4); packagedWav.write("WAVEfmt ", 8); packagedWav.writeUInt32LE(16, 16); packagedWav.writeUInt16LE(1, 20); packagedWav.writeUInt16LE(1, 22); packagedWav.writeUInt32LE(8000, 24); packagedWav.writeUInt32LE(8000, 28); packagedWav.writeUInt16LE(1, 32); packagedWav.writeUInt16LE(8, 34); packagedWav.write("data", 36); packagedWav.writeUInt32LE(800, 40);
+await fs.mkdir(packagedAssetFilesDir, { recursive: true, mode: 0o700 }); await fs.mkdir(packagedAssetTmpDir, { mode: 0o700 });
+await fs.writeFile(path.join(packagedAssetFilesDir, `${packagedAssetId}.wav`), packagedWav, { mode: 0o600 });
+const packagedRegistry = { schemaVersion: 1, assets: [{ schemaVersion: 1, id: packagedAssetId, kind: "audio", displayName: "packaged-smoke.wav", storedFileName: `${packagedAssetId}.wav`, mimeType: "audio/wav", byteLength: packagedWav.length, sha256: crypto.createHash("sha256").update(packagedWav).digest("hex"), createdAt: "2026-07-15T00:00:00.000Z", updatedAt: "2026-07-15T00:00:00.000Z", audio: { durationMs: 100 } }] };
+await fs.writeFile(path.join(packagedAssetDir, "registry.json"), `${JSON.stringify(packagedRegistry, null, 2)}\n`, { mode: 0o600 });
 let browser;
 let child;
 let consolePage;
@@ -103,10 +114,24 @@ try {
   assert.equal(checks.platform.ok, true, JSON.stringify(checks.platform));
   assert.equal(checks.platform.value.runtime, "electron");
   assert.equal(checks.platform.value.isPackaged, true, "smoke-packaged must run against a packaged app (isPackaged=true)");
-  assert.deepEqual(checks.keys, ["ai", "bouyomi", "capture", "config", "events", "feeds", "localLlm", "newsArticles", "newsSearch", "obs", "platform", "secrets", "shortcuts", "speech", "streamEvents", "system", "topics", "twitch", "update", "wikipedia", "windows"]);
+  assert.deepEqual(checks.keys, ["ai", "bouyomi", "capture", "config", "events", "feeds", "localLlm", "newsArticles", "newsSearch", "obs", "overlayAssets", "platform", "secrets", "shortcuts", "speech", "streamEvents", "system", "topics", "twitch", "update", "wikipedia", "windows"]);
   assert.match(checks.csp ?? "", /object-src 'none'/);
   assert.doesNotMatch(checks.rendererConfig, /sk-\.\.\.|or-\.\.\.|smoke-secret/);
   assert.deepEqual(checks.browserGlobals, { require: "undefined", process: "undefined", ipcRenderer: "undefined" });
+  const overlayAssets = await consolePage.evaluate(async (assetId) => {
+    const list = await window.dociai.overlayAssets.list(); const playback = await window.dociai.overlayAssets.getPlaybackHandle({ assetId });
+    if (!playback.ok) return { list, playback };
+    const audio = document.createElement("audio"); audio.preload = "metadata"; audio.src = playback.value.handle;
+    const duration = await new Promise((resolve, reject) => { audio.addEventListener("loadedmetadata", () => resolve(audio.duration), { once: true }); audio.addEventListener("error", () => reject(new Error(`packaged asset media error ${audio.error?.code ?? "unknown"}`)), { once: true }); audio.load(); });
+    return { list, playback, duration };
+  }, packagedAssetId);
+  assert.equal(overlayAssets.list.ok, true, JSON.stringify(overlayAssets));
+  assert.equal(overlayAssets.list.value.assets.length, 1);
+  assert.equal(overlayAssets.list.value.assets[0].id, packagedAssetId);
+  assert.equal("storedFileName" in overlayAssets.list.value.assets[0], false);
+  assert.equal(overlayAssets.playback.ok, true, JSON.stringify(overlayAssets));
+  assert.ok(overlayAssets.duration > 0.09 && overlayAssets.duration < 0.11, `packaged asset duration=${overlayAssets.duration}`);
+  assert.equal(JSON.stringify(overlayAssets).includes(userDataDir), false, "packaged overlay asset IPC must never expose filesystem paths");
 
   // BuildInfo(#72) must reach the running app and match what was embedded at package time.
   const buildInfoPath = path.join(repoRoot, "build/generated/build-info.json");

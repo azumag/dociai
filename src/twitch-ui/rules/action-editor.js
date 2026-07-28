@@ -93,7 +93,7 @@ function selectField(document, { label, value, options, path, onChange }) {
   return wrap;
 }
 
-function renderOverlayCueEditor(body, action, { path, onStructuralChange }, document) {
+function renderOverlayCueEditor(body, action, { path, onStructuralChange, overlayAssetsApi }, document) {
   const cue = action.cue && typeof action.cue === "object" && !Array.isArray(action.cue) ? action.cue : (action.cue = { visual: { assetId: "overlay-image" } });
   const set = (section, field, value) => {
     cue[section] ??= {};
@@ -104,6 +104,31 @@ function renderOverlayCueEditor(body, action, { path, onStructuralChange }, docu
     const heading = document.createElement("h4");
     heading.textContent = title;
     body.append(heading);
+  };
+  const assetPicker = (section, kind) => {
+    const container = document.createElement("div"); container.className = "overlay-asset-picker";
+    const label = document.createElement("label"); label.className = "field-inline"; label.append(document.createTextNode("登録済みasset: "));
+    const select = document.createElement("select"); select.dataset.configPath = pathJoin(path, `cue.${section}.assetId`); label.append(select); container.append(label);
+    const status = document.createElement("span"); status.className = "muted overlay-asset-status"; status.setAttribute("role", "status"); container.append(status);
+    const actions = document.createElement("div"); actions.className = "rule-action-add-row";
+    const importButton = document.createElement("button"); importButton.type = "button"; importButton.textContent = kind === "image" ? "画像を登録" : "効果音を登録";
+    const removeButton = document.createElement("button"); removeButton.type = "button"; removeButton.textContent = "選択assetを削除"; actions.append(importButton, removeButton); container.append(actions);
+    const help = document.createElement("p"); help.className = "muted"; help.textContent = kind === "image" ? "PNG / JPEG / WebP / GIF（SVG・HTMLは非対応）" : "WAV / MP3 / OGG Vorbis（M4A / AACは非対応）"; container.append(help);
+    const api = overlayAssetsApi ?? globalThis.window?.dociai?.overlayAssets;
+    const load = async () => {
+      const selected = cue[section]?.assetId ?? ""; select.replaceChildren();
+      const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = api ? "-- assetを選択 --" : "Electronでassetを登録してください"; select.append(placeholder);
+      if (!api) { select.disabled = true; importButton.disabled = true; removeButton.disabled = true; status.textContent = "managed asset APIを利用できません"; return; }
+      status.textContent = "assetを読込中…"; const result = await api.list();
+      if (!result?.ok) { status.textContent = result?.error?.message ?? "asset一覧を取得できません"; return; }
+      for (const asset of result.value.assets.filter((entry) => entry.kind === kind)) { const option = document.createElement("option"); option.value = asset.id; option.textContent = `${asset.missing ? "⚠ " : ""}${asset.displayName}`; option.selected = asset.id === selected; select.append(option); }
+      if (selected && !result.value.assets.some((entry) => entry.id === selected && entry.kind === kind)) { const known = result.value.assets.find((entry) => entry.id === selected); const stale = document.createElement("option"); stale.value = selected; stale.textContent = known ? `⚠ ${known.displayName} (種類不一致)` : `⚠ ${selected} (未登録)`; stale.selected = true; select.append(stale); }
+      status.textContent = result.value.warnings.join(" / "); removeButton.disabled = !select.value;
+    };
+    select.addEventListener("change", () => { set(section, "assetId", select.value); removeButton.disabled = !select.value; });
+    importButton.addEventListener("click", async () => { importButton.disabled = true; status.textContent = "native dialogを開いています…"; const result = await api?.import(kind); importButton.disabled = false; if (!result?.ok) { status.textContent = result?.error?.message ?? "importに失敗しました"; return; } if (result.value.cancelled) { status.textContent = "importをキャンセルしました"; return; } if (result.value.asset) set(section, "assetId", result.value.asset.id); await load(); });
+    removeButton.addEventListener("click", async () => { const assetId = select.value; if (!assetId) return; removeButton.disabled = true; const result = await api?.remove({ assetId }); if (!result?.ok) { status.textContent = result?.error?.message ?? "削除できません"; removeButton.disabled = false; return; } if (cue[section]?.assetId === assetId) set(section, "assetId", ""); await load(); });
+    void load(); body.append(container);
   };
   const toggle = (section, label, defaultValue) => {
     const wrap = document.createElement("label");
@@ -127,7 +152,7 @@ function renderOverlayCueEditor(body, action, { path, onStructuralChange }, docu
   toggle("audio", "音声を再生", { assetId: "overlay-audio" });
   if (cue.visual) {
     sectionTitle("Visual");
-    body.append(textField(document, { label: "assetId", value: cue.visual.assetId, path: pathJoin(path, "cue.visual.assetId"), onChange: (value) => set("visual", "assetId", value) }));
+    assetPicker("visual", "image");
     for (const [field, min, max, fallback, step] of [["x", 0, 1, DEFAULT_OVERLAY_VISUAL.x, 0.01], ["y", 0, 1, DEFAULT_OVERLAY_VISUAL.y, 0.01], ["width", 1, MAX_OVERLAY_WIDTH, undefined, 1], ["height", 1, MAX_OVERLAY_HEIGHT, undefined, 1], ["opacity", 0, 1, DEFAULT_OVERLAY_VISUAL.opacity, 0.01], ["zIndex", MIN_OVERLAY_Z_INDEX, MAX_OVERLAY_Z_INDEX, DEFAULT_OVERLAY_VISUAL.zIndex, 1]]) {
       body.append(numberField(document, { label: field, value: cue.visual[field] ?? fallback, path: pathJoin(path, `cue.visual.${field}`), min, max, step, onChange: (value) => set("visual", field, value) }));
     }
@@ -136,7 +161,7 @@ function renderOverlayCueEditor(body, action, { path, onStructuralChange }, docu
   }
   if (cue.audio) {
     sectionTitle("Audio");
-    body.append(textField(document, { label: "assetId", value: cue.audio.assetId, path: pathJoin(path, "cue.audio.assetId"), onChange: (value) => set("audio", "assetId", value) }));
+    assetPicker("audio", "audio");
     for (const [field, min, max, fallback, step] of [["volume", 0, 1, DEFAULT_OVERLAY_AUDIO.volume, 0.01], ["startDelayMs", 0, MAX_OVERLAY_DURATION_MS, DEFAULT_OVERLAY_AUDIO.startDelayMs, 1], ["fadeInMs", 0, MAX_OVERLAY_DURATION_MS, DEFAULT_OVERLAY_AUDIO.fadeInMs, 1], ["fadeOutMs", 0, MAX_OVERLAY_DURATION_MS, DEFAULT_OVERLAY_AUDIO.fadeOutMs, 1]]) {
       body.append(numberField(document, { label: field, value: cue.audio[field] ?? fallback, path: pathJoin(path, `cue.audio.${field}`), min, max, step, onChange: (value) => set("audio", field, value) }));
     }
@@ -240,7 +265,7 @@ export function renderActionEditor(root, action, ctx, document = root?.ownerDocu
     hint.textContent = `利用可能なplaceholder: ${PLACEHOLDER_KEYS.map((key) => `{{${key}}}`).join(" / ")}`;
     body.append(hint);
   } else if (action.kind === "overlay-cue") {
-    renderOverlayCueEditor(body, action, { path, onStructuralChange }, document);
+    renderOverlayCueEditor(body, action, { path, onStructuralChange, overlayAssetsApi: ctx.overlayAssetsApi }, document);
   }
 
   body.append(numberField(document, { label: "priority", value: action.priority, path: pathJoin(path, "priority"), onChange: (value) => { action.priority = value ?? DEFAULT_ACTION_PRIORITY; } }));
@@ -279,7 +304,7 @@ export function renderActionList(root, actions, ctx, document = root?.ownerDocum
   if (!root || !document?.createElement) return;
   root.replaceChildren();
   root.className = "rule-action-list";
-  const { path, personaOptions = [], onStructuralChange } = ctx;
+  const { path, personaOptions = [], onStructuralChange, overlayAssetsApi } = ctx;
 
   if (actions.length === 0) {
     const empty = document.createElement("p");
@@ -292,6 +317,7 @@ export function renderActionList(root, actions, ctx, document = root?.ownerDocum
     renderActionEditor(itemRoot, action, {
       path: pathJoin(path, index),
       personaOptions,
+      overlayAssetsApi,
       onStructuralChange,
       onRemove: () => { actions.splice(index, 1); onStructuralChange(); },
     }, document);
