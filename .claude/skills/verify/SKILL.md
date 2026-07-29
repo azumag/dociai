@@ -40,9 +40,13 @@ usable. `getCurrent()` in `SettingsUI.open()` requires this to have already reso
 ## Driving the Settings UI
 
 - Open: click `#btn-settings` (native `<dialog>`, opens via `showModal()`).
-- Add a connector: click `.list-header .btn-add` on the (default-active) "connectors" tab. Only
-  one tab's DOM exists at a time (`_body.replaceChildren()` on every tab switch), so this selector
-  is unambiguous as long as the connectors tab is active.
+- Add a connector: click `.btn-add[data-list-add="connectors"]` on the (default-active) "connectors"
+  tab. The add buttons sit at the end of their list (after the last card, or after the empty-state
+  message), not in `.list-header`. Only one tab's DOM exists at a time
+  (`_body.replaceChildren()` on every tab switch), so this selector is unambiguous.
+- Delete a list item: click its `.btn-remove` (`aria-label` is `<種別>「<id>」を削除`). No focus
+  target is set afterward — the removed button's own removal from the DOM drops focus to
+  `document.body` (standard browser behavior), and the panel re-renders with `scrollTop` reset to 0.
 - Fields use `data-config-path` as their DOM id/selector directly on the `<input>`, e.g.
   `[data-config-path="connectors.new_connector_1.apiKey"]`.
 - **Gotcha**: right after adding a connector (which triggers a synchronous `#render()`), a bare

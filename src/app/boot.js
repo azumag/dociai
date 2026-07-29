@@ -531,12 +531,15 @@ function renderNewsAttribution(container) {
 function renderNewsPanel() {
   const el = $("#news-status");
   const failures = $("#news-failures");
+  const newsBufferedReader = appRuntime.getComponent("newsBufferedReader");
   const newsReader = appRuntime.getComponent("newsReader");
   const toggle = $("#chk-news-enabled");
   const configEnabled = !!state.config?.news?.enabled;
   toggle.checked = state.newsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
-  $("#btn-news-read").disabled = !newsReader?.enabled || newsReader?.busy;
+  const newsStatus = mergeReaderStatus(newsBufferedReader?.status(), newsReader?.status());
+  $("#btn-news-read").disabled = !newsBufferedReader?.enabled || newsStatus?.busy;
+  $("#btn-news-generate").disabled = !newsBufferedReader?.enabled || newsStatus?.busy || newsStatus?.bufferedCount >= 1;
   renderNewsAttribution($("#news-last-attribution"));
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
@@ -548,7 +551,7 @@ function renderNewsPanel() {
     failures.replaceChildren();
     return;
   }
-  const s = newsReader.status();
+  const s = newsStatus;
   if (!s.enabled) {
     el.textContent = "操作卓のトグルで一時停止中です";
     failures.replaceChildren();
@@ -556,19 +559,30 @@ function renderNewsPanel() {
   }
   const trigger = state.config.news.trigger ? `トリガー: ${state.config.news.trigger}` : "トリガー未設定";
   el.textContent = readerLifecycleText(trigger, s);
+  // retryNow/skip (inside renderReaderFailures) and the retry-and-rerun callback must both run
+  // against the unwrapped newsReader, never newsBufferedReader: newsReader's `generation` is kept
+  // in sync by every automatic run (the source of these failure records), while
+  // newsBufferedReader's internal pipeline only advances its OWN generation when the user presses
+  // 生成して貯める/再生. Passing the buffered reader here would make retryNow/skip silently no-op
+  // (MemoryItemProcessingStore requires an exact generation match) on a failure the automatic
+  // path produced. Separately, BufferedReader.run() also plays whatever the buffer already holds
+  // first, which could speak an unrelated item instead of actually retrying the failed one.
   renderReaderFailures(failures, newsReader, s, () => { renderNewsPanel(); appRuntime.getComponent("automationCoordinator")?.run("news", appRuntime.getComponent("newsReader")); }, renderNewsPanel);
 }
 
 function renderTopicPanel() {
   const el = $("#topic-status");
   const failures = $("#topic-failures");
+  const topicBufferedReader = appRuntime.getComponent("topicBufferedReader");
   const topicReader = appRuntime.getComponent("topicReader");
   const toggle = $("#chk-topics-enabled");
   const configEnabled = !!state.config?.topics?.enabled;
   toggle.checked = state.topicsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
-  $("#btn-topic-read").disabled = !topicReader?.enabled || topicReader?.busy;
-  $("#topic-busy").hidden = !topicReader?.busy;
+  const topicStatus = mergeReaderStatus(topicBufferedReader?.status(), topicReader?.status());
+  $("#btn-topic-read").disabled = !topicBufferedReader?.enabled || topicStatus?.busy;
+  $("#btn-topic-generate").disabled = !topicBufferedReader?.enabled || topicStatus?.busy || topicStatus?.bufferedCount >= 1;
+  $("#topic-busy").hidden = !topicStatus?.busy;
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
     failures.replaceChildren();
@@ -579,7 +593,7 @@ function renderTopicPanel() {
     failures.replaceChildren();
     return;
   }
-  const s = topicReader.status();
+  const s = topicStatus;
   if (!s.enabled) {
     el.textContent = "操作卓のトグルで一時停止中です";
     failures.replaceChildren();
@@ -587,7 +601,22 @@ function renderTopicPanel() {
   }
   const trigger = state.config.topics.trigger ? `トリガー: ${state.config.topics.trigger}` : "トリガー未設定";
   el.textContent = readerLifecycleText(trigger, s);
+  // Same reasoning as renderNewsPanel above: retryNow/skip and retry-and-rerun must run against
+  // the unwrapped topicReader, not topicBufferedReader.
   renderReaderFailures(failures, topicReader, s, () => { renderTopicPanel(); appRuntime.getComponent("automationCoordinator")?.run("topics", appRuntime.getComponent("topicReader")); }, renderTopicPanel);
+}
+
+// news/topic panels read from TWO separate reader/pipeline instances: newsBufferedReader/
+// topicBufferedReader (生成して貯める/再生, its bufferedCount comes from here) and the
+// unwrapped newsReader/topicReader that TriggerEngine/NewsScheduleRunner actually run. Their
+// store (counts/failures/nextRetryAt) is shared and therefore identical either way, but busy/
+// lastRunAt/lastSuccessAt/lastRunResult are per-instance execution state — without merging them,
+// an automatic run's 話題を生成中… / 最終実行 never shows up in the panel at all.
+function mergeReaderStatus(bufferedStatus, autoStatus) {
+  if (!bufferedStatus || !autoStatus) return bufferedStatus ?? autoStatus ?? null;
+  const autoIsNewer = (autoStatus.lastRunAt?.getTime?.() ?? 0) > (bufferedStatus.lastRunAt?.getTime?.() ?? 0);
+  const newer = autoIsNewer ? autoStatus : bufferedStatus;
+  return { ...bufferedStatus, busy: bufferedStatus.busy || autoStatus.busy, lastRunAt: newer.lastRunAt, lastSuccessAt: newer.lastSuccessAt, lastRunResult: newer.lastRunResult };
 }
 
 function readerLifecycleText(trigger, status) {
@@ -841,7 +870,7 @@ function bindUI() {
     speechStop: "#btn-speech-stop", speechResume: "#btn-speech-resume", speechSkip: "#btn-speech-skip", speechClear: "#btn-speech-clear",
     micStart: "#btn-mic-start", micStop: "#btn-mic-stop", micBargeIn: "#chk-mic-bargein", screenStart: "#btn-screen-start", screenStop: "#btn-screen-stop", screenRead: "#btn-screen-read",
     screenSourceRefresh: "#btn-screen-source-refresh", screenSourceSelect: "#screen-source-select",
-    newsRead: "#btn-news-read", topicRead: "#btn-topic-read", newsEnabled: "#chk-news-enabled", topicsEnabled: "#chk-topics-enabled", twitchReconnect: "#btn-twitch-reconnect",
+    newsRead: "#btn-news-read", newsGenerate: "#btn-news-generate", topicRead: "#btn-topic-read", topicGenerate: "#btn-topic-generate", newsEnabled: "#chk-news-enabled", topicsEnabled: "#chk-topics-enabled", twitchReconnect: "#btn-twitch-reconnect",
   });
   const actions = createAppActions({
     appRuntime,

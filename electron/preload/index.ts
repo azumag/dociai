@@ -20,6 +20,13 @@ function deepFreeze<T>(value: T): T {
 }
 
 const api: DociaiApi = {
+  overlayAssets: {
+    list: () => invoke(CHANNELS.OVERLAY_ASSETS_LIST),
+    import: (kind) => invoke(CHANNELS.OVERLAY_ASSETS_IMPORT, kind === undefined ? undefined : { kind }),
+    remove: (input) => invoke(CHANNELS.OVERLAY_ASSETS_REMOVE, input),
+    inspect: (input) => invoke(CHANNELS.OVERLAY_ASSETS_INSPECT, input),
+    getPlaybackHandle: (input) => invoke(CHANNELS.OVERLAY_ASSETS_PLAYBACK_HANDLE, input),
+  },
   platform: { getInfo: () => invoke(CHANNELS.PLATFORM_GET_INFO) },
   config: {
     get: () => invoke(CHANNELS.CONFIG_GET),

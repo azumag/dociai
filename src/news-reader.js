@@ -6,7 +6,7 @@ import { MemoryItemProcessingStore } from "./readers/item-processing-store.js";
 import { createNewsPipelineCoordinator } from "./news/news-pipeline-coordinator.js";
 
 export class NewsReader {
-  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), historyStore = undefined, clock = () => Date.now(), pipeline = null, isRuntimeEnabled = () => true }) {
+  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), historyStore = undefined, clock = () => Date.now(), random = Math.random, pipeline = null, isRuntimeEnabled = () => true }) {
     this.config = config;
     this.getConnector = getConnector;
     this.personaRouter = personaRouter;
@@ -32,6 +32,7 @@ export class NewsReader {
       store: this.store,
       ...(historyStore ? { historyStore } : {}),
       clock: this.clock,
+      random,
       fetchAll: (context) => this.fetchAll(context),
     });
   }

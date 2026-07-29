@@ -9,6 +9,7 @@ import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBe
 import type { StreamEventListInput, StreamEventListResult } from "./services/stream-event-ipc-contract";
 import type { TwitchAuthOverview, TwitchConnectionOverview, TwitchCustomRewardsOverview, TwitchSubscriptionsOverview } from "./twitch/overview-contract";
 import type { UpdateState } from "./services/update-ipc-contract";
+import type { OverlayAssetsApi } from "./overlay-asset-contract";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PublicError };
 export type WindowRole = "console" | "obs";
@@ -23,6 +24,7 @@ export type CaptureStatus = { selectedName: string; preferredName: string; sourc
 export type VoiceVoxSynthesisInput = { text: string; speaker: number; baseUrl?: string; timeoutMs?: number; pitch?: number; speed?: number; intonation?: number; volume?: number; requestId?: string; ownerId?: string; generation?: number };
 
 export type DociaiApi = {
+  overlayAssets: OverlayAssetsApi;
   platform: { getInfo(): Promise<Result<PlatformInfo>> };
   config: {
     get(): Promise<Result<{ config: Record<string, unknown>; revision: string; warnings: string[] }>>;

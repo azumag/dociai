@@ -113,10 +113,21 @@ export class SpeechQueue {
     return added;
   }
 
-  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt, commentId, metadata }) {
+  // onDelivered (optional): fired synchronously once this item has actually reached the real
+  // queue (never on drop). Callers such as a news/topic pipeline's onRead broadcast, or
+  // GeneratedSpeechBuffer's own per-generation handler (src/readers/generated-speech-buffer.js),
+  // rely on this firing at real-queue time.
+  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt, commentId, metadata, onDelivered }) {
     const engines = [...this.scheduler.pending, ...(this.current ? [this.current] : [])].map((item) => item.voice?.engine ?? this.#defaultEngine());
     this.backends.validateMix([...engines, voice?.engine ?? this.#defaultEngine()]);
     const item = this.scheduler.enqueue({ personaId, personaName, text, voice, source, priority, deadlineAt, commentId, metadata });
+    // The item is already genuinely enqueued at this point — a throwing onDelivered (e.g. a
+    // console/OBS broadcast handler bug) must never stall notify/pump behind it, nor propagate
+    // out of enqueue() into a caller (like the news pipeline) that would otherwise treat it as a
+    // failed delivery and schedule a duplicate-speaking retry for an item already in the queue.
+    if (item.state !== "dropped") {
+      try { onDelivered?.(); } catch (error) { this.log(`onDelivered通知の処理に失敗しました: ${error.message}`, "error"); }
+    }
     this.#notify(item);
     this.#pump();
     return item;
@@ -153,6 +164,8 @@ export class SpeechQueue {
     const item = this.scheduler.pending.find((entry) => entry.id === itemId);
     if (!item) return false;
     const removed = this.scheduler.removePending(item, "cancelled");
+    this.#clearPumpRetry();
+    this.#pump();
     this.onUpdate(this.items, this);
     return removed;
   }
@@ -236,11 +249,12 @@ export class SpeechQueue {
 
   #pump() {
     if (this.current || this.paused) return;
-    const next = this.scheduler.peekNext();
+    const preferComment = (item) => this.isCommentReaderItem(item);
+    const next = this.scheduler.peekNext(preferComment);
     if (!next) return;
     const waitMs = this.#commentReaderWaitMs(next);
     if (waitMs > 0) { this.#scheduleRetry(waitMs); return; }
-    const item = this.scheduler.take();
+    const item = this.scheduler.take(preferComment);
     if (!item) return;
     if (item.voice?.enabled === false) {
       this.scheduler.complete(item, "done", { error: "音声OFFのペルソナのため読み上げなし" });

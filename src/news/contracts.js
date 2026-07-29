@@ -62,6 +62,7 @@ export function emptyDiagnostics(overrides = {}) {
     fallbackPath: [],
     rewriteCount: 0,
     sourceIds: [],
+    personaSelections: [],
     errorCode: null,
     ...overrides,
   };

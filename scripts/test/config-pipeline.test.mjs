@@ -26,6 +26,26 @@ test("future versions are rejected without downgrade", () => {
   assert.equal(result.issues[0].code, "version.future"); assert.deepEqual(input, { schemaVersion: 99 });
 });
 
+test("invalid persona candidate settings fail structurally without throwing", () => {
+  for (const personas of ["fixed", {}, 3]) {
+    const input = { ...legacy, news: { ...legacy.news, personas } };
+    const direct = processConfig(input);
+    assert.equal(direct.ok, false);
+    assert.equal(direct.stage, "structural-validation");
+    assert.deepEqual(direct.issues[0].path, ["news", "personas"]);
+    assert.equal(direct.issues[0].code, "type.array");
+
+    const fromText = processConfigText(JSON.stringify(input), "browser-file");
+    assert.equal(fromText.ok, false);
+    assert.equal(fromText.stage, "structural-validation");
+    assert.deepEqual(fromText.issues[0].path, ["news", "personas"]);
+  }
+
+  const invalidToggle = processConfig({ ...legacy, news: { ...legacy.news, randomPersona: "yes" } });
+  assert.equal(invalidToggle.ok, false);
+  assert.equal(invalidToggle.issues[0].code, "type.boolean");
+});
+
 test("canonical form and hash ignore key order and secret values", () => {
   const a = { schemaVersion: 2, b: 2, a: 1, apiKey: "one" };
   const b = { apiKey: "two", a: 1, b: 2, schemaVersion: 2 };

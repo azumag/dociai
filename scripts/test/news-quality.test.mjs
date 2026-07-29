@@ -188,7 +188,7 @@ test("integration: NewsPromptGenerateStage + NewsQualityGateStage compose throug
     getConnector: () => connector,
     personaRouter: { get: () => persona, defaultPersona: () => persona },
     contextBuilder: { build: () => { throw new Error("generic ContextBuilder must not be used by the new news-prompt stage"); } },
-    speechQueue: { enqueue: (payload) => { delivered.push(payload); return { state: "waiting" }; } },
+    speechQueue: { enqueue: (payload) => { delivered.push(payload); payload.onDelivered?.(); return { state: "waiting" }; } },
     store,
     clock: () => 1000,
     onRead: (payload) => reads.push(payload),

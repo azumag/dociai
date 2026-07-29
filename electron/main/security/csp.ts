@@ -9,8 +9,8 @@ export function contentSecurityPolicy(devServerUrl?: string): string {
     "form-action 'none'",
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "media-src 'self' blob:",
+    "img-src 'self' data: blob: dociai-asset:",
+    "media-src 'self' blob: dociai-asset:",
     "font-src 'self' data:",
     `connect-src ${connect}`,
   ].join("; ");

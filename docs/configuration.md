@@ -321,7 +321,9 @@ Twitch は読み取り専用なら OAuth 不要です。受信したコメント
 |---|---|
 | `enabled` | ニュース機能のON/OFF |
 | `trigger` | 読み上げを起動するトリガーID (通常 `interval`) |
-| `persona` | 読み上げ担当ペルソナID。省略時は `router.defaultPersona` |
+| `persona` | 固定の読み上げ担当ペルソナID。省略時は `router.defaultPersona`。ランダム候補が空・削除済み・全て無効な場合のフォールバックにも使う |
+| `randomPersona` | `true` でニュース項目ごとに `personas` から担当をランダム抽選する。既定 `false` |
+| `personas` | ランダム抽選候補のペルソナID配列。存在しないIDと `enabled: false` のペルソナは設定を壊さず候補から除外する。候補が0件なら `persona` → `router.defaultPersona` へフォールバックする |
 | `mode` | `topic` / `current` / `simple`。既定 `topic` |
 | `sources` | `{ name, type: "rss" \| "mock", url, enabled }` の配列。`mock` はテスト用。`enabled: false` で一時停止 |
 | `maxItems` | 1回の実行で読む最大件数 (既定 3) |
@@ -342,6 +344,11 @@ RSS取得はブラウザから直接fetchするため、CORSヘッダのない�
 ニュースソースは配列で自由に増減できます。RSS/Atom の `pubDate` / `published` / `updated` がある場合は新しい順に並び、同じ見出しは NFKC 正規化と記号除去後のキーで重複排除されます。
 
 `mode` は読み上げの立ち位置を切り替えます。
+
+ランダム選択は各ニュース項目のattempt開始時に1回だけ行われます。選ばれたペルソナの
+system prompt・connector・voice設定は、生成、品質検査後の再書換え、reply/OBS表示、
+SpeechQueueまで同じ項目内で一貫して使われます。再試行時は話題読み上げと同様に再抽選します。
+`simple` modeではペルソナの口調は反映されますが、独自考察を加えないmode policyが優先されます。
 
 | mode | 動作 |
 |---|---|
@@ -441,6 +448,23 @@ Todoist由来の話題は `topics.intro`/`topics.style` を使って読み上げ
 plan/event/trigger IDを含む`ResolvedOverlayCue`は分離されています。このcontract対応前の古いbuildは
 `overlay-cue`を未知Actionとしてvalidation errorにし、そのActionだけを実行計画から除外します。
 現buildでもrenderer runtimeが利用可能になるまでは、安全に`overlay-unavailable`としてskipします。
+
+### Managed overlay assets
+
+Electronはimportした画像・効果音をuser data内の非公開`overlay-assets` directoryへコピーします。
+設定とRenderer向けAPIが保持するのはopaqueな`assetId`だけで、元の絶対pathや`file://` URLは保存・返却しません。
+importは必ずMain processのnative file dialogから開始します。
+
+初期対応画像はPNG、JPEG、WebP、GIF、音声はWAV、MP3、OGG/Vorbisです。SVG、HTML、script、archive、
+video、M4A/AACは拒否します。M4A/AACはpackaged ChromiumとOSによってdecode可否が異なるため初期対象外です。
+
+画像は1件20 MiBかつ8192 × 8192以下、音声は1件50 MiB以下、registryは500件以下です。managed asset合計が
+1 GiB以上になるとwarningを返し、固定hard capの2 GiBを超えるimportは拒否します。これらはcode定数であり、
+configから無制限化できません。
+
+再生にはrole確認済みIPCが発行する短命でopaqueな`dociai-asset:` handleを使います。protocolはregistryとmanaged
+directoryの両方を照合し、symlink/hardlink置換を拒否し、音声向けsingle byte-range requestへ対応します。
+Rendererが指定したpathを読むAPIはありません。
 
 ## Web調査 prepass (MiniMax)
 

@@ -28,9 +28,11 @@ import type { DownloadStartInput, ModelLicense } from "../../shared/local-llm/mo
 import type { StreamEventBus } from "../services/stream-events/stream-event-bus";
 import type { TwitchComposition } from "../services/twitch/twitch-composition";
 import type { UpdateService } from "../services/update/update-service";
+import type { OverlayAssetService } from "../services/overlay-assets/overlay-asset-service";
+import type { OverlayAssetUrlResolver } from "../services/overlay-assets/overlay-asset-url-resolver";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; newsSourceService: NewsSourceService; newsSearchService: NewsSearchService; wikipediaService: WikipediaService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; newsSourceService: NewsSourceService; newsSearchService: NewsSearchService; wikipediaService: WikipediaService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; overlayAssetService: OverlayAssetService | null; overlayAssetUrlResolver: OverlayAssetUrlResolver | null; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -122,6 +124,8 @@ function register<T>(channel: string, handler: Handler<T>, options: RegisterOpti
 }
 
 export function registerIpcHandlers(options: RegisterOptions): () => void {
+  const overlayAssets = (): OverlayAssetService => { if (!options.overlayAssetService) throw new PublicIpcError("UNAVAILABLE", "overlay asset機能を初期化できませんでした"); return options.overlayAssetService; };
+  const overlayAssetUrls = (): OverlayAssetUrlResolver => { if (!options.overlayAssetUrlResolver) throw new PublicIpcError("UNAVAILABLE", "overlay asset再生機能を初期化できませんでした"); return options.overlayAssetUrlResolver; };
   register(CHANNELS.PLATFORM_GET_INFO, (event, input) => {
     expectNoInput(input);
     return { runtime: "electron", platform: process.platform, arch: process.arch, appVersion: require("electron").app.getVersion(), isPackaged: require("electron").app.isPackaged, buildInfo: options.buildInfo };
@@ -295,6 +299,16 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     options.streamEventBus.clearHistory();
     return { cleared: true };
   }, options, ["console"]);
+  register(CHANNELS.OVERLAY_ASSETS_LIST, (event, input) => { expectNoInput(input); return overlayAssets().list(); }, options, ["console", "obs"]);
+  register(CHANNELS.OVERLAY_ASSETS_IMPORT, (event, input) => {
+    const payload = input === undefined || input === null ? {} : expectRecord(input, "overlay asset import");
+    const kind = payload.kind === undefined ? undefined : expectString(payload.kind, "asset kind", 16);
+    if (kind !== undefined && kind !== "image" && kind !== "audio") throw new PublicIpcError("INVALID_INPUT", "asset kindが不正です");
+    return overlayAssets().import(kind);
+  }, options, ["console"]);
+  register(CHANNELS.OVERLAY_ASSETS_REMOVE, (event, input) => { const payload = expectRecord(input, "overlay asset remove"); return overlayAssets().remove(payload.assetId); }, options, ["console"]);
+  register(CHANNELS.OVERLAY_ASSETS_INSPECT, (event, input) => { const payload = expectRecord(input, "overlay asset inspect"); return overlayAssets().inspect(payload.assetId); }, options, ["console", "obs"]);
+  register(CHANNELS.OVERLAY_ASSETS_PLAYBACK_HANDLE, async (event, input) => { const payload = expectRecord(input, "overlay asset playback"); const id = expectString(payload.assetId, "assetId", 64); return overlayAssetUrls().issue(id); }, options, ["console", "obs"]);
   register(CHANNELS.UPDATE_CHECK, (event, input) => { expectNoInput(input); return options.updateService.check(); }, options);
   register(CHANNELS.UPDATE_DOWNLOAD, (event, input) => { expectNoInput(input); return options.updateService.download(); }, options);
   register(CHANNELS.UPDATE_QUIT_AND_INSTALL, (event, input) => { expectNoInput(input); return { installing: options.updateService.quitAndInstall() }; }, options);

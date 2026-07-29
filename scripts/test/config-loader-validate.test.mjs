@@ -29,12 +29,13 @@ test("validateConfig errors on a missing Todoist topics.sources token unless tok
   assert.ok(!configuredErrors.some((e) => e.includes("token がありません")));
 });
 
-test("validateConfig errors on unknown topics.personas ids and warns when randomPersona has no candidates", () => {
+test("validateConfig warns on unavailable topics.personas ids and when randomPersona has no candidates", () => {
   const base = { connectors: { mock: { provider: "mock" } }, personas: [{ id: "p", name: "P", connector: "mock" }], triggers: {} };
 
   const unknownId = { ...base, topics: { enabled: true, sources: [{ type: "todoist", projectId: "1", name: "x", tokenConfigured: true }], personas: ["missing"] } };
-  const { errors } = validateConfig(unknownId);
-  assert.ok(errors.some((e) => e.includes(`topics.personas の "missing" が personas に存在しません`)));
+  const { errors, warnings: unknownWarnings } = validateConfig(unknownId);
+  assert.ok(!errors.some((e) => e.includes("topics.personas")));
+  assert.ok(unknownWarnings.some((warning) => warning.includes(`topics.personas の "missing"`)));
 
   const emptyPool = { ...base, topics: { enabled: true, sources: [{ type: "todoist", projectId: "1", name: "x", tokenConfigured: true }], randomPersona: true, personas: [] } };
   const { warnings } = validateConfig(emptyPool);
@@ -44,6 +45,28 @@ test("validateConfig errors on unknown topics.personas ids and warns when random
   const { errors: validErrors, warnings: validWarnings } = validateConfig(valid);
   assert.deepEqual(validErrors, []);
   assert.ok(!validWarnings.some((w) => w.includes("topics.randomPersona")));
+});
+
+test("validateConfig accepts news random persona candidates, warns on unavailable IDs, and keeps an empty pool runnable through fallback", () => {
+  const base = {
+    connectors: { mock: { provider: "mock" } },
+    personas: [{ id: "fixed", name: "Fixed", connector: "mock" }, { id: "disabled", name: "Disabled", connector: "mock", enabled: false }],
+    triggers: {},
+    news: { enabled: true, sources: [{ type: "mock", name: "mock" }], persona: "fixed", randomPersona: true, personas: ["disabled", "missing"] },
+  };
+  const unavailable = validateConfig(base);
+  assert.deepEqual(unavailable.errors, []);
+  assert.ok(unavailable.warnings.some((warning) => warning.includes('"disabled" は無効化')));
+  assert.ok(unavailable.warnings.some((warning) => warning.includes('"missing" が personas に存在しない')));
+
+  const empty = validateConfig({ ...base, news: { ...base.news, personas: [] } });
+  assert.deepEqual(empty.errors, []);
+  assert.ok(empty.warnings.some((warning) => warning.includes("news.randomPersona が true")));
+
+  const malformed = validateConfig({ ...base, news: { ...base.news, personas: "fixed" } });
+  assert.ok(malformed.errors.some((error) => error.includes("news.personas はペルソナIDの配列")));
+  const malformedToggle = validateConfig({ ...base, news: { ...base.news, randomPersona: "yes" } });
+  assert.ok(malformedToggle.errors.some((error) => error.includes("news.randomPersona は真偽値")));
 });
 
 test("validateConfig errors on a missing legacy news.sources Todoist token unless tokenConfigured is set", () => {

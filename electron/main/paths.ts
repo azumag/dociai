@@ -12,6 +12,11 @@ export type AppPaths = {
   logsDir: string;
   modelsDir: string;
   cacheDir: string;
+  overlayAssetsDir: string;
+  overlayAssetFilesDir: string;
+  overlayAssetTmpDir: string;
+  overlayAssetRegistryFile: string;
+  overlayAssetRegistryBackupFile: string;
 };
 
 export function resolveAppPaths(userDataDir: string): AppPaths {
@@ -26,6 +31,11 @@ export function resolveAppPaths(userDataDir: string): AppPaths {
     logsDir: path.join(userDataDir, "logs"),
     modelsDir: path.join(userDataDir, "models"),
     cacheDir: path.join(userDataDir, "cache"),
+    overlayAssetsDir: path.join(userDataDir, "overlay-assets"),
+    overlayAssetFilesDir: path.join(userDataDir, "overlay-assets", "files"),
+    overlayAssetTmpDir: path.join(userDataDir, "overlay-assets", "tmp"),
+    overlayAssetRegistryFile: path.join(userDataDir, "overlay-assets", "registry.json"),
+    overlayAssetRegistryBackupFile: path.join(userDataDir, "overlay-assets", "registry.json.bak"),
   };
 }
 

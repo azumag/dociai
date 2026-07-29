@@ -15,7 +15,16 @@ export type PublicErrorCode =
   | "CANCELLED"
   | "CONFLICT"
   | "UNKNOWN"
-  | "EMPTY";
+  | "EMPTY"
+  | "UNSUPPORTED_FORMAT"
+  | "MIME_MISMATCH"
+  | "ASSET_OVERSIZE"
+  | "DIMENSION_OVERSIZE"
+  | "DECODE_FAILED"
+  | "REGISTRY_CORRUPT"
+  | "REGISTRY_LIMIT"
+  | "ASSET_REFERENCED"
+  | "STORAGE_LIMIT";
 
 export type PublicError = {
   code: PublicErrorCode;
