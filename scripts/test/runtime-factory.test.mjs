@@ -285,6 +285,21 @@ test("newsPipeline's deliver stage is wired to createNewsDeliveryStage and honor
   assert.equal(result.status, "accepted", "news.delivery.blockOnUnattributableRequiredSource: false must downgrade the block to a warning and still deliver");
 });
 
+test("newsBufferPipeline's (生成して貯める path, issue #258) deliver stage ALSO blocks an unattributable required source, not just the automatic newsPipeline", async () => {
+  const unattributableItem = { processingKey: "p1", title: "見出し", license: { name: "CC BY 4.0", attributionRequired: true } };
+  const persona = { id: "p1", name: "P1", voice: {} };
+  const runArgs = { persona, item: unattributableItem, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" };
+
+  const config = minimalConfig({ news: { enabled: true, sources: [] } });
+  const { deps } = fakeDeps();
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+  await assert.rejects(
+    bundle.get("newsBufferPipeline").stages.deliver.run(runArgs),
+    /attribution/,
+    "the buffered/pregenerated news path must not bypass the same attribution block the automatic path enforces",
+  );
+});
+
 test("starting a candidate bundle activates the trigger engine and comment sources", async () => {
   // TriggerEngine.start() always binds a "keydown" listener, even with no hotkey triggers
   // configured — same window shim scripts/test/electron-shortcut.test.mjs uses.
