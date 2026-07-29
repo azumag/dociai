@@ -31,6 +31,14 @@ test("buildAttributions falls back to the candidate's own source when there is n
   assert.deepEqual(buildAttributions({ sources: [] }, {}), []);
 });
 
+test("buildAttributions keeps a required-attribution candidate visible even with no name/URL, so hasUnattributableRequiredSource can still catch it", () => {
+  const candidate = { license: { name: "CC BY 4.0", attributionRequired: true } };
+  const attributions = buildAttributions(null, candidate);
+  assert.equal(attributions.length, 1, "must not silently drop a candidate whose own license requires attribution");
+  assert.equal(attributions[0].attributionRequired, true);
+  assert.equal(hasUnattributableRequiredSource(attributions), true);
+});
+
 test("buildAttributions never leaks the candidate's own license onto unrelated research-bundle sources", () => {
   const research = { sources: [{ id: "s1", url: "https://wikipedia.org/x", sourceName: "Wikipedia" }] };
   const candidate = { sourceName: "CC-licensed feed", license: { name: "CC BY 4.0", attributionRequired: true } };
@@ -138,6 +146,18 @@ test("createNewsDeliveryStage blocks delivery (non-retryable) when a required-at
   const persona = { id: "persona-1", name: "P", voice: {} };
   await assert.rejects(
     stage.run({ persona, item, text: "本文", research, modePolicy: { mode: "current" }, runId: "run-1" }),
+    (error) => error instanceof PipelineStageError && error.retryable === false,
+  );
+  assert.equal(speechQueue.enqueued.length, 0, "must not enqueue before the block check");
+});
+
+test("createNewsDeliveryStage blocks delivery when the candidate itself (no research bundle) requires attribution but has no displayable name/URL", async () => {
+  const speechQueue = fakeSpeechQueue();
+  const stage = createNewsDeliveryStage({ speechQueue });
+  const item = { processingKey: "p1", title: "見出し", license: { name: "CC BY 4.0", attributionRequired: true } };
+  const persona = { id: "persona-1", name: "P", voice: {} };
+  await assert.rejects(
+    stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" }),
     (error) => error instanceof PipelineStageError && error.retryable === false,
   );
   assert.equal(speechQueue.enqueued.length, 0, "must not enqueue before the block check");
