@@ -37,12 +37,21 @@ export class GeneratedSpeechBuffer {
     const item = this.state.items.shift();
     if (!item) return null;
     const onDelivered = this.onDelivered ? () => this.onDelivered(item.deliveryPayload) : undefined;
-    // The item was already committed to its source (history/markRead) when it entered this
-    // buffer, so a drop here (real-queue deadline/overflow, src/speech/speech-scheduler.js) is
-    // otherwise silent and unrecoverable — it will never be spoken and never regenerated. Log
-    // it so it is at least visible, even though it isn't retried.
-    const result = this.speechQueue?.enqueue({ ...item, onDelivered });
-    if (result?.state === "dropped") this.log(`事前生成した読み上げがキュー上限/期限切れで破棄されました: ${item.text ?? ""}`.slice(0, 200), "warn");
+    try {
+      // The item was already committed to its source (history/markRead) when it entered this
+      // buffer, so a drop here (real-queue deadline/overflow, src/speech/speech-scheduler.js) is
+      // otherwise silent and unrecoverable — it will never be spoken and never regenerated. Log
+      // it so it is at least visible, even though it isn't retried.
+      const result = this.speechQueue?.enqueue({ ...item, onDelivered });
+      if (result?.state === "dropped") this.log(`事前生成した読み上げがキュー上限/期限切れで破棄されました: ${item.text ?? ""}`.slice(0, 200), "warn");
+    } catch (error) {
+      // Unlike a drop, a THROW (e.g. SpeechQueue's strict-ordering/voice-mix validation) means
+      // the item never actually reached the real queue — nothing was lost yet, so put it back
+      // instead of discarding it. The next play() gets another chance once conditions change.
+      this.state.items.unshift(item);
+      this.log(`事前生成した読み上げの再生に失敗しました。次回再試行します: ${error.message}`.slice(0, 200), "warn");
+      return null;
+    }
     return item;
   }
 }

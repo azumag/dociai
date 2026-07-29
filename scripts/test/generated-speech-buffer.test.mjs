@@ -96,3 +96,18 @@ test("play() never fires onDelivered when the real speechQueue drops the item", 
   assert.equal(item.text, "will-drop", "play() still returns the dequeued item so the caller knows what was lost");
   assert.equal(delivered, 0, "a dropped real-queue enqueue must never fire onDelivered (never spoken)");
 });
+
+test("play() puts the item BACK instead of losing it when the real speechQueue.enqueue() throws", () => {
+  const warnings = [];
+  const state = { items: [{ text: "will-throw", source: "news", deliveryPayload: { text: "will-throw" } }] };
+  // Unlike a drop (an explicit, handled outcome), a throw (e.g. SpeechQueue's strict-ordering/
+  // voice-mix validation) means the item never actually reached the real queue — nothing was
+  // lost yet, so it must not be discarded the way a genuine drop is.
+  const buffer = new GeneratedSpeechBuffer({ speechQueue: { enqueue: () => { throw new Error("mixed voice engines"); } }, state, log: (message, level) => warnings.push({ message, level }) });
+
+  const result = buffer.play();
+  assert.equal(result, null, "play() must report nothing was delivered");
+  assert.equal(buffer.size, 1, "the item must be put back into the buffer, not lost");
+  assert.equal(state.items[0].text, "will-throw");
+  assert.ok(warnings.some((w) => w.level === "warn" && w.message.includes("mixed voice engines")), "the failure must be logged");
+});

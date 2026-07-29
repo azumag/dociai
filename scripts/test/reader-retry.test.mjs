@@ -261,6 +261,27 @@ test("TopicReader runs Web research before chat and includes grounded results", 
   assert.equal(reader.status().counts.read, 1);
 });
 
+test("TopicReader resets a dropped item back to unread (not markRead) so a later run can retry it, and skips the Todoist completion", async () => {
+  const now = { value: 1_000 };
+  let todoistCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { todoistCalls++; return { ok: true, json: async () => ({}) }; };
+  try {
+    const reader = new TopicReader({
+      config: { topics: { enabled: true, maxItems: 1 } },
+      ...readerDependencies({ now, connector: { chat: async () => ({ text: "generated comment" }) } }),
+      speechQueue: { enqueue: () => ({ state: "dropped" }) },
+    });
+    reader.fetchAll = async () => reader.refineItems([{ guid: "topic", title: "topic", sourceName: "todoist", _todoistTaskId: "t1", _todoistToken: "tok" }]);
+    await reader.run({ generation: 1 });
+    assert.equal(reader.status().counts.read, 0, "a dropped item must never be marked read — it was never actually spoken");
+    assert.equal(reader.status().counts.unread, 1, "a dropped item must go back to unread so a later run can retry it");
+    assert.equal(todoistCalls, 0, "onDelivered (which completes the Todoist task) must never fire for a dropped item");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("TopicReader fails open when Web research fails", async () => {
   const now = { value: 1_000 };
   const warnings = [];

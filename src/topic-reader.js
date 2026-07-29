@@ -120,8 +120,16 @@ export class TopicReader {
           // of replaying this specific run's (possibly stale) closure.
           const deliveryPayload = { persona, item, text, debugText };
           const queued = this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "topics", onDelivered: () => { this.onRead(deliveryPayload); this.completeTodoistTask(item, context).catch((error) => { if (!isCancellation(error)) this.log(`Todoistタスクの完了処理に失敗しました [${item.title}]: ${error.message}`, "warn"); }); }, deliveryPayload });
-          if (queued?.state === "dropped") this.log(`話題音声はキュー上限で破棄されました [${item.title}]`, "warn");
           this.#guard(context);
+          // onDelivered (onRead + Todoist completion) only fires when queued.state !== "dropped"
+          // (SpeechQueue.enqueue()'s own contract), so a drop must not markRead either — that
+          // would permanently hide an item that was never actually spoken and whose Todoist task
+          // was never closed. Reset it back to unread instead so a later run can retry it.
+          if (queued?.state === "dropped") {
+            this.log(`話題音声はキュー上限で破棄されました [${item.title}]`, "warn");
+            this.store.resetUnread(item.processingKey, this.generation, this.clock());
+            continue;
+          }
           this.store.markRead(item.processingKey, this.generation, this.clock());
           this.lastRunResult.succeeded++;
           this.lastSuccessAt = new Date(this.clock());

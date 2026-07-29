@@ -480,3 +480,18 @@ test("SpeechQueue.enqueue fires onDelivered once the item reaches the real queue
   assert.equal(deliveredCount, 1, "a dropped enqueue must never fire onDelivered");
   queue.dispose();
 });
+
+test("SpeechQueue.enqueue survives a throwing onDelivered — the item still lands and the queue still pumps", async () => {
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const errors = [];
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance }, log: (message, level) => errors.push({ message, level }) });
+
+  // A throwing onDelivered (e.g. a buggy console/OBS broadcast handler) must never stall the
+  // item that already, genuinely, reached the queue — nor should it propagate out of enqueue()
+  // into a caller (like the news pipeline) that would otherwise treat this as a failed delivery
+  // and schedule a duplicate-speaking retry for an item already enqueued.
+  const item = queue.enqueue({ text: "boom", voice: { engine: "webspeech" }, onDelivered: () => { throw new Error("broadcast handler bug"); } });
+  assert.equal(item.state, "speaking", "the item must still be genuinely enqueued and pumped despite onDelivered throwing");
+  assert.ok(errors.some((e) => e.level === "error" && e.message.includes("broadcast handler bug")), "the failure must be logged, not silently swallowed");
+  queue.dispose();
+});
