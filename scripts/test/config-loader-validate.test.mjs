@@ -113,6 +113,27 @@ test("validateConfig (issue #193) validates the optional news.schedule slots, an
   assert.ok(validateConfig(badMaxRuns).errors.some((e) => e.includes("maxRunsPerHour は0以上")));
 });
 
+test("validateConfig (issue #193) validates the optional news.delivery block/congestion/priority settings, and accepts configs that omit it entirely", () => {
+  const base = { connectors: { main: { provider: "mock" } }, personas: [{ id: "p", name: "P", connector: "main" }], triggers: {}, news: { enabled: true, sources: [{ type: "mock", name: "m" }] } };
+
+  assert.deepEqual(validateConfig(base).errors, [], "news.delivery is fully optional");
+
+  const valid = { ...base, news: { ...base.news, delivery: { blockOnUnattributableRequiredSource: false, deferWhenQueueAbove: 5, priority: 20 } } };
+  assert.deepEqual(validateConfig(valid).errors, []);
+
+  const notObject = { ...base, news: { ...base.news, delivery: "yes" } };
+  assert.ok(validateConfig(notObject).errors.some((e) => e.includes("news.delivery はオブジェクト")));
+
+  const badBlockFlag = { ...base, news: { ...base.news, delivery: { blockOnUnattributableRequiredSource: "true" } } };
+  assert.ok(validateConfig(badBlockFlag).errors.some((e) => e.includes("blockOnUnattributableRequiredSource は真偽値")));
+
+  const badDefer = { ...base, news: { ...base.news, delivery: { deferWhenQueueAbove: -1 } } };
+  assert.ok(validateConfig(badDefer).errors.some((e) => e.includes("deferWhenQueueAbove は0以上")));
+
+  const badPriority = { ...base, news: { ...base.news, delivery: { priority: "high" } } };
+  assert.ok(validateConfig(badPriority).errors.some((e) => e.includes("priority は数値")));
+});
+
 test("validateConfig accepts comment reader engine-specific voice boundaries", () => {
   const config = {
     connectors: { mock: { provider: "mock" } },

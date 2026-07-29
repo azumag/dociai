@@ -11,6 +11,7 @@ import { ContextBuilder } from "../context-builder.js";
 import { NewsReader } from "../news-reader.js";
 import { createNewsPipelineCoordinator } from "../news/news-pipeline-coordinator.js";
 import { NewsScheduleRunner } from "../news/delivery/news-schedule-runner.js";
+import { createNewsDeliveryStage } from "../news/stages/deliver-stage.js";
 import { TopicReader } from "../topic-reader.js";
 import { TriggerEngine } from "../trigger-engine.js";
 import { ResponseCoordinator } from "./response-coordinator.js";
@@ -378,6 +379,13 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   // dedupe/spam/diversity history survives config reload — a fresh generation's runtime
   // component graph must not reset "have we already delivered this article" memory. Falls back
   // to createNewsPipelineCoordinator's own bounded default when a caller (tests) doesn't supply one.
+  // Issue #193: news.delivery配線 — 完全にoptionalなfield (未指定ならblockOnUnattributable
+  // RequiredSourceの既定trueだけが効き、deferWhenQueueAbove/priorityは既存のlegacy adapter
+  // deliver()相当の挙動 (未指定) のままになる)。stages.deliverをこのcreateNewsDeliveryStage
+  // へ差し替えることで、attribution requiredなsourceの出典表示漏れが実際にdelivery blockingへ
+  // 反映される — createNewsDeliveryStage自体は#249で実装済みだったが、ここへ配線するまでは
+  // どのnews runにも一切使われていなかった (PR #249レビュー指摘)。
+  const newsDelivery = config.news?.delivery ?? {};
   const newsPipeline = define("newsPipeline", () => createNewsPipelineCoordinator({
     getConfig: () => config,
     getConnector: (id) => connectors.get(id),
@@ -387,6 +395,15 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     log: deps.log,
     onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
     ...(deps.newsHistoryStore ? { historyStore: deps.newsHistoryStore } : {}),
+    stages: {
+      deliver: createNewsDeliveryStage({
+        speechQueue,
+        deferWhenQueueAbove: newsDelivery.deferWhenQueueAbove ?? null,
+        priority: newsDelivery.priority,
+        blockOnUnattributableRequiredSource: newsDelivery.blockOnUnattributableRequiredSource ?? true,
+        log: deps.log,
+      }),
+    },
   }));
 
   const newsReader = define("newsReader", () => new NewsReader({

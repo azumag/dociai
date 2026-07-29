@@ -263,6 +263,27 @@ test("newsReader/topicReader stay gated by config.news.enabled/config.topics.ena
   assert.equal(config.topics.enabled, true, "toggling the main-screen switch must never mutate config");
 });
 
+test("newsPipeline's deliver stage is wired to createNewsDeliveryStage and honors config.news.delivery.blockOnUnattributableRequiredSource (issue #193)", async () => {
+  const unattributableItem = { processingKey: "p1", title: "見出し", license: { name: "CC BY 4.0", attributionRequired: true } };
+  const persona = { id: "p1", name: "P1", voice: {} };
+  const runArgs = { persona, item: unattributableItem, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" };
+
+  const blockingConfig = minimalConfig({ news: { enabled: true, sources: [] } });
+  const { deps: blockingDeps } = fakeDeps();
+  const blockingBundle = await createDociaiRuntimeFactory().createCandidate({ config: blockingConfig, generation: 1, deps: blockingDeps });
+  await assert.rejects(
+    blockingBundle.get("newsPipeline").stages.deliver.run(runArgs),
+    /attribution/,
+    "default (unconfigured) news.delivery must still block an unattributable required source",
+  );
+
+  const warnOnlyConfig = minimalConfig({ news: { enabled: true, sources: [], delivery: { blockOnUnattributableRequiredSource: false } } });
+  const { deps: warnOnlyDeps } = fakeDeps();
+  const warnOnlyBundle = await createDociaiRuntimeFactory().createCandidate({ config: warnOnlyConfig, generation: 1, deps: warnOnlyDeps });
+  const result = await warnOnlyBundle.get("newsPipeline").stages.deliver.run(runArgs);
+  assert.equal(result.status, "accepted", "news.delivery.blockOnUnattributableRequiredSource: false must downgrade the block to a warning and still deliver");
+});
+
 test("starting a candidate bundle activates the trigger engine and comment sources", async () => {
   // TriggerEngine.start() always binds a "keydown" listener, even with no hotkey triggers
   // configured — same window shim scripts/test/electron-shortcut.test.mjs uses.
