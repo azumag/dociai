@@ -217,7 +217,7 @@ test("createNewsDeliveryStage also treats the currently-speaking item (not just 
   assert.equal(speechQueue.enqueued.length, 0);
 });
 
-test("createNewsDeliveryStage defers when the newstalk queue is above the configured congestion threshold", async () => {
+test("createNewsDeliveryStage defers (without throwing) when the newstalk queue is above the configured congestion threshold — congestion must reset to unread, not consume a retry attempt toward a permanent blacklist (PR #249 review)", async () => {
   const items = [
     { source: "newstalk", state: "waiting", metadata: { candidateId: "other-1", mode: "current" } },
     { source: "newstalk", state: "waiting", metadata: { candidateId: "other-2", mode: "current" } },
@@ -226,10 +226,8 @@ test("createNewsDeliveryStage defers when the newstalk queue is above the config
   const stage = createNewsDeliveryStage({ speechQueue, deferWhenQueueAbove: 1 });
   const item = { processingKey: "p1", title: "見出し" };
   const persona = { id: "persona-1", name: "P", voice: {} };
-  await assert.rejects(
-    stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" }),
-    (error) => error instanceof PipelineStageError && error.retryable === true,
-  );
+  const result = await stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" });
+  assert.deepEqual(result, { status: "dropped", queueItemId: null, commitAllowed: false, reason: "queue-congested", attribution: [] });
   assert.equal(speechQueue.enqueued.length, 0);
 });
 
