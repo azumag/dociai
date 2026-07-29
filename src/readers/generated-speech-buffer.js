@@ -2,10 +2,11 @@
 // That matches the existing readers' successful-delivery transition and prevents the next
 // replenish attempt from generating the same news item or Todoist task again.
 export class GeneratedSpeechBuffer {
-  constructor({ speechQueue, state = { items: [] }, capacity = 1 }) {
+  constructor({ speechQueue, state = { items: [] }, capacity = 1, log = () => {} }) {
     this.speechQueue = speechQueue;
     this.state = state;
     this.capacity = capacity;
+    this.log = log;
     this.state.items ??= [];
   }
 
@@ -22,7 +23,12 @@ export class GeneratedSpeechBuffer {
   play() {
     const item = this.state.items.shift();
     if (!item) return null;
-    this.speechQueue?.enqueue(item);
+    // The item was already committed to its source (history/markRead) when it entered this
+    // buffer, so a drop here (real-queue deadline/overflow, src/speech/speech-scheduler.js) is
+    // otherwise silent and unrecoverable — it will never be spoken and never regenerated. Log
+    // it so it is at least visible, even though it isn't retried.
+    const result = this.speechQueue?.enqueue(item);
+    if (result?.state === "dropped") this.log(`事前生成した読み上げがキュー上限/期限切れで破棄されました: ${item.text ?? ""}`.slice(0, 200), "warn");
     return item;
   }
 }

@@ -531,7 +531,7 @@ function renderNewsAttribution(container) {
 function renderNewsPanel() {
   const el = $("#news-status");
   const failures = $("#news-failures");
-  const newsReader = appRuntime.getComponent("newsReader");
+  const newsReader = appRuntime.getComponent("newsBufferedReader");
   const toggle = $("#chk-news-enabled");
   const configEnabled = !!state.config?.news?.enabled;
   toggle.checked = state.newsRuntimeEnabled !== false;
@@ -558,13 +558,13 @@ function renderNewsPanel() {
   }
   const trigger = state.config.news.trigger ? `トリガー: ${state.config.news.trigger}` : "トリガー未設定";
   el.textContent = readerLifecycleText(trigger, s);
-  renderReaderFailures(failures, newsReader, s, () => { renderNewsPanel(); appRuntime.getComponent("automationCoordinator")?.run("news", appRuntime.getComponent("newsReader")); }, renderNewsPanel);
+  renderReaderFailures(failures, newsReader, s, () => { renderNewsPanel(); appRuntime.getComponent("automationCoordinator")?.run("news", appRuntime.getComponent("newsBufferedReader")); }, renderNewsPanel);
 }
 
 function renderTopicPanel() {
   const el = $("#topic-status");
   const failures = $("#topic-failures");
-  const topicReader = appRuntime.getComponent("topicReader");
+  const topicReader = appRuntime.getComponent("topicBufferedReader");
   const toggle = $("#chk-topics-enabled");
   const configEnabled = !!state.config?.topics?.enabled;
   toggle.checked = state.topicsRuntimeEnabled !== false;
@@ -591,7 +591,7 @@ function renderTopicPanel() {
   }
   const trigger = state.config.topics.trigger ? `トリガー: ${state.config.topics.trigger}` : "トリガー未設定";
   el.textContent = readerLifecycleText(trigger, s);
-  renderReaderFailures(failures, topicReader, s, () => { renderTopicPanel(); appRuntime.getComponent("automationCoordinator")?.run("topics", appRuntime.getComponent("topicReader")); }, renderTopicPanel);
+  renderReaderFailures(failures, topicReader, s, () => { renderTopicPanel(); appRuntime.getComponent("automationCoordinator")?.run("topics", appRuntime.getComponent("topicBufferedReader")); }, renderTopicPanel);
 }
 
 function readerLifecycleText(trigger, status) {

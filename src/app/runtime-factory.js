@@ -382,12 +382,43 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   // These plain states live on the long-lived runtime deps object, so prepared speech survives
   // the configuration reload boundary just like the existing runtime-scoped news history does.
   const generatedBufferStates = deps.generatedBufferStates ??= new Map();
-  const newsBuffer = new GeneratedSpeechBuffer({ speechQueue, state: generatedBufferStates.get("news") ?? { items: [] } });
-  const topicBuffer = new GeneratedSpeechBuffer({ speechQueue, state: generatedBufferStates.get("topics") ?? { items: [] } });
+  const newsBuffer = new GeneratedSpeechBuffer({ speechQueue, state: generatedBufferStates.get("news") ?? { items: [] }, log: deps.log });
+  const topicBuffer = new GeneratedSpeechBuffer({ speechQueue, state: generatedBufferStates.get("topics") ?? { items: [] }, log: deps.log });
   generatedBufferStates.set("news", newsBuffer.state);
   generatedBufferStates.set("topics", topicBuffer.state);
 
+  // Automatic delivery (TriggerEngine / NewsScheduleRunner, below) always runs through
+  // `newsPipeline`/`newsReader`/`topicReader`, which speak directly to the real `speechQueue`:
+  // config's news.maxItems/topics.maxItems, the deliver stage's real-queue congestion/duplicate
+  // checks (src/news/stages/deliver-stage.js), and drop retries all keep working exactly as
+  // before this feature existed. The 生成して貯める/再生 buttons below get their own
+  // `newsBufferedReader`/`topicBufferedReader`, wired to `newsBuffer`/`topicBuffer` instead —
+  // they share the SAME store/historyStore (single source of read/dedupe truth) but never touch
+  // the automatic path's maxItems or speechQueue.
   const newsPipeline = define("newsPipeline", () => createNewsPipelineCoordinator({
+    getConfig: () => config,
+    getConnector: (id) => connectors.get(id),
+    personaRouter,
+    contextBuilder,
+    speechQueue,
+    log: deps.log,
+    onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
+    ...(deps.newsHistoryStore ? { historyStore: deps.newsHistoryStore } : {}),
+  }));
+
+  const newsReader = define("newsReader", () => new NewsReader({
+    config,
+    getConnector: (id) => connectors.get(id),
+    personaRouter,
+    contextBuilder,
+    speechQueue,
+    log: deps.log,
+    onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
+    isRuntimeEnabled: deps.isNewsRuntimeEnabled,
+    pipeline: newsPipeline,
+  }));
+
+  const newsBufferPipeline = define("newsBufferPipeline", () => createNewsPipelineCoordinator({
     getConfig: () => config,
     getConnector: (id) => connectors.get(id),
     personaRouter,
@@ -395,10 +426,11 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     speechQueue: newsBuffer,
     log: deps.log,
     onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
-    ...(deps.newsHistoryStore ? { historyStore: deps.newsHistoryStore } : {}),
+    store: newsPipeline.store,
+    historyStore: newsPipeline.historyStore,
   }));
 
-  const newsReader = define("newsReader", () => new BufferedReader({
+  const newsBufferedReader = define("newsBufferedReader", () => new BufferedReader({
     reader: new NewsReader({
       config,
       getConnector: (id) => connectors.get(id),
@@ -408,13 +440,25 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       log: deps.log,
       onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
       isRuntimeEnabled: deps.isNewsRuntimeEnabled,
-      pipeline: newsPipeline,
+      pipeline: newsBufferPipeline,
     }),
     buffer: newsBuffer,
     log: deps.log,
   }));
 
-  const topicReader = define("topicReader", () => new BufferedReader({
+  const topicReader = define("topicReader", () => new TopicReader({
+    config,
+    getConnector: (id) => connectors.get(id),
+    personaRouter,
+    contextBuilder,
+    speechQueue,
+    webResearcher,
+    log: deps.log,
+    onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },
+    isRuntimeEnabled: deps.isTopicsRuntimeEnabled,
+  }));
+
+  const topicBufferedReader = define("topicBufferedReader", () => new BufferedReader({
     reader: new TopicReader({
       config,
       getConnector: (id) => connectors.get(id),
@@ -425,6 +469,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       log: deps.log,
       onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },
       isRuntimeEnabled: deps.isTopicsRuntimeEnabled,
+      store: topicReader.store,
     }),
     buffer: topicBuffer,
     log: deps.log,

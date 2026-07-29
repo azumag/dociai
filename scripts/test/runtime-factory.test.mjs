@@ -150,7 +150,8 @@ test("buildDociaiRuntime wires a candidate bundle in dependency order without st
 
   assert.deepEqual(bundle.names(), [
     "connectors", "personaRouter", "speechQueue", "webResearcher", "contextBuilder",
-    "responseCoordinator", "eventTriggerRunner", "automationCoordinator", "newsPipeline", "newsReader", "topicReader",
+    "responseCoordinator", "eventTriggerRunner", "automationCoordinator", "newsPipeline", "newsReader",
+    "newsBufferPipeline", "newsBufferedReader", "topicReader", "topicBufferedReader",
     "triggerEngine", "newsScheduleRunner", "sourceCoordinator",
   ]);
   assert.equal(calls.onSecrets.length, 1);

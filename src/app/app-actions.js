@@ -94,10 +94,10 @@ export function createAppActions({
       finally { request.complete(); }
       if (appRuntime.isCurrent(generation)) render.screen?.();
     },
-    readNews: () => { render.news?.(); component("automationCoordinator")?.run("news", component("newsReader")); },
-    readTopics: () => { render.topics?.(); component("automationCoordinator")?.run("topics", component("topicReader")); },
-    generateNews: () => generateReader("news", "newsReader", render.news),
-    generateTopics: () => generateReader("topics", "topicReader", render.topics),
+    readNews: () => { render.news?.(); component("automationCoordinator")?.run("news", component("newsBufferedReader")); },
+    readTopics: () => { render.topics?.(); component("automationCoordinator")?.run("topics", component("topicBufferedReader")); },
+    generateNews: () => generateReader("news", "newsBufferedReader", render.news),
+    generateTopics: () => generateReader("topics", "topicBufferedReader", render.topics),
     setNewsEnabled: (enabled) => { store.dispatch({ type: "set", key: "newsRuntimeEnabled", value: enabled }); render.news?.(); },
     setTopicsEnabled: (enabled) => { store.dispatch({ type: "set", key: "topicsRuntimeEnabled", value: enabled }); render.topics?.(); },
     reconnectTwitch: () => {
