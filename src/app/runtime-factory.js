@@ -11,6 +11,7 @@ import { ContextBuilder } from "../context-builder.js";
 import { NewsReader } from "../news-reader.js";
 import { createNewsPipelineCoordinator } from "../news/news-pipeline-coordinator.js";
 import { NewsScheduleRunner } from "../news/delivery/news-schedule-runner.js";
+import { createNewsDeliveryStage } from "../news/stages/deliver-stage.js";
 import { TopicReader } from "../topic-reader.js";
 import { BufferedReader, GeneratedSpeechBuffer } from "../readers/generated-speech-buffer.js";
 import { isCancellation } from "../runtime/request-registry.js";
@@ -406,6 +407,37 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   // `newsBufferedReader`/`topicBufferedReader`, wired to `newsBuffer`/`topicBuffer` instead —
   // they share the SAME store/historyStore (single source of read/dedupe truth) but never touch
   // the automatic path's maxItems or speechQueue.
+  //
+  // Issue #193: news.delivery配線 — 完全にoptionalなfield (未指定ならblockOnUnattributable
+  // RequiredSourceの既定trueだけが効き、deferWhenQueueAbove/priorityは既存のlegacy adapter
+  // deliver()相当の挙動 (未指定) のままになる)。stages.deliverをこのcreateNewsDeliveryStage
+  // へ差し替えることで、attribution requiredなsourceの出典表示漏れが実際にdelivery blockingへ
+  // 反映される — createNewsDeliveryStage自体は#249で実装済みだったが、ここへ配線するまでは
+  // どのnews runにも一切使われていなかった (PR #249レビュー指摘)。newsBufferPipeline (下記の
+  // 生成して貯めるpath) にも同じ理由で同じstage/configを渡す — buffer側だけ出典blockingが
+  // 効かない非対称は同じ穴の再発になる。
+  const newsDelivery = config.news?.delivery ?? {};
+  // A distinct createNewsDeliveryStage() instance per target queue: the stage closes over
+  // whichever `speechQueue` it's given both for its congestion/duplicate check (`.items`) and
+  // the actual enqueue, so newsBufferPipeline (below) must get one bound to `newsBuffer`, not
+  // the real speechQueue, or buffered items would skip the buffer and enqueue directly.
+  // GeneratedSpeechBuffer has no `.items`/`.paused` (buffer capacity is 1, not a queue to inspect)
+  // but does implement `.enqueue()`, so the congestion/duplicate check is inert there while the
+  // attribution block check above it — the actual point of this wiring — still applies identically.
+  const createNewsDeliverStageFor = (queue) => createNewsDeliveryStage({
+    speechQueue: queue,
+    // sourceLabel defaults to "newstalk" inside createNewsDeliveryStage, but the legacy adapter
+    // (and every speech item persisted before this wiring existed) used "news" — keep that label
+    // so speech-scheduler.js's same-source pending-count bucketing (keyed by this string) doesn't
+    // silently split a runtime-restored pre-upgrade "news" item from newly-enqueued items into two
+    // separate buckets, and so it stays consistent with news-delivery-contract.js's own
+    // metadata.source: "news" (PR #249 review).
+    sourceLabel: "news",
+    deferWhenQueueAbove: newsDelivery.deferWhenQueueAbove ?? null,
+    priority: newsDelivery.priority,
+    blockOnUnattributableRequiredSource: newsDelivery.blockOnUnattributableRequiredSource ?? true,
+    log: deps.log,
+  });
   const newsPipeline = define("newsPipeline", () => createNewsPipelineCoordinator({
     getConfig: () => config,
     getConnector: (id) => connectors.get(id),
@@ -415,6 +447,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     log: deps.log,
     onRead: onNewsRead,
     ...(deps.newsHistoryStore ? { historyStore: deps.newsHistoryStore } : {}),
+    stages: { deliver: createNewsDeliverStageFor(speechQueue) },
   }));
 
   const newsReader = define("newsReader", () => new NewsReader({
@@ -439,6 +472,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     onRead: onNewsRead,
     store: newsPipeline.store,
     historyStore: newsPipeline.historyStore,
+    stages: { deliver: createNewsDeliverStageFor(newsBuffer) },
   }));
 
   const newsBufferedReader = define("newsBufferedReader", () => new BufferedReader({

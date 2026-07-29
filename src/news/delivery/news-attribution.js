@@ -22,7 +22,10 @@ export function buildAttributions(researchBundle, candidate = {}) {
   if (sources.length) return sources.map((source) => toAttribution(source, null));
 
   const url = candidate.canonicalUrl ?? candidate.link ?? null;
-  if (!url && !candidate.sourceName) return [];
+  // license.attributionRequiredなcandidateはname/urlが両方欠けていても出典entryを残す —
+  // ここで[]を返すとhasUnattributableRequiredSource()側に判定材料が渡らず、この関数が
+  // 検出すべき「出典表示不可」自体を握りつぶしてしまう (issue #193)。
+  if (!url && !candidate.sourceName && !candidate.license?.attributionRequired) return [];
   return [toAttribution({ sourceName: candidate.sourceName, url }, candidate.license)];
 }
 

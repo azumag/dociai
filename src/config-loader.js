@@ -248,6 +248,25 @@ export function validateConfig(cfg) {
         if (schedule.maxRunsPerHour !== undefined && (typeof schedule.maxRunsPerHour !== "number" || schedule.maxRunsPerHour < 0)) errors.push("news.schedule.maxRunsPerHour は0以上の数値で指定してください");
       }
     }
+    // news.delivery (issue #193): createNewsDeliveryStageのqueue優先度/congestion閾値/
+    // attribution blocking挙動。完全にoptionalで、未指定ならblockOnUnattributableRequiredSource
+    // の既定trueだけが効く (既存挙動には影響しない)。
+    if (cfg.news.delivery !== undefined) {
+      const delivery = cfg.news.delivery;
+      if (!delivery || typeof delivery !== "object") {
+        errors.push("news.delivery はオブジェクトで指定してください");
+      } else {
+        if (delivery.blockOnUnattributableRequiredSource !== undefined && typeof delivery.blockOnUnattributableRequiredSource !== "boolean") {
+          errors.push("news.delivery.blockOnUnattributableRequiredSource は真偽値で指定してください");
+        }
+        if (delivery.deferWhenQueueAbove !== undefined && (typeof delivery.deferWhenQueueAbove !== "number" || delivery.deferWhenQueueAbove < 0)) {
+          errors.push("news.delivery.deferWhenQueueAbove は0以上の数値で指定してください");
+        }
+        if (delivery.priority !== undefined && typeof delivery.priority !== "number") {
+          errors.push("news.delivery.priority は数値で指定してください");
+        }
+      }
+    }
   }
 
   // topics (Todoistなどの配信ネタ)

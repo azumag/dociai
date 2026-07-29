@@ -264,6 +264,48 @@ test("newsReader/topicReader stay gated by config.news.enabled/config.topics.ena
   assert.equal(config.topics.enabled, true, "toggling the main-screen switch must never mutate config");
 });
 
+test("newsPipeline's deliver stage is wired to createNewsDeliveryStage and honors config.news.delivery.blockOnUnattributableRequiredSource (issue #193)", async () => {
+  const unattributableItem = { processingKey: "p1", title: "見出し", license: { name: "CC BY 4.0", attributionRequired: true } };
+  const persona = { id: "p1", name: "P1", voice: {} };
+  const runArgs = { persona, item: unattributableItem, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" };
+
+  const blockingConfig = minimalConfig({ news: { enabled: true, sources: [] } });
+  const { deps: blockingDeps } = fakeDeps();
+  const blockingBundle = await createDociaiRuntimeFactory().createCandidate({ config: blockingConfig, generation: 1, deps: blockingDeps });
+  await assert.rejects(
+    blockingBundle.get("newsPipeline").stages.deliver.run(runArgs),
+    /attribution/,
+    "default (unconfigured) news.delivery must still block an unattributable required source",
+  );
+
+  const warnOnlyConfig = minimalConfig({ news: { enabled: true, sources: [], delivery: { blockOnUnattributableRequiredSource: false } } });
+  const { deps: warnOnlyDeps } = fakeDeps();
+  const warnOnlyBundle = await createDociaiRuntimeFactory().createCandidate({ config: warnOnlyConfig, generation: 1, deps: warnOnlyDeps });
+  const result = await warnOnlyBundle.get("newsPipeline").stages.deliver.run(runArgs);
+  assert.equal(result.status, "accepted", "news.delivery.blockOnUnattributableRequiredSource: false must downgrade the block to a warning and still deliver");
+  // In this real (non-mocked) runtime, the webspeech backend fails synchronously in Node (no Web
+  // Speech API), so by the time enqueue() returns the item may already have moved from
+  // current/pending into history — check whichever bucket actually holds the enqueued id.
+  const snapshot = warnOnlyBundle.get("speechQueue").snapshot();
+  const queued = [snapshot.current, ...snapshot.pending, ...snapshot.history].find((entry) => entry?.id === result.queueItemId);
+  assert.equal(queued?.source, "news", "the wired stage must keep the pre-existing \"news\" source label, not its own \"newstalk\" default, so speech-scheduler.js's per-source pending count still buckets old and new items together (PR #249 review)");
+});
+
+test("newsBufferPipeline's (生成して貯める path, issue #258) deliver stage ALSO blocks an unattributable required source, not just the automatic newsPipeline", async () => {
+  const unattributableItem = { processingKey: "p1", title: "見出し", license: { name: "CC BY 4.0", attributionRequired: true } };
+  const persona = { id: "p1", name: "P1", voice: {} };
+  const runArgs = { persona, item: unattributableItem, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" };
+
+  const config = minimalConfig({ news: { enabled: true, sources: [] } });
+  const { deps } = fakeDeps();
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+  await assert.rejects(
+    bundle.get("newsBufferPipeline").stages.deliver.run(runArgs),
+    /attribution/,
+    "the buffered/pregenerated news path must not bypass the same attribution block the automatic path enforces",
+  );
+});
+
 test("starting a candidate bundle activates the trigger engine and comment sources", async () => {
   // TriggerEngine.start() always binds a "keydown" listener, even with no hotkey triggers
   // configured — same window shim scripts/test/electron-shortcut.test.mjs uses.

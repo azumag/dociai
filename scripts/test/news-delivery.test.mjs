@@ -31,6 +31,14 @@ test("buildAttributions falls back to the candidate's own source when there is n
   assert.deepEqual(buildAttributions({ sources: [] }, {}), []);
 });
 
+test("buildAttributions keeps a required-attribution candidate visible even with no name/URL, so hasUnattributableRequiredSource can still catch it", () => {
+  const candidate = { license: { name: "CC BY 4.0", attributionRequired: true } };
+  const attributions = buildAttributions(null, candidate);
+  assert.equal(attributions.length, 1, "must not silently drop a candidate whose own license requires attribution");
+  assert.equal(attributions[0].attributionRequired, true);
+  assert.equal(hasUnattributableRequiredSource(attributions), true);
+});
+
 test("buildAttributions never leaks the candidate's own license onto unrelated research-bundle sources", () => {
   const research = { sources: [{ id: "s1", url: "https://wikipedia.org/x", sourceName: "Wikipedia" }] };
   const candidate = { sourceName: "CC-licensed feed", license: { name: "CC BY 4.0", attributionRequired: true } };
@@ -130,15 +138,62 @@ test("createNewsDeliveryStage accepts, tags metadata, and reflects a mic-hold as
   assert.deepEqual(result.attribution[0].sourceName, "A");
 });
 
-test("createNewsDeliveryStage throws a retryable PipelineStageError on queue-limit drop", async () => {
+test("createNewsDeliveryStage blocks delivery (non-retryable) when a required-attribution source has no displayable name/URL", async () => {
+  const speechQueue = fakeSpeechQueue();
+  const stage = createNewsDeliveryStage({ speechQueue });
+  const research = { sources: [{ id: "s1", url: null, sourceName: "", license: { name: "CC BY 4.0", attributionRequired: true } }] };
+  const item = { processingKey: "p1", title: "見出し" };
+  const persona = { id: "persona-1", name: "P", voice: {} };
+  await assert.rejects(
+    stage.run({ persona, item, text: "本文", research, modePolicy: { mode: "current" }, runId: "run-1" }),
+    (error) => error instanceof PipelineStageError && error.retryable === false,
+  );
+  assert.equal(speechQueue.enqueued.length, 0, "must not enqueue before the block check");
+});
+
+test("createNewsDeliveryStage blocks delivery when the candidate itself (no research bundle) requires attribution but has no displayable name/URL", async () => {
+  const speechQueue = fakeSpeechQueue();
+  const stage = createNewsDeliveryStage({ speechQueue });
+  const item = { processingKey: "p1", title: "見出し", license: { name: "CC BY 4.0", attributionRequired: true } };
+  const persona = { id: "persona-1", name: "P", voice: {} };
+  await assert.rejects(
+    stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" }),
+    (error) => error instanceof PipelineStageError && error.retryable === false,
+  );
+  assert.equal(speechQueue.enqueued.length, 0, "must not enqueue before the block check");
+});
+
+test("createNewsDeliveryStage downgrades to a warning log (and still delivers) when blockOnUnattributableRequiredSource is false", async () => {
+  const speechQueue = fakeSpeechQueue();
+  const logs = [];
+  const stage = createNewsDeliveryStage({ speechQueue, blockOnUnattributableRequiredSource: false, log: (message, level) => logs.push({ message, level }) });
+  const research = { sources: [{ id: "s1", url: null, sourceName: "", license: { name: "CC BY 4.0", attributionRequired: true } }] };
+  const item = { processingKey: "p1", title: "見出し" };
+  const persona = { id: "persona-1", name: "P", voice: {} };
+  const result = await stage.run({ persona, item, text: "本文", research, modePolicy: { mode: "current" }, runId: "run-1" });
+  assert.equal(result.status, "accepted");
+  assert.equal(speechQueue.enqueued.length, 1);
+  assert.ok(logs.some((entry) => entry.level === "warn" && entry.message.includes("attribution")));
+});
+
+test("createNewsDeliveryStage delivers normally when a required-attribution source DOES have a displayable name/URL", async () => {
+  const speechQueue = fakeSpeechQueue();
+  const stage = createNewsDeliveryStage({ speechQueue });
+  const research = { sources: [{ id: "s1", url: "https://a.example", sourceName: "A", license: { name: "CC BY 4.0", attributionRequired: true } }] };
+  const item = { processingKey: "p1", title: "見出し" };
+  const persona = { id: "persona-1", name: "P", voice: {} };
+  const result = await stage.run({ persona, item, text: "本文", research, modePolicy: { mode: "current" }, runId: "run-1" });
+  assert.equal(result.status, "accepted");
+  assert.equal(speechQueue.enqueued.length, 1);
+});
+
+test("createNewsDeliveryStage does NOT throw on a real-queue-capacity drop — it returns status 'dropped' so the coordinator resets the item to unread instead of eventually blacklisting it via the retry path", async () => {
   const speechQueue = fakeSpeechQueue({ dropNext: true });
   const stage = createNewsDeliveryStage({ speechQueue });
   const item = { processingKey: "p1", title: "見出し" };
   const persona = { id: "persona-1", name: "P", voice: {} };
-  await assert.rejects(
-    stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" }),
-    (error) => error instanceof PipelineStageError && error.retryable === true,
-  );
+  const result = await stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" });
+  assert.deepEqual(result, { status: "dropped", queueItemId: null, commitAllowed: false, reason: "queue-limit", attribution: [] });
 });
 
 test("createNewsDeliveryStage throws a non-retryable PipelineStageError before enqueueing a duplicate (mode, candidate) already pending", async () => {
@@ -162,7 +217,7 @@ test("createNewsDeliveryStage also treats the currently-speaking item (not just 
   assert.equal(speechQueue.enqueued.length, 0);
 });
 
-test("createNewsDeliveryStage defers when the newstalk queue is above the configured congestion threshold", async () => {
+test("createNewsDeliveryStage defers (without throwing) when the newstalk queue is above the configured congestion threshold — congestion must reset to unread, not consume a retry attempt toward a permanent blacklist (PR #249 review)", async () => {
   const items = [
     { source: "newstalk", state: "waiting", metadata: { candidateId: "other-1", mode: "current" } },
     { source: "newstalk", state: "waiting", metadata: { candidateId: "other-2", mode: "current" } },
@@ -171,10 +226,8 @@ test("createNewsDeliveryStage defers when the newstalk queue is above the config
   const stage = createNewsDeliveryStage({ speechQueue, deferWhenQueueAbove: 1 });
   const item = { processingKey: "p1", title: "見出し" };
   const persona = { id: "persona-1", name: "P", voice: {} };
-  await assert.rejects(
-    stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" }),
-    (error) => error instanceof PipelineStageError && error.retryable === true,
-  );
+  const result = await stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" });
+  assert.deepEqual(result, { status: "dropped", queueItemId: null, commitAllowed: false, reason: "queue-congested", attribution: [] });
   assert.equal(speechQueue.enqueued.length, 0);
 });
 
