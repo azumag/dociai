@@ -48,9 +48,11 @@ export class BufferedReader {
     if (!this.buffer.size) await this.generate(context);
     const queued = this.buffer.play();
     if (!queued) return null;
-    // Start replenishment without delaying the just-requested playback. Source state was
-    // committed when the generated item entered the buffer, so this cannot duplicate it.
-    void this.generate(context).catch((error) => this.log(`読み上げ用の次の項目を生成できませんでした: ${error.message}`, "warn"));
+    // Awaited (not fire-and-forget): callers such as AutomationCoordinator resolve their
+    // busy/onComplete state from this promise, and status()'s read count only reflects a
+    // replenish once it lands. A detached (`void`) replenish previously left both stuck
+    // mid-flight from the caller's perspective even after the item had actually landed.
+    await this.generate(context).catch((error) => this.log(`読み上げ用の次の項目を生成できませんでした: ${error.message}`, "warn"));
     return queued;
   }
 
