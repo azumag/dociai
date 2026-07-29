@@ -463,3 +463,20 @@ test("SpeechQueue.enqueue passes an optional metadata field through to the retur
   assert.equal(plain.metadata, null);
   queue.dispose();
 });
+
+test("SpeechQueue.enqueue fires onDelivered once the item reaches the real queue, but never on a drop", async () => {
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
+  let deliveredCount = 0;
+  const accepted = queue.enqueue({ text: "accepted", voice: { engine: "webspeech" }, onDelivered: () => deliveredCount++ });
+  assert.equal(accepted.state, "speaking");
+  assert.equal(deliveredCount, 1);
+
+  // A deadline already in the past is an unconditional drop (SpeechScheduler#enqueue's very
+  // first check), so this deterministically exercises the "never on a drop" half without
+  // depending on any queue-depth policy default.
+  const dropped = queue.enqueue({ text: "expired", voice: { engine: "webspeech" }, deadlineAt: Date.now() - 1000, onDelivered: () => deliveredCount++ });
+  assert.equal(dropped.state, "dropped");
+  assert.equal(deliveredCount, 1, "a dropped enqueue must never fire onDelivered");
+  queue.dispose();
+});

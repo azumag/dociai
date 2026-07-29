@@ -49,3 +49,28 @@ test("Play generates then immediately consumes an empty buffer, whose state surv
   const reloaded = new GeneratedSpeechBuffer({ speechQueue: { enqueue: (item) => { played.push(item); return { state: "waiting" }; } }, state });
   assert.equal(reloaded.play().text, "kept-across-reload");
 });
+
+test("enqueue() never fires onDelivered — play() only forwards it to the real speechQueue, which decides when to fire it", () => {
+  let delivered = 0;
+  const state = { items: [] };
+  // Mimics SpeechQueue.enqueue()'s real contract (src/speech-queue.js): fire onDelivered once
+  // the item genuinely reaches the real queue. GeneratedSpeechBuffer itself never touches
+  // onDelivered — it only forwards the item, onDelivered included, at play() time.
+  const buffer = new GeneratedSpeechBuffer({ speechQueue: { enqueue: (item) => { item.onDelivered?.(); return { state: "waiting" }; } }, state });
+
+  buffer.enqueue({ text: "held", source: "news", onDelivered: () => delivered++ });
+  assert.equal(delivered, 0, "buffering an item must not broadcast onRead/complete external side effects yet");
+
+  buffer.play();
+  assert.equal(delivered, 1, "play() must forward the item (onDelivered included) to the real queue");
+});
+
+test("play() never fires onDelivered when the real speechQueue drops the item", () => {
+  let delivered = 0;
+  const state = { items: [{ text: "will-drop", source: "news", onDelivered: () => delivered++ }] };
+  const buffer = new GeneratedSpeechBuffer({ speechQueue: { enqueue: () => ({ state: "dropped" }) }, state, log: () => {} });
+
+  const item = buffer.play();
+  assert.equal(item.text, "will-drop", "play() still returns the dequeued item so the caller knows what was lost");
+  assert.equal(delivered, 0, "a dropped real-queue enqueue must never fire onDelivered (never spoken)");
+});

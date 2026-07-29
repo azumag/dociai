@@ -135,9 +135,13 @@ export class NewsPipelineCoordinator {
           // modePolicy.research: "none") でもcandidate自身をfallback sourceとして返す —
           // 出典表示 (音声本文へはURLを読ませない) はどちらの経路でも常に取れる (issue #193)。
           const attribution = buildAttributions(research, item);
-          this.onRead({ persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle, attribution });
           guardPipelineContext(context);
-          await this.stages.deliver.run({ persona, item, text: spokenText, research, modePolicy, runId: context.requestId ?? null }, context);
+          // onDelivered fires once this reaches the REAL speech queue (SpeechQueue.enqueue()),
+          // never merely on buffer acceptance — see GeneratedSpeechBuffer/SpeechQueue.enqueue()
+          // (issue: pregenerated buffer). Firing onRead here unconditionally would broadcast the
+          // console/overlay "last read" state and its attribution for an item that may never
+          // actually be spoken (buffered-but-unplayed, dropped, or discarded on app exit).
+          await this.stages.deliver.run({ persona, item, text: spokenText, research, modePolicy, runId: context.requestId ?? null, onDelivered: () => this.onRead({ persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle, attribution }) }, context);
           guardPipelineContext(context);
           this.store.markRead(item.processingKey, this.generation, this.clock());
           this.lastRunResult.succeeded++;

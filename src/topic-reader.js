@@ -107,11 +107,13 @@ export class TopicReader {
           if (!String(text ?? "").trim()) throw Object.assign(new Error("話題コメントが空です"), { kind: "empty" });
           this.#guard(context);
           if (isOutputLimitFinishReason(result.finishReason)) this.log(buildOutputLimitWarning(result.finishReason, persona.connector), "warn");
-          this.onRead({ persona, item, text, debugText });
           this.#guard(context);
-          const queued = this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "topics" });
+          // onDelivered fires once this reaches the REAL speech queue, never merely on
+          // pregenerated-buffer acceptance (see GeneratedSpeechBuffer / SpeechQueue.enqueue()) —
+          // otherwise the console/overlay "last read" broadcast and the Todoist task completion
+          // (an external side effect) would both fire for an item that may never be spoken.
+          const queued = this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "topics", onDelivered: () => { this.onRead({ persona, item, text, debugText }); void this.completeTodoistTask(item, context); } });
           if (queued?.state === "dropped") this.log(`話題音声はキュー上限で破棄されました [${item.title}]`, "warn");
-          await this.completeTodoistTask(item, context);
           this.#guard(context);
           this.store.markRead(item.processingKey, this.generation, this.clock());
           this.lastRunResult.succeeded++;

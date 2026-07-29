@@ -113,10 +113,16 @@ export class SpeechQueue {
     return added;
   }
 
-  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt, commentId, metadata }) {
+  // onDelivered (optional): fired synchronously once this item has actually reached the real
+  // queue (never on drop). GeneratedSpeechBuffer (src/readers/generated-speech-buffer.js) relies
+  // on this: it forwards a caller-supplied onDelivered through its own enqueue() untouched, so a
+  // pipeline's onRead/side-effect callback fires at real-queue time whether or not a
+  // pregenerated-buffer hop sits in between — the buffer itself never has to know the field exists.
+  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt, commentId, metadata, onDelivered }) {
     const engines = [...this.scheduler.pending, ...(this.current ? [this.current] : [])].map((item) => item.voice?.engine ?? this.#defaultEngine());
     this.backends.validateMix([...engines, voice?.engine ?? this.#defaultEngine()]);
     const item = this.scheduler.enqueue({ personaId, personaName, text, voice, source, priority, deadlineAt, commentId, metadata });
+    if (item.state !== "dropped") onDelivered?.();
     this.#notify(item);
     this.#pump();
     return item;
