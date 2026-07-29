@@ -163,6 +163,24 @@ test("a throwing deliver stage leaves the item unread/retryable instead of commi
   assert.equal(store.get(item.processingKey).state, "retry_wait");
 });
 
+test("a dropped deliver result (legacy adapter's non-throwing { queued: { state: 'dropped' } }) resets the item to unread instead of committing, and never fires onRead", async () => {
+  const item = { guid: "g1", title: "t1", processingKey: "news:g1", sourceName: "s" };
+  let onReadCalls = 0;
+  const { coordinator, store } = makeHarness({
+    onRead: () => onReadCalls++,
+    impls: {
+      acquire: async () => [item],
+      // Mirrors legacy-news-adapter.js's deliver(): a drop is reported by return value, not a
+      // throw — onDelivered (news-pipeline-coordinator.js's onRead wiring) never fires for it.
+      deliver: async () => ({ queued: { state: "dropped" } }),
+    },
+  });
+  const result = await coordinator.run({ generation: 1 });
+  assert.equal(result.status, "delivered");
+  assert.equal(store.get(item.processingKey).state, "unread", "a dropped item must reset to unread, not be silently marked read/delivered forever");
+  assert.equal(onReadCalls, 0, "onRead must never fire for an item that was dropped before reaching the real queue");
+});
+
 test("a failing candidate does not block later candidates in the same run", async () => {
   const itemA = { guid: "a", title: "a", processingKey: "news:a", sourceName: "s" };
   const itemB = { guid: "b", title: "b", processingKey: "news:b", sourceName: "s" };

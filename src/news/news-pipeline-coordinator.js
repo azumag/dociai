@@ -149,8 +149,19 @@ export class NewsPipelineCoordinator {
           // through an old, no-longer-current isCurrent(). The buffer instead fires ITS OWN
           // onDelivered (rebound to the current generation after each reload) with this payload.
           const deliveryPayload = { persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle, attribution };
-          await this.stages.deliver.run({ persona, item, text: spokenText, research, modePolicy, runId: context.requestId ?? null, onDelivered: () => this.onRead(deliveryPayload), deliveryPayload }, context);
+          const deliverResult = await this.stages.deliver.run({ persona, item, text: spokenText, research, modePolicy, runId: context.requestId ?? null, onDelivered: () => this.onRead(deliveryPayload), deliveryPayload }, context);
           guardPipelineContext(context);
+          // The legacy deliver stage (createDeliverStage, the default) never throws on a
+          // real-queue drop — it just logs and returns { queued: { state: "dropped" } } — and
+          // onDelivered never fires for a drop (SpeechQueue.enqueue()'s own contract), so this
+          // item was never actually spoken. Mirror TopicReader's drop handling: reset back to
+          // unread instead of permanently hiding it in read-state/persistent dedupe history with
+          // no broadcast and no retry. (createNewsDeliveryStage, the newer opt-in stage, instead
+          // throws on drop and is already handled by the catch block's retry path below.)
+          if (deliverResult?.queued?.state === "dropped") {
+            this.store.resetUnread(item.processingKey, this.generation, this.clock());
+            continue;
+          }
           this.store.markRead(item.processingKey, this.generation, this.clock());
           this.lastRunResult.succeeded++;
           this.lastSuccessAt = new Date(this.clock());

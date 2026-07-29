@@ -537,9 +537,9 @@ function renderNewsPanel() {
   const configEnabled = !!state.config?.news?.enabled;
   toggle.checked = state.newsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
-  const newsStatus = newsBufferedReader?.status();
-  $("#btn-news-read").disabled = !newsBufferedReader?.enabled || newsBufferedReader?.busy;
-  $("#btn-news-generate").disabled = !newsBufferedReader?.enabled || newsBufferedReader?.busy || newsStatus?.bufferedCount >= 1;
+  const newsStatus = mergeReaderStatus(newsBufferedReader?.status(), newsReader?.status());
+  $("#btn-news-read").disabled = !newsBufferedReader?.enabled || newsStatus?.busy;
+  $("#btn-news-generate").disabled = !newsBufferedReader?.enabled || newsStatus?.busy || newsStatus?.bufferedCount >= 1;
   renderNewsAttribution($("#news-last-attribution"));
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
@@ -579,10 +579,10 @@ function renderTopicPanel() {
   const configEnabled = !!state.config?.topics?.enabled;
   toggle.checked = state.topicsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
-  const topicStatus = topicBufferedReader?.status();
-  $("#btn-topic-read").disabled = !topicBufferedReader?.enabled || topicBufferedReader?.busy;
-  $("#btn-topic-generate").disabled = !topicBufferedReader?.enabled || topicBufferedReader?.busy || topicStatus?.bufferedCount >= 1;
-  $("#topic-busy").hidden = !topicBufferedReader?.busy;
+  const topicStatus = mergeReaderStatus(topicBufferedReader?.status(), topicReader?.status());
+  $("#btn-topic-read").disabled = !topicBufferedReader?.enabled || topicStatus?.busy;
+  $("#btn-topic-generate").disabled = !topicBufferedReader?.enabled || topicStatus?.busy || topicStatus?.bufferedCount >= 1;
+  $("#topic-busy").hidden = !topicStatus?.busy;
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
     failures.replaceChildren();
@@ -604,6 +604,19 @@ function renderTopicPanel() {
   // Same reasoning as renderNewsPanel above: retryNow/skip and retry-and-rerun must run against
   // the unwrapped topicReader, not topicBufferedReader.
   renderReaderFailures(failures, topicReader, s, () => { renderTopicPanel(); appRuntime.getComponent("automationCoordinator")?.run("topics", appRuntime.getComponent("topicReader")); }, renderTopicPanel);
+}
+
+// news/topic panels read from TWO separate reader/pipeline instances: newsBufferedReader/
+// topicBufferedReader (生成して貯める/再生, its bufferedCount comes from here) and the
+// unwrapped newsReader/topicReader that TriggerEngine/NewsScheduleRunner actually run. Their
+// store (counts/failures/nextRetryAt) is shared and therefore identical either way, but busy/
+// lastRunAt/lastSuccessAt/lastRunResult are per-instance execution state — without merging them,
+// an automatic run's 話題を生成中… / 最終実行 never shows up in the panel at all.
+function mergeReaderStatus(bufferedStatus, autoStatus) {
+  if (!bufferedStatus || !autoStatus) return bufferedStatus ?? autoStatus ?? null;
+  const autoIsNewer = (autoStatus.lastRunAt?.getTime?.() ?? 0) > (bufferedStatus.lastRunAt?.getTime?.() ?? 0);
+  const newer = autoIsNewer ? autoStatus : bufferedStatus;
+  return { ...bufferedStatus, busy: bufferedStatus.busy || autoStatus.busy, lastRunAt: newer.lastRunAt, lastSuccessAt: newer.lastSuccessAt, lastRunResult: newer.lastRunResult };
 }
 
 function readerLifecycleText(trigger, status) {
