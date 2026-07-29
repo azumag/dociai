@@ -531,14 +531,15 @@ function renderNewsAttribution(container) {
 function renderNewsPanel() {
   const el = $("#news-status");
   const failures = $("#news-failures");
-  const newsReader = appRuntime.getComponent("newsBufferedReader");
+  const newsBufferedReader = appRuntime.getComponent("newsBufferedReader");
+  const newsReader = appRuntime.getComponent("newsReader");
   const toggle = $("#chk-news-enabled");
   const configEnabled = !!state.config?.news?.enabled;
   toggle.checked = state.newsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
-  const newsStatus = newsReader?.status();
-  $("#btn-news-read").disabled = !newsReader?.enabled || newsReader?.busy;
-  $("#btn-news-generate").disabled = !newsReader?.enabled || newsReader?.busy || newsStatus?.bufferedCount >= 1;
+  const newsStatus = newsBufferedReader?.status();
+  $("#btn-news-read").disabled = !newsBufferedReader?.enabled || newsBufferedReader?.busy;
+  $("#btn-news-generate").disabled = !newsBufferedReader?.enabled || newsBufferedReader?.busy || newsStatus?.bufferedCount >= 1;
   renderNewsAttribution($("#news-last-attribution"));
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
@@ -558,24 +559,30 @@ function renderNewsPanel() {
   }
   const trigger = state.config.news.trigger ? `トリガー: ${state.config.news.trigger}` : "トリガー未設定";
   el.textContent = readerLifecycleText(trigger, s);
-  // Retry must run the unwrapped newsReader (not newsBufferedReader): BufferedReader.run()
-  // plays whatever the buffer already holds first, which could speak an unrelated item instead
-  // of actually retrying the failed one.
+  // retryNow/skip (inside renderReaderFailures) and the retry-and-rerun callback must both run
+  // against the unwrapped newsReader, never newsBufferedReader: newsReader's `generation` is kept
+  // in sync by every automatic run (the source of these failure records), while
+  // newsBufferedReader's internal pipeline only advances its OWN generation when the user presses
+  // 生成して貯める/再生. Passing the buffered reader here would make retryNow/skip silently no-op
+  // (MemoryItemProcessingStore requires an exact generation match) on a failure the automatic
+  // path produced. Separately, BufferedReader.run() also plays whatever the buffer already holds
+  // first, which could speak an unrelated item instead of actually retrying the failed one.
   renderReaderFailures(failures, newsReader, s, () => { renderNewsPanel(); appRuntime.getComponent("automationCoordinator")?.run("news", appRuntime.getComponent("newsReader")); }, renderNewsPanel);
 }
 
 function renderTopicPanel() {
   const el = $("#topic-status");
   const failures = $("#topic-failures");
-  const topicReader = appRuntime.getComponent("topicBufferedReader");
+  const topicBufferedReader = appRuntime.getComponent("topicBufferedReader");
+  const topicReader = appRuntime.getComponent("topicReader");
   const toggle = $("#chk-topics-enabled");
   const configEnabled = !!state.config?.topics?.enabled;
   toggle.checked = state.topicsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
-  const topicStatus = topicReader?.status();
-  $("#btn-topic-read").disabled = !topicReader?.enabled || topicReader?.busy;
-  $("#btn-topic-generate").disabled = !topicReader?.enabled || topicReader?.busy || topicStatus?.bufferedCount >= 1;
-  $("#topic-busy").hidden = !topicReader?.busy;
+  const topicStatus = topicBufferedReader?.status();
+  $("#btn-topic-read").disabled = !topicBufferedReader?.enabled || topicBufferedReader?.busy;
+  $("#btn-topic-generate").disabled = !topicBufferedReader?.enabled || topicBufferedReader?.busy || topicStatus?.bufferedCount >= 1;
+  $("#topic-busy").hidden = !topicBufferedReader?.busy;
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
     failures.replaceChildren();
@@ -594,8 +601,8 @@ function renderTopicPanel() {
   }
   const trigger = state.config.topics.trigger ? `トリガー: ${state.config.topics.trigger}` : "トリガー未設定";
   el.textContent = readerLifecycleText(trigger, s);
-  // Same reasoning as the news retry callback above: retry the unwrapped topicReader, not the
-  // buffered one.
+  // Same reasoning as renderNewsPanel above: retryNow/skip and retry-and-rerun must run against
+  // the unwrapped topicReader, not topicBufferedReader.
   renderReaderFailures(failures, topicReader, s, () => { renderTopicPanel(); appRuntime.getComponent("automationCoordinator")?.run("topics", appRuntime.getComponent("topicReader")); }, renderTopicPanel);
 }
 
