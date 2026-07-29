@@ -30,7 +30,7 @@ function makeHarness({ config = baseConfig(), store = new MemoryItemProcessingSt
     research: wrap("research", impls.research ?? (async () => null)),
     generate: wrap("generate", impls.generate ?? (async () => ({ text: "generated", debugText: "debug" }))),
     quality: wrap("quality", impls.quality ?? (async () => ({ passed: true, reasons: [] }))),
-    deliver: wrap("deliver", impls.deliver ?? (async () => ({ queued: { state: "waiting" } }))),
+    deliver: wrap("deliver", impls.deliver ?? (async (input) => { input.onDelivered?.(); return { queued: { state: "waiting" } }; })),
   };
   const adapter = { resolvePersona: () => persona, resolveConnector: () => connector, canDeliver };
   const coordinator = new NewsPipelineCoordinator({ getConfig: () => config, adapter, stages, store, clock, log, onRead, maxRewrites, ...(historyStore ? { historyStore } : {}) });
@@ -163,6 +163,24 @@ test("a throwing deliver stage leaves the item unread/retryable instead of commi
   assert.equal(store.get(item.processingKey).state, "retry_wait");
 });
 
+test("a dropped deliver result (legacy adapter's non-throwing { queued: { state: 'dropped' } }) resets the item to unread instead of committing, and never fires onRead", async () => {
+  const item = { guid: "g1", title: "t1", processingKey: "news:g1", sourceName: "s" };
+  let onReadCalls = 0;
+  const { coordinator, store } = makeHarness({
+    onRead: () => onReadCalls++,
+    impls: {
+      acquire: async () => [item],
+      // Mirrors legacy-news-adapter.js's deliver(): a drop is reported by return value, not a
+      // throw — onDelivered (news-pipeline-coordinator.js's onRead wiring) never fires for it.
+      deliver: async () => ({ queued: { state: "dropped" } }),
+    },
+  });
+  const result = await coordinator.run({ generation: 1 });
+  assert.equal(result.status, "delivered");
+  assert.equal(store.get(item.processingKey).state, "unread", "a dropped item must reset to unread, not be silently marked read/delivered forever");
+  assert.equal(onReadCalls, 0, "onRead must never fire for an item that was dropped before reaching the real queue");
+});
+
 test("a failing candidate does not block later candidates in the same run", async () => {
   const itemA = { guid: "a", title: "a", processingKey: "news:a", sourceName: "s" };
   const itemB = { guid: "b", title: "b", processingKey: "news:b", sourceName: "s" };
@@ -284,7 +302,7 @@ test("createNewsPipelineCoordinator wires the legacy adapter end-to-end for mock
     getConnector: () => ({ chat: async () => ({ text: "ok" }) }),
     personaRouter: { get: () => persona, defaultPersona: () => persona },
     contextBuilder: { build: () => ({ messages: [{ role: "user", content: "news" }], debugText: "debug" }) },
-    speechQueue: { enqueue: (item) => { spoken.push(item); return { state: "waiting" }; } },
+    speechQueue: { enqueue: (item) => { spoken.push(item); item.onDelivered?.(); return { state: "waiting" }; } },
   });
   const result = await coordinator.run({ generation: 1 });
   assert.equal(result.status, "delivered");
@@ -310,7 +328,7 @@ test("random news persona is resolved once per item and stays identical across c
     getConnector: (connectorId) => ({ chat: async () => { connectorCalls.push(connectorId); return { text: `text-${connectorId}` }; } }),
     personaRouter: { get: (id) => personas[id] ?? null, defaultPersona: () => personas.a },
     contextBuilder: { build: ({ persona }) => { promptPersonas.push(persona.id); return { messages: [{ role: "user", content: persona.systemPrompt }], debugText: persona.id }; } },
-    speechQueue: { enqueue: (item) => { speech.push(item); return { ...item, state: "waiting" }; } },
+    speechQueue: { enqueue: (item) => { speech.push(item); item.onDelivered?.(); return { ...item, state: "waiting" }; } },
     onRead: ({ persona, debugText }) => reads.push({ personaId: persona.id, debugText }),
     random: () => sequence[randomIndex++],
     fetchAll: async () => [
@@ -382,7 +400,7 @@ test("a retry is a new item attempt and re-resolves the random news persona", as
     } }),
     personaRouter: { get: (id) => personas[id] ?? null, defaultPersona: () => personas.a },
     contextBuilder: { build: ({ persona }) => ({ messages: [], debugText: persona.id }) },
-    speechQueue: { enqueue: (entry) => { speech.push(entry); return { state: "waiting" }; } },
+    speechQueue: { enqueue: (entry) => { speech.push(entry); entry.onDelivered?.(); return { state: "waiting" }; } },
     onRead: ({ persona }) => reads.push(persona.id),
     random: () => samples[randomIndex++],
     fetchAll: async () => [item],

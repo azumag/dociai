@@ -76,7 +76,7 @@ export class TopicReader {
       const now = this.clock();
       for (const item of items) this.store.ensure({ ...item, key: item.processingKey }, this.generation, now);
       const candidateKeys = new Set(this.store.candidates(this.generation, now).map((record) => record.key));
-      const picks = items.filter((item) => candidateKeys.has(item.processingKey)).slice(0, topics.maxItems ?? 3);
+      const picks = items.filter((item) => candidateKeys.has(item.processingKey)).slice(0, context.maxItems ?? topics.maxItems ?? 3);
       this.lastRunResult = { candidates: candidateKeys.size, processed: 0, succeeded: 0, retryScheduled: 0, failed: 0 };
       this.log(`話題候補 ${items.length}件 (再処理可能 ${candidateKeys.size}件、読み上げ ${picks.length}件)`);
       if (!picks.length) return;
@@ -107,12 +107,29 @@ export class TopicReader {
           if (!String(text ?? "").trim()) throw Object.assign(new Error("話題コメントが空です"), { kind: "empty" });
           this.#guard(context);
           if (isOutputLimitFinishReason(result.finishReason)) this.log(buildOutputLimitWarning(result.finishReason, persona.connector), "warn");
-          this.onRead({ persona, item, text, debugText });
           this.#guard(context);
-          const queued = this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "topics" });
-          if (queued?.state === "dropped") this.log(`話題音声はキュー上限で破棄されました [${item.title}]`, "warn");
-          await this.completeTodoistTask(item, context);
+          // onDelivered fires once this reaches the REAL speech queue, never merely on
+          // pregenerated-buffer acceptance (see GeneratedSpeechBuffer / SpeechQueue.enqueue()) —
+          // otherwise the console/overlay "last read" broadcast and the Todoist task completion
+          // (an external side effect) would both fire for an item that may never be spoken.
+          // completeTodoistTask is detached (not awaited): it self-logs everything except a
+          // cancellation, which it rethrows — catch that here instead of an unhandled rejection.
+          // deliveryPayload mirrors onDelivered's onRead data as plain data (see the equivalent
+          // news-pipeline-coordinator.js comment) so GeneratedSpeechBuffer can rebind both this
+          // and the Todoist completion to the CURRENT generation after a config reload, instead
+          // of replaying this specific run's (possibly stale) closure.
+          const deliveryPayload = { persona, item, text, debugText };
+          const queued = this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "topics", onDelivered: () => { this.onRead(deliveryPayload); this.completeTodoistTask(item, context).catch((error) => { if (!isCancellation(error)) this.log(`Todoistタスクの完了処理に失敗しました [${item.title}]: ${error.message}`, "warn"); }); }, deliveryPayload });
           this.#guard(context);
+          // onDelivered (onRead + Todoist completion) only fires when queued.state !== "dropped"
+          // (SpeechQueue.enqueue()'s own contract), so a drop must not markRead either — that
+          // would permanently hide an item that was never actually spoken and whose Todoist task
+          // was never closed. Reset it back to unread instead so a later run can retry it.
+          if (queued?.state === "dropped") {
+            this.log(`話題音声はキュー上限で破棄されました [${item.title}]`, "warn");
+            this.store.resetUnread(item.processingKey, this.generation, this.clock());
+            continue;
+          }
           this.store.markRead(item.processingKey, this.generation, this.clock());
           this.lastRunResult.succeeded++;
           this.lastSuccessAt = new Date(this.clock());

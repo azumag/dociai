@@ -70,7 +70,7 @@ export class NewsPipelineCoordinator {
       const items = await this.stages.acquire.run(null, context);
       diagnostics.candidateCounts.acquired = items.length;
 
-      const { picks, eligibleCount, stats: filterStats, keysByProcessingKey } = await this.stages.select.run({ items, generation: this.generation, maxItems: news.maxItems ?? 3 }, context);
+      const { picks, eligibleCount, stats: filterStats, keysByProcessingKey } = await this.stages.select.run({ items, generation: this.generation, maxItems: context.maxItems ?? news.maxItems ?? 3 }, context);
       diagnostics.candidateCounts.filtered = eligibleCount;
       diagnostics.candidateCounts.eligible = picks.length;
       diagnostics.filterStats = filterStats ?? null;
@@ -135,10 +135,33 @@ export class NewsPipelineCoordinator {
           // modePolicy.research: "none") でもcandidate自身をfallback sourceとして返す —
           // 出典表示 (音声本文へはURLを読ませない) はどちらの経路でも常に取れる (issue #193)。
           const attribution = buildAttributions(research, item);
-          this.onRead({ persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle, attribution });
           guardPipelineContext(context);
-          await this.stages.deliver.run({ persona, item, text: spokenText, research, modePolicy, runId: context.requestId ?? null }, context);
+          // onDelivered fires once this reaches the REAL speech queue (SpeechQueue.enqueue()),
+          // never merely on buffer acceptance — see GeneratedSpeechBuffer/SpeechQueue.enqueue()
+          // (issue: pregenerated buffer). Firing onRead here unconditionally would broadcast the
+          // console/overlay "last read" state and its attribution for an item that may never
+          // actually be spoken (buffered-but-unplayed, dropped, or discarded on app exit).
+          //
+          // deliveryPayload carries the SAME plain data as onDelivered's closure, but as data,
+          // not a closure over `this`/generation. A pregenerated buffer (GeneratedSpeechBuffer)
+          // deliberately discards onDelivered on entry — its state can survive a config reload
+          // into a fresh generation, and replaying a stale closure would re-broadcast onRead
+          // through an old, no-longer-current isCurrent(). The buffer instead fires ITS OWN
+          // onDelivered (rebound to the current generation after each reload) with this payload.
+          const deliveryPayload = { persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle, attribution };
+          const deliverResult = await this.stages.deliver.run({ persona, item, text: spokenText, research, modePolicy, runId: context.requestId ?? null, onDelivered: () => this.onRead(deliveryPayload), deliveryPayload }, context);
           guardPipelineContext(context);
+          // The legacy deliver stage (createDeliverStage, the default) never throws on a
+          // real-queue drop — it just logs and returns { queued: { state: "dropped" } } — and
+          // onDelivered never fires for a drop (SpeechQueue.enqueue()'s own contract), so this
+          // item was never actually spoken. Mirror TopicReader's drop handling: reset back to
+          // unread instead of permanently hiding it in read-state/persistent dedupe history with
+          // no broadcast and no retry. (createNewsDeliveryStage, the newer opt-in stage, instead
+          // throws on drop and is already handled by the catch block's retry path below.)
+          if (deliverResult?.queued?.state === "dropped") {
+            this.store.resetUnread(item.processingKey, this.generation, this.clock());
+            continue;
+          }
           this.store.markRead(item.processingKey, this.generation, this.clock());
           this.lastRunResult.succeeded++;
           this.lastSuccessAt = new Date(this.clock());
