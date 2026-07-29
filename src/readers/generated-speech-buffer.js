@@ -2,11 +2,18 @@
 // That matches the existing readers' successful-delivery transition and prevents the next
 // replenish attempt from generating the same news item or Todoist task again.
 export class GeneratedSpeechBuffer {
-  constructor({ speechQueue, state = { items: [] }, capacity = 1, log = () => {} }) {
+  // onDelivered (optional): fires with an item's `deliveryPayload` once that item reaches the
+  // real speech queue (never on drop). Bound by whichever generation currently owns this buffer
+  // (see runtime-factory.js) — reassign `buffer.onDelivered` after a config reload rebuilds this
+  // buffer with the SAME persisted state.items. That is what lets a buffered item that survives
+  // a reload still broadcast onRead / complete its Todoist task through the CURRENT generation's
+  // isCurrent()/handlers when it is eventually played, instead of a stale one from generate time.
+  constructor({ speechQueue, state = { items: [] }, capacity = 1, log = () => {}, onDelivered = null }) {
     this.speechQueue = speechQueue;
     this.state = state;
     this.capacity = capacity;
     this.log = log;
+    this.onDelivered = onDelivered;
     this.state.items ??= [];
   }
 
@@ -15,7 +22,13 @@ export class GeneratedSpeechBuffer {
 
   enqueue(input) {
     if (this.full) return { state: "dropped" };
-    const item = { ...input, voice: input.voice ? { ...input.voice } : input.voice };
+    // A caller-supplied onDelivered closure is deliberately dropped here, never stored: it may
+    // capture a specific generation's isCurrent()/onRead, and this buffer's state.items can
+    // survive a config reload into a NEW generation (see constructor comment). Only the plain
+    // deliveryPayload (if any) is kept — play() below fires THIS buffer's own onDelivered, bound
+    // fresh by whichever generation currently owns it, instead of replaying a stale closure.
+    const { onDelivered: _ignored, ...rest } = input;
+    const item = { ...rest, voice: input.voice ? { ...input.voice } : input.voice };
     this.state.items.push(item);
     return { state: "waiting" };
   }
@@ -23,11 +36,12 @@ export class GeneratedSpeechBuffer {
   play() {
     const item = this.state.items.shift();
     if (!item) return null;
+    const onDelivered = this.onDelivered ? () => this.onDelivered(item.deliveryPayload) : undefined;
     // The item was already committed to its source (history/markRead) when it entered this
     // buffer, so a drop here (real-queue deadline/overflow, src/speech/speech-scheduler.js) is
     // otherwise silent and unrecoverable — it will never be spoken and never regenerated. Log
     // it so it is at least visible, even though it isn't retried.
-    const result = this.speechQueue?.enqueue(item);
+    const result = this.speechQueue?.enqueue({ ...item, onDelivered });
     if (result?.state === "dropped") this.log(`事前生成した読み上げがキュー上限/期限切れで破棄されました: ${item.text ?? ""}`.slice(0, 200), "warn");
     return item;
   }

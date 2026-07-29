@@ -558,7 +558,10 @@ function renderNewsPanel() {
   }
   const trigger = state.config.news.trigger ? `トリガー: ${state.config.news.trigger}` : "トリガー未設定";
   el.textContent = readerLifecycleText(trigger, s);
-  renderReaderFailures(failures, newsReader, s, () => { renderNewsPanel(); appRuntime.getComponent("automationCoordinator")?.run("news", appRuntime.getComponent("newsBufferedReader")); }, renderNewsPanel);
+  // Retry must run the unwrapped newsReader (not newsBufferedReader): BufferedReader.run()
+  // plays whatever the buffer already holds first, which could speak an unrelated item instead
+  // of actually retrying the failed one.
+  renderReaderFailures(failures, newsReader, s, () => { renderNewsPanel(); appRuntime.getComponent("automationCoordinator")?.run("news", appRuntime.getComponent("newsReader")); }, renderNewsPanel);
 }
 
 function renderTopicPanel() {
@@ -591,7 +594,9 @@ function renderTopicPanel() {
   }
   const trigger = state.config.topics.trigger ? `トリガー: ${state.config.topics.trigger}` : "トリガー未設定";
   el.textContent = readerLifecycleText(trigger, s);
-  renderReaderFailures(failures, topicReader, s, () => { renderTopicPanel(); appRuntime.getComponent("automationCoordinator")?.run("topics", appRuntime.getComponent("topicBufferedReader")); }, renderTopicPanel);
+  // Same reasoning as the news retry callback above: retry the unwrapped topicReader, not the
+  // buffered one.
+  renderReaderFailures(failures, topicReader, s, () => { renderTopicPanel(); appRuntime.getComponent("automationCoordinator")?.run("topics", appRuntime.getComponent("topicReader")); }, renderTopicPanel);
 }
 
 function readerLifecycleText(trigger, status) {

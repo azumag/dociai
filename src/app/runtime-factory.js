@@ -13,6 +13,7 @@ import { createNewsPipelineCoordinator } from "../news/news-pipeline-coordinator
 import { NewsScheduleRunner } from "../news/delivery/news-schedule-runner.js";
 import { TopicReader } from "../topic-reader.js";
 import { BufferedReader, GeneratedSpeechBuffer } from "../readers/generated-speech-buffer.js";
+import { isCancellation } from "../runtime/request-registry.js";
 import { TriggerEngine } from "../trigger-engine.js";
 import { ResponseCoordinator } from "./response-coordinator.js";
 import { AutomationCoordinator } from "./automation-coordinator.js";
@@ -387,6 +388,16 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   generatedBufferStates.set("news", newsBuffer.state);
   generatedBufferStates.set("topics", topicBuffer.state);
 
+  // Shared by every reader below (automatic AND buffered) so onDelivered/deliveryPayload always
+  // resolve through THIS generation's isCurrent()/deps.onNewsRead — never one captured by an
+  // earlier generation. That matters specifically for newsBuffer/topicBuffer.onDelivered
+  // (bound below, after newsReader/topicReader exist): their state.items persists across a
+  // config reload, but a reload also discards the old generation's `isCurrent` closure, so
+  // rebinding here is what lets a surviving buffered item still broadcast onRead correctly
+  // instead of silently no-oping through a permanently-false stale isCurrent().
+  const onNewsRead = ({ persona, item, text, debugText, titleSpoken, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, titleSpoken, attribution }); };
+  const onTopicRead = ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); };
+
   // Automatic delivery (TriggerEngine / NewsScheduleRunner, below) always runs through
   // `newsPipeline`/`newsReader`/`topicReader`, which speak directly to the real `speechQueue`:
   // config's news.maxItems/topics.maxItems, the deliver stage's real-queue congestion/duplicate
@@ -402,7 +413,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     contextBuilder,
     speechQueue,
     log: deps.log,
-    onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
+    onRead: onNewsRead,
     ...(deps.newsHistoryStore ? { historyStore: deps.newsHistoryStore } : {}),
   }));
 
@@ -413,7 +424,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     contextBuilder,
     speechQueue,
     log: deps.log,
-    onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
+    onRead: onNewsRead,
     isRuntimeEnabled: deps.isNewsRuntimeEnabled,
     pipeline: newsPipeline,
   }));
@@ -425,7 +436,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     contextBuilder,
     speechQueue: newsBuffer,
     log: deps.log,
-    onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
+    onRead: onNewsRead,
     store: newsPipeline.store,
     historyStore: newsPipeline.historyStore,
   }));
@@ -438,7 +449,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       contextBuilder,
       speechQueue: newsBuffer,
       log: deps.log,
-      onRead: ({ persona, item, text, debugText, attribution }) => { if (isCurrent()) deps.onNewsRead({ persona, item, text, debugText, attribution }); },
+      onRead: onNewsRead,
       isRuntimeEnabled: deps.isNewsRuntimeEnabled,
       pipeline: newsBufferPipeline,
     }),
@@ -454,7 +465,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     speechQueue,
     webResearcher,
     log: deps.log,
-    onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },
+    onRead: onTopicRead,
     isRuntimeEnabled: deps.isTopicsRuntimeEnabled,
   }));
 
@@ -467,13 +478,28 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       speechQueue: topicBuffer,
       webResearcher,
       log: deps.log,
-      onRead: ({ persona, item, text, debugText }) => { if (isCurrent()) deps.onTopicRead({ persona, item, text, debugText }); },
+      onRead: onTopicRead,
       isRuntimeEnabled: deps.isTopicsRuntimeEnabled,
       store: topicReader.store,
     }),
     buffer: topicBuffer,
     log: deps.log,
   }));
+
+  // Rebind AFTER newsReader/topicReader exist (see the shared-onRead comment above): a buffered
+  // item's deliveryPayload is plain data, never a closure, so this is what actually supplies
+  // this generation's isCurrent()/onRead when a pre-existing buffered item is eventually played
+  // — and, for topics, runs Todoist completion through the CURRENT generation's topicReader
+  // instance rather than a stale one. completeTodoistTask self-logs every failure except a
+  // cancellation, which it rethrows (src/topic-reader.js) — catch that here instead of an
+  // unhandled rejection; play() isn't inside any single request's context to resetUnread through.
+  newsBuffer.onDelivered = (payload) => onNewsRead(payload);
+  topicBuffer.onDelivered = (payload) => {
+    onTopicRead(payload);
+    topicReader.completeTodoistTask(payload.item, {}).catch((error) => {
+      if (!isCancellation(error)) deps.log(`Todoistタスクの完了処理に失敗しました [${payload.item.title}]: ${error.message}`, "warn");
+    });
+  };
 
   const handleTrigger = expose("handleTrigger", (triggerId, options = {}) => {
     let automationMatched = false;

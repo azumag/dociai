@@ -5,8 +5,8 @@
 export function createDeliverStage({ adapter }) {
   return {
     id: "deliver",
-    async run({ persona, item, text, onDelivered }, _context) {
-      return adapter.deliver({ persona, item, text, onDelivered });
+    async run({ persona, item, text, onDelivered, deliveryPayload }, _context) {
+      return adapter.deliver({ persona, item, text, onDelivered, deliveryPayload });
     },
   };
 }
@@ -34,7 +34,7 @@ import { TERMINAL_SPEECH_STATES } from "../../speech/speech-item.js";
 export function createNewsDeliveryStage({ speechQueue, sourceLabel = "newstalk", deferWhenQueueAbove = null, priority, log = () => {} }) {
   return {
     id: "deliver",
-    async run({ persona, item, text, research, modePolicy, runId, onDelivered }, _context) {
+    async run({ persona, item, text, research, modePolicy, runId, onDelivered, deliveryPayload }, _context) {
       const attribution = buildAttributions(research, item);
       const metadata = createNewsSpeechMetadata({
         runId: runId ?? null,
@@ -57,7 +57,7 @@ export function createNewsDeliveryStage({ speechQueue, sourceLabel = "newstalk",
         throw new PipelineStageError(`ニュース配信をキューへ投入できませんでした (${decision.reason})`, { stage: "deliver", kind: decision.reason === "queue-congested" ? "server" : "duplicate" });
       }
 
-      const queued = speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: sourceLabel, priority, metadata, onDelivered });
+      const queued = speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: sourceLabel, priority, metadata, onDelivered, deliveryPayload });
       if (queued?.state === "dropped") {
         throw new PipelineStageError(`ニュース音声はキュー上限で破棄されました [${item.title}]`, { stage: "deliver", kind: "server" });
       }

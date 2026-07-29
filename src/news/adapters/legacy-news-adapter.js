@@ -153,8 +153,8 @@ export function createLegacyNewsAdapter({ getConfig, getConnector, personaRouter
     return { text, debugText, finishReason: result.finishReason };
   }
 
-  function deliver({ persona, item, text, onDelivered }) {
-    const queued = speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "news", onDelivered });
+  function deliver({ persona, item, text, onDelivered, deliveryPayload }) {
+    const queued = speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "news", onDelivered, deliveryPayload });
     if (queued?.state === "dropped") log(`ニュース音声はキュー上限で破棄されました [${item.title}]`, "warn");
     return { queued };
   }

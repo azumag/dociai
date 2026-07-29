@@ -141,7 +141,15 @@ export class NewsPipelineCoordinator {
           // (issue: pregenerated buffer). Firing onRead here unconditionally would broadcast the
           // console/overlay "last read" state and its attribution for an item that may never
           // actually be spoken (buffered-but-unplayed, dropped, or discarded on app exit).
-          await this.stages.deliver.run({ persona, item, text: spokenText, research, modePolicy, runId: context.requestId ?? null, onDelivered: () => this.onRead({ persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle, attribution }) }, context);
+          //
+          // deliveryPayload carries the SAME plain data as onDelivered's closure, but as data,
+          // not a closure over `this`/generation. A pregenerated buffer (GeneratedSpeechBuffer)
+          // deliberately discards onDelivered on entry — its state can survive a config reload
+          // into a fresh generation, and replaying a stale closure would re-broadcast onRead
+          // through an old, no-longer-current isCurrent(). The buffer instead fires ITS OWN
+          // onDelivered (rebound to the current generation after each reload) with this payload.
+          const deliveryPayload = { persona, item, text: spokenText, debugText: generated.debugText, titleSpoken: spokenTitle, attribution };
+          await this.stages.deliver.run({ persona, item, text: spokenText, research, modePolicy, runId: context.requestId ?? null, onDelivered: () => this.onRead(deliveryPayload), deliveryPayload }, context);
           guardPipelineContext(context);
           this.store.markRead(item.processingKey, this.generation, this.clock());
           this.lastRunResult.succeeded++;

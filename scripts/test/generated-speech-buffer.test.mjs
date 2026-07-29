@@ -50,25 +50,47 @@ test("Play generates then immediately consumes an empty buffer, whose state surv
   assert.equal(reloaded.play().text, "kept-across-reload");
 });
 
-test("enqueue() never fires onDelivered — play() only forwards it to the real speechQueue, which decides when to fire it", () => {
-  let delivered = 0;
+test("enqueue() drops a caller-supplied onDelivered closure and keeps only the plain deliveryPayload", () => {
+  let calledAtEnqueueTime = 0;
   const state = { items: [] };
-  // Mimics SpeechQueue.enqueue()'s real contract (src/speech-queue.js): fire onDelivered once
-  // the item genuinely reaches the real queue. GeneratedSpeechBuffer itself never touches
-  // onDelivered — it only forwards the item, onDelivered included, at play() time.
-  const buffer = new GeneratedSpeechBuffer({ speechQueue: { enqueue: (item) => { item.onDelivered?.(); return { state: "waiting" }; } }, state });
+  const buffer = new GeneratedSpeechBuffer({ speechQueue: { enqueue: () => ({ state: "waiting" }) }, state });
 
-  buffer.enqueue({ text: "held", source: "news", onDelivered: () => delivered++ });
-  assert.equal(delivered, 0, "buffering an item must not broadcast onRead/complete external side effects yet");
+  buffer.enqueue({ text: "held", source: "news", onDelivered: () => calledAtEnqueueTime++, deliveryPayload: { text: "held" } });
+  assert.equal(calledAtEnqueueTime, 0, "buffering an item must not broadcast onRead/complete external side effects yet");
+  assert.equal(state.items[0].onDelivered, undefined, "a caller's onDelivered closure must never be stored — see the buffer's own onDelivered below");
+  assert.deepEqual(state.items[0].deliveryPayload, { text: "held" });
+});
 
+test("play() fires the BUFFER's own onDelivered (never the enqueue-time closure) with the item's deliveryPayload", () => {
+  const delivered = [];
+  const state = { items: [] };
+  const buffer = new GeneratedSpeechBuffer({ speechQueue: { enqueue: (item) => { item.onDelivered?.(); return { state: "waiting" }; } }, state, onDelivered: (payload) => delivered.push(payload) });
+
+  buffer.enqueue({ text: "held", source: "news", onDelivered: () => { throw new Error("must never be called"); }, deliveryPayload: { text: "held" } });
   buffer.play();
-  assert.equal(delivered, 1, "play() must forward the item (onDelivered included) to the real queue");
+  assert.deepEqual(delivered, [{ text: "held" }], "play() must fire the buffer's CURRENT onDelivered, not a closure captured at enqueue time");
+});
+
+// This is the actual bug fix: config reload persists state.items (see runtime-factory.js's
+// generatedBufferStates) into a FRESH GeneratedSpeechBuffer instance, but the old generation's
+// onDelivered would otherwise still be sitting on the stale instance. Reassigning
+// buffer.onDelivered (as runtime-factory.js does right after constructing the new generation's
+// readers) must reach an item enqueued under the OLD onDelivered.
+test("reassigning buffer.onDelivered (simulating a config-reload rebind) reaches an item enqueued under the OLD handler", () => {
+  const seenBy = [];
+  const state = { items: [] };
+  const buffer = new GeneratedSpeechBuffer({ speechQueue: { enqueue: (item) => { item.onDelivered?.(); return { state: "waiting" }; } }, state, onDelivered: (payload) => seenBy.push({ gen: "old", payload }) });
+
+  buffer.enqueue({ text: "survives-reload", source: "news", deliveryPayload: { text: "survives-reload" } });
+  buffer.onDelivered = (payload) => seenBy.push({ gen: "new", payload });
+  buffer.play();
+  assert.deepEqual(seenBy, [{ gen: "new", payload: { text: "survives-reload" } }], "play() must use whichever onDelivered is CURRENTLY assigned, not the one active at enqueue time");
 });
 
 test("play() never fires onDelivered when the real speechQueue drops the item", () => {
   let delivered = 0;
-  const state = { items: [{ text: "will-drop", source: "news", onDelivered: () => delivered++ }] };
-  const buffer = new GeneratedSpeechBuffer({ speechQueue: { enqueue: () => ({ state: "dropped" }) }, state, log: () => {} });
+  const state = { items: [{ text: "will-drop", source: "news", deliveryPayload: { text: "will-drop" } }] };
+  const buffer = new GeneratedSpeechBuffer({ speechQueue: { enqueue: () => ({ state: "dropped" }) }, state, log: () => {}, onDelivered: () => delivered++ });
 
   const item = buffer.play();
   assert.equal(item.text, "will-drop", "play() still returns the dequeued item so the caller knows what was lost");
