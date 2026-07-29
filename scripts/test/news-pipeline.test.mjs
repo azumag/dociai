@@ -181,6 +181,22 @@ test("a dropped deliver result (legacy adapter's non-throwing { queued: { state:
   assert.equal(onReadCalls, 0, "onRead must never fire for an item that was dropped before reaching the real queue");
 });
 
+test("a dropped deliver result (createNewsDeliveryStage's non-throwing { status: 'dropped' }) ALSO resets the item to unread — a transient queue-capacity drop must not consume a retry attempt or ever reach recordFailedPermanent (PR #249 review)", async () => {
+  const item = { guid: "g1", title: "t1", processingKey: "news:g1", sourceName: "s" };
+  let onReadCalls = 0;
+  const { coordinator, store } = makeHarness({
+    onRead: () => onReadCalls++,
+    impls: {
+      acquire: async () => [item],
+      deliver: async () => ({ status: "dropped", queueItemId: null, commitAllowed: false, reason: "queue-limit", attribution: [] }),
+    },
+  });
+  const result = await coordinator.run({ generation: 1 });
+  assert.equal(result.status, "delivered");
+  assert.equal(store.get(item.processingKey).state, "unread", "a dropped item must reset to unread, not consume a retry attempt");
+  assert.equal(onReadCalls, 0, "onRead must never fire for an item that was dropped before reaching the real queue");
+});
+
 test("a failing candidate does not block later candidates in the same run", async () => {
   const itemA = { guid: "a", title: "a", processingKey: "news:a", sourceName: "s" };
   const itemB = { guid: "b", title: "b", processingKey: "news:b", sourceName: "s" };

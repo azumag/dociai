@@ -426,6 +426,13 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   // attribution block check above it — the actual point of this wiring — still applies identically.
   const createNewsDeliverStageFor = (queue) => createNewsDeliveryStage({
     speechQueue: queue,
+    // sourceLabel defaults to "newstalk" inside createNewsDeliveryStage, but the legacy adapter
+    // (and every speech item persisted before this wiring existed) used "news" — keep that label
+    // so speech-scheduler.js's same-source pending-count bucketing (keyed by this string) doesn't
+    // silently split a runtime-restored pre-upgrade "news" item from newly-enqueued items into two
+    // separate buckets, and so it stays consistent with news-delivery-contract.js's own
+    // metadata.source: "news" (PR #249 review).
+    sourceLabel: "news",
     deferWhenQueueAbove: newsDelivery.deferWhenQueueAbove ?? null,
     priority: newsDelivery.priority,
     blockOnUnattributableRequiredSource: newsDelivery.blockOnUnattributableRequiredSource ?? true,

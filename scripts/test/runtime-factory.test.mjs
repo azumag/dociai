@@ -283,6 +283,12 @@ test("newsPipeline's deliver stage is wired to createNewsDeliveryStage and honor
   const warnOnlyBundle = await createDociaiRuntimeFactory().createCandidate({ config: warnOnlyConfig, generation: 1, deps: warnOnlyDeps });
   const result = await warnOnlyBundle.get("newsPipeline").stages.deliver.run(runArgs);
   assert.equal(result.status, "accepted", "news.delivery.blockOnUnattributableRequiredSource: false must downgrade the block to a warning and still deliver");
+  // In this real (non-mocked) runtime, the webspeech backend fails synchronously in Node (no Web
+  // Speech API), so by the time enqueue() returns the item may already have moved from
+  // current/pending into history — check whichever bucket actually holds the enqueued id.
+  const snapshot = warnOnlyBundle.get("speechQueue").snapshot();
+  const queued = [snapshot.current, ...snapshot.pending, ...snapshot.history].find((entry) => entry?.id === result.queueItemId);
+  assert.equal(queued?.source, "news", "the wired stage must keep the pre-existing \"news\" source label, not its own \"newstalk\" default, so speech-scheduler.js's per-source pending count still buckets old and new items together (PR #249 review)");
 });
 
 test("newsBufferPipeline's (生成して貯める path, issue #258) deliver stage ALSO blocks an unattributable required source, not just the automatic newsPipeline", async () => {

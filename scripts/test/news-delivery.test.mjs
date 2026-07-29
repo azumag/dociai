@@ -187,15 +187,13 @@ test("createNewsDeliveryStage delivers normally when a required-attribution sour
   assert.equal(speechQueue.enqueued.length, 1);
 });
 
-test("createNewsDeliveryStage throws a retryable PipelineStageError on queue-limit drop", async () => {
+test("createNewsDeliveryStage does NOT throw on a real-queue-capacity drop — it returns status 'dropped' so the coordinator resets the item to unread instead of eventually blacklisting it via the retry path", async () => {
   const speechQueue = fakeSpeechQueue({ dropNext: true });
   const stage = createNewsDeliveryStage({ speechQueue });
   const item = { processingKey: "p1", title: "見出し" };
   const persona = { id: "persona-1", name: "P", voice: {} };
-  await assert.rejects(
-    stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" }),
-    (error) => error instanceof PipelineStageError && error.retryable === true,
-  );
+  const result = await stage.run({ persona, item, text: "本文", research: null, modePolicy: { mode: "current" }, runId: "run-1" });
+  assert.deepEqual(result, { status: "dropped", queueItemId: null, commitAllowed: false, reason: "queue-limit", attribution: [] });
 });
 
 test("createNewsDeliveryStage throws a non-retryable PipelineStageError before enqueueing a duplicate (mode, candidate) already pending", async () => {

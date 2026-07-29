@@ -68,8 +68,16 @@ export function createNewsDeliveryStage({ speechQueue, sourceLabel = "newstalk",
       }
 
       const queued = speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: sourceLabel, priority, metadata, onDelivered, deliveryPayload });
+      // A real-queue-capacity drop is a transient system-load condition, not a defect in this
+      // particular item — unlike the block/duplicate cases above, throwing a retryable error here
+      // would let repeated congestion exhaust this item's retry budget and reach
+      // historyStore.recordFailedPermanent(), permanently blacklisting an article purely because
+      // the speech queue happened to be full (PR #249 review). Return a non-throwing "dropped"
+      // status instead, exactly like the legacy adapter's drop path, so the coordinator resets the
+      // item back to unread (news-pipeline-coordinator.js) rather than penalizing it.
       if (queued?.state === "dropped") {
-        throw new PipelineStageError(`ニュース音声はキュー上限で破棄されました [${item.title}]`, { stage: "deliver", kind: "server" });
+        log(`ニュース音声はキュー上限で破棄されました [${item.title}]`, "warn");
+        return { status: "dropped", queueItemId: null, commitAllowed: false, reason: "queue-limit", attribution };
       }
       log(`ニュース配信をキューへ投入しました [${item.title}]`);
       return { status: speechQueue.paused ? "held" : "accepted", queueItemId: queued?.id ?? null, commitAllowed: true, reason: null, attribution };
