@@ -118,10 +118,21 @@ export class SettingsUI {
     this._translationModelProgress = null;
     this.#ensureBuilt();
     if (hasElectronTranslationService()) {
+      // 再入 (open()呼び出し中にもう一度open()される) で前回分の購読を孤児化させない。
+      this._unsubscribeTranslationModelProgress?.();
       this._unsubscribeTranslationModelProgress = subscribeTranslationModelProgressThroughElectron((event) => {
         this._translationModelProgress = event;
-        // 完了・失敗したらstatus()を取り直す (installed/エラー内容を最新化する)。
-        if (event.state === "installed" || event.state === "failed") this._translationModelStatus = null;
+        // 完了・失敗、および (ダウンロード中状態を初めて知った時点で) status()を取り直す。
+        // "downloading"を逃すと、インストール中ずっとcacheされたnot_installedのままとなり
+        // キャンセルボタンが一切出せない状態が続く (PRレビュー指摘)。既にdownloading反映済みなら
+        // 進捗イベントの度に再取得しない。
+        const alreadyDownloading = this._translationModelStatus?.value?.state === "downloading";
+        if (event.state === "installed" || event.state === "failed" || event.state === "cancelled" || (event.state === "downloading" && !alreadyDownloading)) {
+          this._translationModelStatus = null;
+        }
+        if (event.state === "installed") this._announcer?.announce("翻訳モデルの導入が完了しました");
+        else if (event.state === "failed") this._announcer?.announce("翻訳モデルの導入に失敗しました");
+        else if (event.state === "cancelled") this._announcer?.announce("翻訳モデルの導入をキャンセルしました");
         if (this.root?.open) this.#render();
       });
     }
@@ -1230,11 +1241,15 @@ export class SettingsUI {
   #ensureTranslationModelStatusLoaded() {
     if (this._translationModelStatus || this._translationModelStatusLoading) return;
     this._translationModelStatusLoading = true;
-    translationModelStatusThroughElectron().then((result) => {
-      this._translationModelStatusLoading = false;
-      this._translationModelStatus = result;
-      if (this.root?.open) this.#render();
-    });
+    translationModelStatusThroughElectron()
+      .then((result) => { this._translationModelStatus = result; })
+      // ipcRenderer.invoke() 自体がreject する経路 (Main process側のResult<T>包み込み以前の
+      // 異常) も拾っておく — さもないと「状態を確認しています…」が復帰不能に固定表示される。
+      .catch((error) => { this._translationModelStatus = { ok: false, error: { message: error instanceof Error ? error.message : String(error) } }; })
+      .finally(() => {
+        this._translationModelStatusLoading = false;
+        if (this.root?.open) this.#render();
+      });
   }
 
   async #installTranslationModel() {
@@ -1246,7 +1261,7 @@ export class SettingsUI {
     this._translationModelBusy = false;
     this._translationModelProgress = null;
     this._translationModelStatus = null; // 最新状態を取り直す
-    if (!result.ok) this.log(`翻訳モデルの導入に失敗しました: ${result.error.message}`, "error");
+    if (!result.ok && result.error.code !== "CANCELLED") this.log(`翻訳モデルの導入に失敗しました: ${result.error.message}`, "error");
     if (this.root?.open) this.#render();
   }
 
@@ -1336,11 +1351,17 @@ export class SettingsUI {
 
     const progress = this._translationModelProgress;
     if ((state === "downloading" || this._translationModelBusy) && progress) {
+      const percent = Math.round(progress.percent ?? 0);
       const bar = document.createElement("div");
       bar.className = "download-progress";
+      bar.setAttribute("role", "progressbar");
+      bar.setAttribute("aria-valuemin", "0");
+      bar.setAttribute("aria-valuemax", "100");
+      bar.setAttribute("aria-valuenow", String(percent));
+      bar.setAttribute("aria-label", "翻訳モデルのダウンロード進捗");
       const fill = document.createElement("div");
       fill.className = "download-progress-fill";
-      fill.style.width = `${Math.round(progress.percent ?? 0)}%`;
+      fill.style.width = `${percent}%`;
       bar.append(fill);
       body.append(bar);
       const progressText = document.createElement("p");

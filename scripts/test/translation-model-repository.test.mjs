@@ -220,3 +220,96 @@ test("cancelInstall() aborts an in-flight install and status() reflects it stopp
     assert.equal(await repository.isInstalled(), false);
   } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
 });
+
+test("a deliberate cancelInstall() reports status() as not_installed (never error/lastError), and the progress event is 'cancelled' not 'failed'", async () => {
+  const { modules, directory } = await loadModules();
+  const files = { "config.json": Buffer.from("ok") };
+  const { server, url } = await startServer(files);
+  try {
+    const modelsDir = path.join(directory, "models");
+    const catalogFile = path.join(directory, "catalog.json");
+    await writeCatalog(catalogFile, files, url);
+    let gate;
+    const gatePromise = new Promise((resolve) => { gate = resolve; });
+    const progressEvents = [];
+    const repository = makeRepository(modules, {
+      modelsDir, catalogFile, progressEvents,
+      downloadFile: async (input) => {
+        gate();
+        return new Promise((resolve, reject) => {
+          input.signal.addEventListener("abort", () => reject(new modules.ServiceError("CANCELLED", "download cancelled", { retryable: false })), { once: true });
+        });
+      },
+    });
+    const installPromise = repository.install();
+    await gatePromise;
+    repository.cancelInstall();
+    await assert.rejects(installPromise, (error) => error instanceof modules.ServiceError && error.code === "CANCELLED");
+
+    const status = await repository.status();
+    assert.equal(status.state, "not_installed", "a deliberate cancel must not surface as state: error");
+    assert.equal(status.lastError, undefined, "cancelling must not set lastError — that's reserved for real failures");
+    assert.ok(progressEvents.some((event) => event.state === "cancelled"), "a distinct 'cancelled' progress event, not 'failed'");
+    assert.ok(!progressEvents.some((event) => event.state === "failed"), "cancellation must never also emit 'failed'");
+
+    // the staging tree for the aborted attempt must not linger on disk after the cancel settles.
+    const stagingRoot = path.join(modelsDir, ".staging");
+    const stagingLeftover = await fs.readdir(stagingRoot).catch(() => []);
+    assert.deepEqual(stagingLeftover, []);
+  } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("delete() during an in-flight install is rejected with CONFLICT, and the install completes normally afterward", async () => {
+  const { modules, directory } = await loadModules();
+  const files = { "config.json": Buffer.from("ok") };
+  const { server, url } = await startServer(files);
+  try {
+    const modelsDir = path.join(directory, "models");
+    const catalogFile = path.join(directory, "catalog.json");
+    await writeCatalog(catalogFile, files, url);
+    let gate;
+    const gatePromise = new Promise((resolve) => { gate = resolve; });
+    let release;
+    const releasePromise = new Promise((resolve) => { release = resolve; });
+    const repository = makeRepository(modules, {
+      modelsDir, catalogFile,
+      downloadFile: async (input) => {
+        gate();
+        await releasePromise;
+        return insecureDownloadFile(modules, input);
+      },
+    });
+    const installPromise = repository.install();
+    await gatePromise;
+
+    await assert.rejects(repository.delete(), (error) => error instanceof modules.ServiceError && error.code === "CONFLICT");
+
+    release();
+    await installPromise;
+    assert.equal(await repository.isInstalled(), true, "the delete attempt during install must not have undone the install that was already in flight");
+  } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("status()/isInstalled() self-heal to not_installed when the model directory is missing despite a registry entry (out-of-band deletion)", async () => {
+  const { modules, directory } = await loadModules();
+  const files = { "config.json": Buffer.from("ok") };
+  const { server, url } = await startServer(files);
+  try {
+    const modelsDir = path.join(directory, "models");
+    const catalogFile = path.join(directory, "catalog.json");
+    await writeCatalog(catalogFile, files, url);
+    const repository = makeRepository(modules, { modelsDir, catalogFile, downloadFile: (input) => insecureDownloadFile(modules, input) });
+    await repository.install();
+    assert.equal(await repository.isInstalled(), true);
+
+    // simulate the model directory being removed out-of-band (manual disk cleanup, a failed
+    // fs.rm during delete(), etc.) while installed.json itself is left behind untouched.
+    const modelDir = await repository.modelDirectory();
+    await fs.rm(modelDir, { recursive: true, force: true });
+
+    assert.equal(await repository.isInstalled(), false, "the registry alone must not be trusted once the directory is gone");
+    const status = await repository.status();
+    assert.equal(status.state, "not_installed");
+    assert.equal(status.installed, null);
+  } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
+});

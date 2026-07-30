@@ -83,15 +83,26 @@ export class TranslationModelRepository {
     await fs.rename(temporary, this.#registryFile());
   }
 
+  // installed.json単体を信用せず、実際のモデルディレクトリの存在も確認する。out-of-band削除や
+  // delete()自体の`fs.rm(registryFile)`失敗(178行目、意図的に無視している)でレジストリと実体が
+  // 食い違うと、registryだけを見た場合「利用可能」と誤表示したままtranslate()がload失敗で落ちる
+  // (PRレビュー指摘: 状態表示が実体を反映しない)。
+  async #verifiedInstalledEntry(model: TranslationModelCatalogEntry): Promise<InstalledTranslationModel | null> {
+    const installed = await this.#readRegistry();
+    if (!installed) return null;
+    const dirExists = await fs.access(this.#modelDir(model)).then(() => true).catch(() => false);
+    return dirExists ? installed : null;
+  }
+
   async status(): Promise<TranslationModelStatus> {
     const model = await this.#loadCatalog();
-    const installed = await this.#readRegistry();
+    const installed = await this.#verifiedInstalledEntry(model);
     const state: TranslationModelState = this.#installAbort ? "downloading" : installed ? "installed" : this.#lastError ? "error" : "not_installed";
     return { state, catalogModel: model, installed, ...(this.#lastError ? { lastError: { message: this.#lastError.message } } : {}) };
   }
 
   async isInstalled(): Promise<boolean> {
-    return (await this.#readRegistry()) !== null;
+    return (await this.#verifiedInstalledEntry(await this.#loadCatalog())) !== null;
   }
 
   async modelDirectory(): Promise<string> {
@@ -107,6 +118,7 @@ export class TranslationModelRepository {
   async install(): Promise<InstalledTranslationModel> {
     if (this.#installAbort) throw new ServiceError("CONFLICT", "a translation model install is already in progress", { serviceId: SERVICE_ID, retryable: false });
     const model = await this.#loadCatalog();
+    const stagingDir = path.join(this.#modelsDir, STAGING_DIR_NAME, ...model.id.split("/"));
     const controller = new AbortController();
     this.#installAbort = controller;
     this.#lastError = null;
@@ -120,7 +132,6 @@ export class TranslationModelRepository {
         throw new ServiceError("BAD_REQUEST", `insufficient disk space for the translation model (need ~${Math.ceil(model.totalSizeBytes / (1024 * 1024))} MB plus headroom)`, { serviceId: SERVICE_ID, retryable: false });
       }
 
-      const stagingDir = path.join(this.#modelsDir, STAGING_DIR_NAME, ...model.id.split("/"));
       await fs.rm(stagingDir, { recursive: true, force: true });
       await fs.mkdir(stagingDir, { recursive: true, mode: 0o700 });
 
@@ -161,9 +172,17 @@ export class TranslationModelRepository {
       this.#emitDownloadProgress({ modelId: model.id, fileName: "", fileIndex: model.files.length, fileCount: model.files.length, bytesDownloaded: model.totalSizeBytes, totalBytes: model.totalSizeBytes, bytesPerSecond: 0, percent: 100, state: "installed", at: new Date().toISOString() });
       return entry;
     } catch (error) {
-      this.#lastError = error instanceof Error ? error : new Error(String(error));
-      const normalized = error instanceof ServiceError ? error : new ServiceError("UNKNOWN", this.#lastError.message, { serviceId: SERVICE_ID, retryable: true });
-      this.#emitDownloadProgress({ modelId: model.id, fileName: "", fileIndex: 0, fileCount: model.files.length, bytesDownloaded: 0, totalBytes: model.totalSizeBytes, bytesPerSecond: 0, state: "failed", at: new Date().toISOString() });
+      const normalized = error instanceof ServiceError ? error : new ServiceError("UNKNOWN", error instanceof Error ? error.message : String(error), { serviceId: SERVICE_ID, retryable: true });
+      // ユーザーによる意図的なキャンセル (cancelInstall() -> AbortSignal -> CANCELLED) は
+      // 「失敗」ではない。#lastErrorを立てたりstate:"failed"を出したりすると、キャンセル直後に
+      // 設定UIが「エラー」チップと再試行ボタンを表示してしまう (PRレビュー指摘)。
+      const cancelled = normalized.code === "CANCELLED";
+      if (!cancelled) this.#lastError = normalized;
+      this.#emitDownloadProgress({ modelId: model.id, fileName: "", fileIndex: 0, fileCount: model.files.length, bytesDownloaded: 0, totalBytes: model.totalSizeBytes, bytesPerSecond: 0, state: cancelled ? "cancelled" : "failed", at: new Date().toISOString() });
+      // 失敗・キャンセルいずれでも、中途半端なstagingを次回install()の実行まで放置しない。
+      // catalogは常に単一モデルなので、leaf dirだけでなく.staging全体を消してよい
+      // (空の親ディレクトリを残さない)。
+      await fs.rm(path.join(this.#modelsDir, STAGING_DIR_NAME), { recursive: true, force: true }).catch(() => {});
       throw normalized;
     } finally {
       this.#installAbort = null;
@@ -171,6 +190,10 @@ export class TranslationModelRepository {
   }
 
   async delete(): Promise<{ deleted: boolean }> {
+    // install()中のdeleteを許すと、delete()が消した直後にinstall()側のstaging→finalDirの
+    // atomic renameが完了してしまい、「削除したはずなのに導入済みのまま」という状態に戻る
+    // (PRレビュー指摘の実レース)。install()自身のCONFLICTガードと対称的に扱う。
+    if (this.#installAbort) throw new ServiceError("CONFLICT", "cannot delete while a translation model install is in progress", { serviceId: SERVICE_ID, retryable: false });
     const model = await this.#loadCatalog();
     const finalDir = this.#modelDir(model);
     const existed = await fs.access(finalDir).then(() => true).catch(() => false);

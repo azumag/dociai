@@ -71,7 +71,7 @@ test("downloads a file, streams it to disk, and returns the matching sha256/size
   } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
 });
 
-test("a sha256 mismatch throws BAD_REQUEST and removes the partial file", async () => {
+test("a sha256 mismatch throws BAD_REQUEST/retryable:false and removes the partial file", async () => {
   const { modules, directory } = await loadModules();
   const buffer = crypto.randomBytes(4096);
   const { server, url } = await startServer((req, res) => { res.writeHead(200, { "Content-Length": String(buffer.length) }); res.end(buffer); });
@@ -87,7 +87,10 @@ test("a sha256 mismatch throws BAD_REQUEST and removes the partial file", async 
         isAddressAllowed: () => true,
         allowInsecure: true,
       }),
-      (error) => error instanceof modules.ServiceError && error.code === "BAD_REQUEST" && /sha256 mismatch/.test(error.message),
+      // retryable:false — re-downloading the exact same URL would re-fetch the exact same
+      // (wrong) bytes and fail identically every time, unlike a genuinely transient NETWORK
+      // error; PR review flagged this as previously (inconsistently) retryable:true.
+      (error) => error instanceof modules.ServiceError && error.code === "BAD_REQUEST" && error.retryable === false && /sha256 mismatch/.test(error.message),
     );
     await assert.rejects(fs.access(destinationPath));
   } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }

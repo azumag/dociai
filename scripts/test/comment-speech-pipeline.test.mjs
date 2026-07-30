@@ -155,6 +155,43 @@ test("a stale generation's in-flight translation never enqueues into the (possib
   assert.equal(speechQueue.items.length, 0, "isCurrent()===false must block the enqueue, even on the readOriginal fallback path");
 });
 
+test("timeoutMs actually bounds the wait even when the adapter's promise never settles (PR review regression)", async () => {
+  // #processQueued clamps timeoutMs to a 500ms floor (matching config-validation.js's own
+  // minimum), so 500 is the smallest bound observable here — not an arbitrary test choice.
+  const config = baseConfig({ onFailure: "readOriginal", timeoutMs: 500 }, { includeAuthor: false });
+  const speechQueue = fakeSpeechQueue();
+  let abortedSignal = null;
+  const adapter = {
+    translate({ signal }) {
+      abortedSignal = signal;
+      return new Promise(() => {}); // never resolves/rejects — simulates a hung IPC/Main handler
+    },
+  };
+  const pipeline = new CommentSpeechPipeline({ config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true, translationAdapter: adapter });
+  const start = Date.now();
+  pipeline.submit({ id: "a", author: "A", text: "first comment goes here right now" });
+  await waitFor(() => speechQueue.items.length === 1, { timeoutMs: 2000 });
+  assert.ok(Date.now() - start < 1000, "the pipeline must move on around the 500ms timeout floor, not wait for the adapter forever");
+  assert.equal(speechQueue.items[0].text, "first comment goes here right now", "onFailure: readOriginal after a timeout");
+  assert.equal(abortedSignal?.aborted, true, "the abort signal is still sent, even though the pipeline doesn't wait on it");
+});
+
+test("a later comment is not blocked behind an earlier one whose adapter promise never settles", async () => {
+  const config = baseConfig({ onFailure: "skip", timeoutMs: 500 }, { includeAuthor: false });
+  const speechQueue = fakeSpeechQueue();
+  const adapter = {
+    translate({ text }) {
+      if (text === "first comment goes here right now") return new Promise(() => {});
+      return Promise.resolve({ text: "次のコメント" });
+    },
+  };
+  const pipeline = new CommentSpeechPipeline({ config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true, translationAdapter: adapter });
+  pipeline.submit({ id: "a", author: "A", text: "first comment goes here right now" });
+  pipeline.submit({ id: "b", author: "B", text: "the second comment arrives right after that one" });
+  await waitFor(() => speechQueue.items.length === 1, { timeoutMs: 1000 });
+  assert.equal(speechQueue.items[0].text, "次のコメント", "the first comment's stuck translate() must not block the second comment forever");
+});
+
 test("maxPendingComments overflow drops the oldest still-queued comment and logs a warning", async () => {
   const config = baseConfig({ onFailure: "skip", maxPendingComments: 1 }, { includeAuthor: false });
   const speechQueue = fakeSpeechQueue();

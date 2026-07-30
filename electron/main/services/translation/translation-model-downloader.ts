@@ -201,7 +201,11 @@ export async function downloadVerifiedFile(input: DownloadFileInput): Promise<{ 
   const sha256 = hash.digest("hex");
   if (sha256.toLowerCase() !== input.expectedSha256.toLowerCase()) {
     await fsp.rm(input.destinationPath, { force: true }).catch(() => {});
-    throw new ServiceError("BAD_REQUEST", `sha256 mismatch: expected ${input.expectedSha256}, got ${sha256}`, { serviceId: SERVICE_ID, retryable: true });
+    // retryable: false — a checksum mismatch after a fully-downloaded, size-correct file means the
+    // bytes themselves are wrong (bad mirror, tampering, or a stale catalog hash), not a transient
+    // network issue. Retrying re-downloads the exact same content and fails the same way every
+    // time, unlike the sibling size-mismatch case above (a truncated transfer, genuinely NETWORK).
+    throw new ServiceError("BAD_REQUEST", `sha256 mismatch: expected ${input.expectedSha256}, got ${sha256}`, { serviceId: SERVICE_ID, retryable: false });
   }
   return { sha256, sizeBytes: bytesDownloaded };
 }

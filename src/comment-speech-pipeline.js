@@ -15,6 +15,8 @@ export const COMMENT_READER_ID = "__comment_reader__";
 // Phase 2 (#261) が実IPC接続のTranslationServiceアダプタに差し替えるまでの既定アダプタ。
 // 常にRUNTIME_UNAVAILABLEで失敗するので、翻訳結果の有無に関わらずonFailureポリシーだけが
 // 効く (既定のreadOriginalなら原文がそのまま読み上げられる)。
+const TRANSLATE_TIMED_OUT = Symbol("translate-timed-out");
+
 export const UNAVAILABLE_TRANSLATION_ADAPTER = Object.freeze({
   async translate() {
     const error = new Error("translation runtime is not available yet");
@@ -115,25 +117,27 @@ export class CommentSpeechPipeline {
 
   async #translateWithTimeout(text, sourceLanguage, timeoutMs) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const result = await this.#translationAdapter.translate({
-        text,
-        sourceLanguage,
-        targetLanguage: "ja",
-        signal: controller.signal,
-      });
-      const translated = result?.text;
-      if (typeof translated !== "string") return null;
-      const trimmed = translated.trim();
-      // 空・原文と実質同一・制御文字混入の出力は失敗扱いにする。
-      if (!trimmed || trimmed === text.trim() || hasStrayControlChars(trimmed)) return null;
-      return trimmed;
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timer);
-    }
+    let timer;
+    // timeoutMsが実際にパイプラインの待ち時間を上限するよう、アダプタのpromiseとタイマーを
+    // race()する。signal.abortだけをアダプタに送って結果を待ち続けると、abortを無視する
+    // (または反応が遅い) アダプタ実装ではtimeoutMsが無意味になり、#drain()のFIFOが
+    // ブロックされ続ける (PRレビューで繰り返し指摘された実バグ)。timeout側が先に解決した
+    // 場合、取り残されたアダプタのpromiseは後続の.catchで静かに処理させ、ここでは待たない。
+    const timedOut = new Promise((resolve) => {
+      timer = setTimeout(() => { controller.abort(); resolve(TRANSLATE_TIMED_OUT); }, timeoutMs);
+    });
+    const translated = this.#translationAdapter
+      .translate({ text, sourceLanguage, targetLanguage: "ja", signal: controller.signal })
+      .catch(() => null);
+    const outcome = await Promise.race([translated, timedOut]);
+    clearTimeout(timer);
+    if (outcome === TRANSLATE_TIMED_OUT) return null;
+    const translatedText = outcome?.text;
+    if (typeof translatedText !== "string") return null;
+    const trimmed = translatedText.trim();
+    // 空・原文と実質同一・制御文字混入の出力は失敗扱いにする。
+    if (!trimmed || trimmed === text.trim() || hasStrayControlChars(trimmed)) return null;
+    return trimmed;
   }
 
   #enqueue(comment, cr, bodies) {

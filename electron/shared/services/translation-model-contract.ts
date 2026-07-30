@@ -44,7 +44,7 @@ export type TranslationModelDownloadProgress = {
   bytesPerSecond: number;
   percent?: number;
   etaSeconds?: number;
-  state: "downloading" | "verifying" | "installed" | "failed";
+  state: "downloading" | "verifying" | "installed" | "failed" | "cancelled";
   at: string;
 };
 
