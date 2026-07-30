@@ -22,7 +22,7 @@ import { deriveSimulationStatus } from "../twitch-ui/history/history-store.js";
 import { AppRuntime } from "./app-runtime.js";
 import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } from "./runtime-factory.js";
 import { createAppActions } from "./app-actions.js";
-import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron, hasElectronTranslationService } from "../platform/electron-services.js";
+import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron, hasElectronTranslationService, translationModelStatusThroughElectron, subscribeTranslationModelProgressThroughElectron } from "../platform/electron-services.js";
 import { createElectronTranslationAdapter } from "../comment-translation-adapter.js";
 import { splitConnectorSecrets } from "../config/config-secrets-split.js";
 import { personaTriggerIdsForDisplay } from "../ui/persona-trigger-display.js";
@@ -197,6 +197,15 @@ function normalizeExternalHealth(status) {
   return "unknown";
 }
 
+// issue #257 Phase 4 (#263): モデル未導入のまま機能をONにした場合、無言で外部APIへ切り替えず
+// health表示で明示する ("configuration_required" は他の「未設定」系サービスと同じ表示になる)。
+function normalizeTranslationModelHealth(modelState) {
+  if (modelState === "installed") return "ready";
+  if (modelState === "downloading") return "checking";
+  if (modelState === "error") return "error";
+  return "configuration_required"; // not_installed または未取得
+}
+
 function integrationHealthServices() {
   const config = state.config;
   if (!config) return [{ serviceId: "config", name: "設定", category: "runtime", status: "unknown", critical: true, enabled: true }];
@@ -228,6 +237,14 @@ function integrationHealthServices() {
     const eventTriggerCount = Object.keys(config.eventTriggers ?? {}).length;
     const status = eventTriggerStatus?.lastError ? "error" : eventTriggerStatus?.subscribed ? "ready" : "unknown";
     add("event-triggers", "Event Trigger", "stream", eventTriggerCount > 0, status, { critical: false, metrics: eventTriggerStatus ? { triggerCount: eventTriggerStatus.triggerCount, lastEventAt: eventTriggerStatus.lastEventAt } : {} });
+  }
+  {
+    const translationModel = state.translationModelStatus;
+    add("translation", "コメント翻訳", "model", Boolean(config.commentReader?.translation?.enabled), normalizeTranslationModelHealth(translationModel?.state), {
+      critical: false,
+      metrics: translationModel?.installed ? { totalSizeBytes: translationModel.installed.totalSizeBytes } : {},
+      action: translationModel?.state === "installed" ? "open_diagnostics" : "open_settings",
+    });
   }
   return services;
 }
@@ -775,6 +792,22 @@ function setupUpdateStatus() {
   checkForUpdateThroughElectron().then((result) => { if (result?.ok) renderUpdateStatus(result.value); });
 }
 
+// issue #257 Phase 4 (#263): 翻訳モデルの導入状態をintegration healthへ反映する。設定UI自身の
+// モデル管理ブロック (src/settings-ui.js) とは別の、常時表示されるhealthパネル向けの購読 —
+// 設定ダイアログを開いていない間もダウンロード進捗・導入完了/失敗がheaderへ反映されるようにする。
+function setupTranslationModelHealth() {
+  if (!hasElectronTranslationService()) return;
+  const refresh = () => translationModelStatusThroughElectron().then((result) => {
+    if (result?.ok) { state.translationModelStatus = result.value; renderIntegrationHealth(); }
+  });
+  refresh();
+  subscribeTranslationModelProgressThroughElectron((event) => {
+    state.translationModelStatus = { ...(state.translationModelStatus ?? {}), state: event.state === "installed" ? "installed" : event.state === "failed" ? "error" : "downloading" };
+    renderIntegrationHealth();
+    if (event.state === "installed" || event.state === "failed") refresh();
+  });
+}
+
 const settingsUI = new SettingsUI({
   getCurrent: () => state.config,
   onApply: (cfg) => applyEditedConfig(cfg),
@@ -932,6 +965,7 @@ function boot() {
   commentStore.onChange(renderComments);
   renderAll();
   setupUpdateStatus();
+  setupTranslationModelHealth();
   logEvent("dociai 操作卓を起動しました。設定を読み込んでください");
   loadCurrentConfig()
     .then(applyLoadedConfig)

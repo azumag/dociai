@@ -27,6 +27,14 @@ import { createLiveAnnouncer } from "./settings/a11y/live-region.js";
 import { deferFocus, restoreFocus } from "./settings/a11y/focus-controller.js";
 import { fieldIds } from "./settings/a11y/field-a11y.js";
 import { isMiniMaxSearchConnector } from "./config/minimax-search-config.js";
+import {
+  hasElectronTranslationService,
+  translationModelStatusThroughElectron,
+  installTranslationModelThroughElectron,
+  cancelTranslationModelInstallThroughElectron,
+  deleteTranslationModelThroughElectron,
+  subscribeTranslationModelProgressThroughElectron,
+} from "./platform/electron-services.js";
 
 const PROVIDERS = registryOptions("providers");
 const TRIGGER_TYPES = registryOptions("triggerTypes");
@@ -34,6 +42,10 @@ const VOICE_ENGINES = registryOptions("voiceEngines");
 const NEWS_MODES = registryOptions("newsModes");
 const NEWS_SOURCE_TYPES = registryOptions("newsSourceTypes");
 const TOPIC_SOURCE_TYPES = registryOptions("topicSourceTypes");
+const TRANSLATION_SOURCE_LANGUAGES = registryOptions("translationSourceLanguages");
+const TRANSLATION_OUTPUT_MODES = registryOptions("translationOutputModes");
+const TRANSLATION_FAILURE_POLICIES = registryOptions("translationFailurePolicies");
+const TRANSLATION_MODEL_STATE_LABELS = { not_installed: "未導入", downloading: "ダウンロード中", installed: "利用可能", error: "エラー" };
 
 function configUiMetadata(path) {
   const segments = path.split(".");
@@ -62,6 +74,11 @@ export class SettingsUI {
     this._opener = null;
     this._pendingFocusSelector = null;
     this._built = false;
+    this._translationModelStatus = null;
+    this._translationModelStatusLoading = false;
+    this._translationModelProgress = null;
+    this._translationModelBusy = false;
+    this._unsubscribeTranslationModelProgress = null;
     this.controller = new SettingsController({
       confirmDiscard: async () => showDiscardChangesDialog(document),
       save: async (draft) => { const { errors } = validateConfig(draft); if (errors.length) throw new Error(errors[0]); await this.onApply(clone(draft)); if (this.root?.open) this.root.close(); },
@@ -97,7 +114,17 @@ export class SettingsUI {
     this.draft = clone(current);
     this.controller.open(this.draft);
     this.activeTab = "connectors";
+    this._translationModelStatus = null;
+    this._translationModelProgress = null;
     this.#ensureBuilt();
+    if (hasElectronTranslationService()) {
+      this._unsubscribeTranslationModelProgress = subscribeTranslationModelProgressThroughElectron((event) => {
+        this._translationModelProgress = event;
+        // 完了・失敗したらstatus()を取り直す (installed/エラー内容を最新化する)。
+        if (event.state === "installed" || event.state === "failed") this._translationModelStatus = null;
+        if (this.root?.open) this.#render();
+      });
+    }
     if (!this.root.open) this.root.showModal();
     this.#render();
     deferFocus(this._tabs?.find((tab) => tab.dataset.tab === this.activeTab));
@@ -205,6 +232,9 @@ export class SettingsUI {
     document.body.append(dlg);
     // 背景クリックでの close は行わない。閉じるのは ×/キャンセル/保存して適用のみ
     // (誤クリックで編集内容を失わないため)。
+    // ネイティブの dialog close イベントで確実に購読解除する (Escapeキー等、this.close()を
+    // 経由しない閉じ方でも translation:model:progress の購読が残り続けないようにするため)。
+    dlg.addEventListener("close", () => { this._unsubscribeTranslationModelProgress?.(); this._unsubscribeTranslationModelProgress = null; });
 
     const header = document.createElement("header");
     header.className = "settings-header";
@@ -1139,6 +1169,210 @@ export class SettingsUI {
     note.className = "muted settings-note";
     note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。「読み上げ間隔 (秒)」は、あるコメントの読み上げが終わってから次のコメントの読み上げを始めるまでの最短待機時間です (既定0=間隔なし)。コメントが連続で届いても機関銃のように読み上げ続けないよう調整できます。同じキューにコメント読み上げより後ろに積まれたAI応答は、この待機の間も自分の順番を待つため、間隔を長くするとAI応答の開始も遅れる場合があります。「連続する絵文字を1つにまとめる」は、単独の絵文字は残し、空白を挟んだ絵文字の連投も先頭1つだけ読み上げます。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
     this._body.append(note);
+    if (cr.enabled) this.#renderCommentReaderTranslation(cr);
+  }
+
+  // ---- commentReader.translation (issue #257 Phase 4, #263) ----
+  #renderCommentReaderTranslation(cr) {
+    const t = cr.translation ?? {};
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = "外国語コメントの翻訳読み上げ";
+    const { card, body: cardBody } = this.#card([title]);
+    const enabledField = this.#pathCheckbox("外国語コメントを日本語に翻訳して読み上げる", "commentReader.translation.enabled", { value: !!t.enabled, onChange: () => this.#render() });
+    cardBody.append(enabledField);
+    if (t.enabled) {
+      const g = document.createElement("div");
+      g.className = "card-grid";
+      g.append(this.#translationSourceLanguages(asArray(t.sourceLanguages)));
+      g.append(this.#pathSelect("読み上げ方法", TRANSLATION_OUTPUT_MODES, "commentReader.translation.outputMode", { value: t.outputMode ?? "translated" }));
+      g.append(this.#pathSelect("翻訳失敗時", TRANSLATION_FAILURE_POLICIES, "commentReader.translation.onFailure", { value: t.onFailure ?? "readOriginal" }));
+      g.append(this.#pathField("言語判定の信頼度 (0〜1)", "commentReader.translation.minimumConfidence", { type: "number", value: t.minimumConfidence ?? 0.7, attrs: { min: 0, max: 1, step: 0.05 } }));
+      g.append(this.#pathField("翻訳timeout (ms)", "commentReader.translation.timeoutMs", { type: "number", value: t.timeoutMs ?? 3000, attrs: { min: 500, max: 15000, step: 100 } }));
+      g.append(this.#pathField("翻訳する最大文字数", "commentReader.translation.maxInputChars", { type: "number", value: t.maxInputChars ?? 500, attrs: { min: 1, max: 1000, step: 10 } }));
+      cardBody.append(g);
+      cardBody.append(this.#translationModelStatusBlock());
+    }
+    this._body.append(card);
+    const note = document.createElement("p");
+    note.className = "muted settings-note";
+    note.textContent = "英語・フランス語のコメントを端末内で日本語へ翻訳し、翻訳後のテキストだけをコメント読み上げに使います。元コメントの表示・履歴・OBS通知・AIペルソナへの入力は原文のままです。翻訳は外部API/AIへ一切送信せず、下の翻訳モデルを事前に導入したうえで完全にオフラインで動作します。日本語コメント・対象外言語・短い定型反応 (GG/LOL等) は原則として翻訳せず原文のまま読み上げます。";
+    this._body.append(note);
+  }
+
+  #translationSourceLanguages(selectedLanguages) {
+    const selected = new Set(selectedLanguages.length ? selectedLanguages : ["en", "fr"]);
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const label = document.createElement("span");
+    label.className = "field-label";
+    label.textContent = "対象言語";
+    const box = document.createElement("div");
+    box.className = "checkbox-group";
+    for (const opt of TRANSLATION_SOURCE_LANGUAGES) {
+      const lab = document.createElement("label");
+      lab.className = "chip-check";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = opt.value;
+      cb.checked = selected.has(opt.value);
+      cb.addEventListener("change", () => {
+        if (cb.checked) selected.add(opt.value); else selected.delete(opt.value);
+        this.#setPath(this.draft, "commentReader.translation.sourceLanguages", [...selected]);
+      });
+      lab.append(cb, document.createTextNode(opt.label));
+      box.append(lab);
+    }
+    wrap.append(label, box);
+    return wrap;
+  }
+
+  #ensureTranslationModelStatusLoaded() {
+    if (this._translationModelStatus || this._translationModelStatusLoading) return;
+    this._translationModelStatusLoading = true;
+    translationModelStatusThroughElectron().then((result) => {
+      this._translationModelStatusLoading = false;
+      this._translationModelStatus = result;
+      if (this.root?.open) this.#render();
+    });
+  }
+
+  async #installTranslationModel() {
+    if (this._translationModelBusy) return;
+    this._translationModelBusy = true;
+    this._translationModelProgress = null;
+    this.#render();
+    const result = await installTranslationModelThroughElectron();
+    this._translationModelBusy = false;
+    this._translationModelProgress = null;
+    this._translationModelStatus = null; // 最新状態を取り直す
+    if (!result.ok) this.log(`翻訳モデルの導入に失敗しました: ${result.error.message}`, "error");
+    if (this.root?.open) this.#render();
+  }
+
+  async #cancelTranslationModelInstall() {
+    await cancelTranslationModelInstallThroughElectron();
+  }
+
+  async #deleteTranslationModel() {
+    if (this._translationModelBusy) return;
+    this._translationModelBusy = true;
+    this.#render();
+    const result = await deleteTranslationModelThroughElectron();
+    this._translationModelBusy = false;
+    this._translationModelStatus = null;
+    if (!result.ok) this.log(`翻訳モデルの削除に失敗しました: ${result.error.message}`, "error");
+    if (this.root?.open) this.#render();
+  }
+
+  #translationModelActionButton(label, onClick, { disabled = false } = {}) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-ghost";
+    btn.textContent = label;
+    btn.disabled = disabled;
+    btn.addEventListener("click", () => { void onClick(); });
+    return btn;
+  }
+
+  #translationModelStatusBlock() {
+    const wrap = document.createElement("div");
+    wrap.className = "field translation-model-status";
+    const label = document.createElement("span");
+    label.className = "field-label";
+    label.textContent = "翻訳モデルの状態";
+    wrap.append(label);
+
+    if (!hasElectronTranslationService()) {
+      const note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = "翻訳モデルの導入・管理はElectron版でのみ利用できます。";
+      wrap.append(note);
+      return wrap;
+    }
+
+    this.#ensureTranslationModelStatusLoaded();
+    const body = document.createElement("div");
+    body.className = "translation-model-status-body";
+    const result = this._translationModelStatus;
+
+    if (!result) {
+      const loading = document.createElement("p");
+      loading.className = "muted";
+      loading.textContent = "状態を確認しています…";
+      body.append(loading);
+      wrap.append(body);
+      return wrap;
+    }
+    if (!result.ok) {
+      const errP = document.createElement("p");
+      errP.className = "muted";
+      errP.textContent = `状態の取得に失敗しました: ${result.error.message}`;
+      body.append(errP);
+      wrap.append(body);
+      return wrap;
+    }
+
+    const { state, catalogModel, installed, lastError } = result.value;
+    const chip = document.createElement("span");
+    chip.className = `chip translation-model-chip is-${state}`;
+    chip.textContent = TRANSLATION_MODEL_STATE_LABELS[state] ?? state;
+    body.append(chip);
+
+    const info = document.createElement("p");
+    info.className = "muted";
+    const sizeMb = Math.ceil((installed?.totalSizeBytes ?? catalogModel.totalSizeBytes) / (1024 * 1024));
+    info.textContent = `${catalogModel.displayName} — 約${sizeMb}MB — ライセンス: ${catalogModel.license.name}`;
+    body.append(info);
+    if (catalogModel.license.url) {
+      const licenseLink = document.createElement("a");
+      licenseLink.href = catalogModel.license.url;
+      licenseLink.target = "_blank";
+      licenseLink.rel = "noopener noreferrer";
+      licenseLink.className = "muted translation-model-license-link";
+      licenseLink.textContent = "ライセンス全文を見る";
+      body.append(licenseLink);
+    }
+
+    const progress = this._translationModelProgress;
+    if ((state === "downloading" || this._translationModelBusy) && progress) {
+      const bar = document.createElement("div");
+      bar.className = "download-progress";
+      const fill = document.createElement("div");
+      fill.className = "download-progress-fill";
+      fill.style.width = `${Math.round(progress.percent ?? 0)}%`;
+      bar.append(fill);
+      body.append(bar);
+      const progressText = document.createElement("p");
+      progressText.className = "muted";
+      progressText.textContent = `${progress.fileName || ""} (${progress.fileIndex + 1}/${progress.fileCount}) ${Math.round(progress.percent ?? 0)}%`;
+      body.append(progressText);
+    }
+
+    if (lastError) {
+      const errP = document.createElement("p");
+      errP.className = "muted translation-model-error";
+      errP.textContent = `エラー: ${lastError.message}`;
+      body.append(errP);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "btn-row";
+    if (this._translationModelBusy && state !== "downloading") {
+      const busy = document.createElement("span");
+      busy.className = "muted";
+      busy.textContent = "処理中…";
+      actions.append(busy);
+    } else if (state === "not_installed" || state === "error") {
+      actions.append(this.#translationModelActionButton(state === "error" ? "再試行" : "ダウンロード", () => this.#installTranslationModel()));
+    } else if (state === "downloading") {
+      actions.append(this.#translationModelActionButton("キャンセル", () => this.#cancelTranslationModelInstall()));
+    } else if (state === "installed") {
+      actions.append(this.#translationModelActionButton("削除", () => this.#deleteTranslationModel()));
+    }
+    body.append(actions);
+    wrap.append(body);
+    return wrap;
   }
 
   // ---- news ----
