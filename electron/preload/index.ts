@@ -137,6 +137,12 @@ const api: DociaiApi = {
     translate: (input) => invoke(CHANNELS.TRANSLATION_TRANSLATE, input),
     cancel: (requestId) => invoke(CHANNELS.TRANSLATION_CANCEL, requestId),
     status: () => invoke(CHANNELS.TRANSLATION_STATUS),
+    model: {
+      status: () => invoke(CHANNELS.TRANSLATION_MODEL_STATUS),
+      install: () => invoke(CHANNELS.TRANSLATION_MODEL_INSTALL),
+      cancelInstall: () => invoke(CHANNELS.TRANSLATION_MODEL_INSTALL_CANCEL),
+      delete: () => invoke(CHANNELS.TRANSLATION_MODEL_DELETE),
+    },
   },
   streamEvents: {
     list: (input) => invoke(CHANNELS.STREAM_EVENTS_LIST, input),

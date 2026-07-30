@@ -13,6 +13,7 @@ import { MAX_TRANSLATE_INPUT_CHARS } from "../../../shared/services/translation-
 import { ServiceRuntime } from "../service-runtime";
 import { ServiceError, normalizeServiceError } from "../service-error";
 import { TranslationRuntime } from "./translation-runtime";
+import type { TranslationModelRepository } from "./translation-model-repository";
 
 // モデルの初回ロードには約22秒かかる (issue #259実測、macOS arm64)。commentReader.translation.
 // timeoutMsの既定値(3000ms)より大幅に長いため、Main側はより寛容な上限を独自に持ち、初回ロード中の
@@ -38,10 +39,14 @@ function assertInput(input: TranslateInput): void {
 export class TranslationService {
   readonly runtime = new ServiceRuntime("translation");
   readonly #modelRuntime: TranslationRuntime;
+  readonly #modelRepository: TranslationModelRepository | null;
   readonly #timeoutMs: number;
 
-  constructor(deps: { cacheDir: string; modelRuntime?: TranslationRuntime; timeoutMs?: number }) {
+  constructor(deps: { cacheDir: string; modelRuntime?: TranslationRuntime; modelRepository?: TranslationModelRepository; timeoutMs?: number }) {
     this.#modelRuntime = deps.modelRuntime ?? new TranslationRuntime({ cacheDir: deps.cacheDir });
+    // issue #257 Phase 3 (#262): modelRepositoryが無い場合はテスト用途のフォールバック
+    // (モデル導入状態の確認をスキップし、モデル自体があるかどうかだけで判断する既存挙動)。
+    this.#modelRepository = deps.modelRepository ?? null;
     this.#timeoutMs = deps.timeoutMs ?? SERVICE_TIMEOUT_MS;
   }
 
@@ -56,6 +61,12 @@ export class TranslationService {
 
   async translate(input: TranslateInput): Promise<TranslateResult> {
     assertInput(input);
+    // issue #257要件: モデル未導入のまま呼ばれた場合、無言で外部APIへ切り替えたりダウンロードを
+    // 試みたりせず、明示的なエラーを返す (env.allowRemoteModels=falseがtransformers.js側の
+    // フォールバックを防ぎ、ここはIPCの呼び出し元へ分かりやすいメッセージを返す役目)。
+    if (this.#modelRepository && !(await this.#modelRepository.isInstalled())) {
+      throw new ServiceError("UNAVAILABLE", "translation model is not installed", { serviceId: "translation", retryable: false });
+    }
     const generation = input.generation ?? this.runtime.generation;
     if (generation !== this.runtime.generation) {
       throw new ServiceError("CANCELLED", "request generation is stale", { serviceId: "translation", retryable: false });

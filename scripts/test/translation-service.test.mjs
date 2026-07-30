@@ -129,6 +129,28 @@ test("the service's own timeoutMs marks a slow request stale; a result that arri
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test("when a modelRepository is supplied, translate() rejects with UNAVAILABLE (not a model-load attempt) while the model is not installed", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    let called = false;
+    const runtime = fakeRuntime({ translate: async (text) => { called = true; return text; } });
+    const modelRepository = { isInstalled: async () => false };
+    const service = new modules.TranslationService({ cacheDir: "/tmp/unused", modelRuntime: runtime, modelRepository });
+    await assert.rejects(service.translate(validInput), (error) => error.code === "UNAVAILABLE" && /not installed/.test(error.message));
+    assert.equal(called, false, "the model runtime must never be touched when the model isn't installed");
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("when a modelRepository is supplied and the model IS installed, translate() proceeds normally", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    const modelRepository = { isInstalled: async () => true };
+    const service = new modules.TranslationService({ cacheDir: "/tmp/unused", modelRuntime: fakeRuntime(), modelRepository });
+    const result = await service.translate(validInput);
+    assert.equal(result.text, `翻訳結果: ${validInput.text}`);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("status() reflects the model runtime's own state/modelId/lastError", async () => {
   const { modules, directory } = await loadModules();
   try {

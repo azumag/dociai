@@ -34,7 +34,13 @@ export class TranslationRuntime {
     this.#modelId = options.modelId ?? DEFAULT_MODEL_ID;
     // アプリ起動時・翻訳時に外部へ利用状況やtelemetryを送信しない (issue #257要件)。
     // transformers.js自体はHTTPアクセス統計等を送らない実装のため、追加の抑止設定は不要。
+    // cacheDirはTranslationModelRepository (issue #257 Phase 3, #262) が導入するファイルと
+    // 同じ場所を指す — `{cacheDir}/{modelId}/...` というtransformers.jsの既定キャッシュ配置に
+    // repository側が合わせて配置するので、導入済みなら追加のダウンロードなしで見つかる。
+    // allowRemoteModels: false により、未導入のまま呼ばれた場合は無言でHFから取得しにいかず
+    // 明示的なエラーになる (issue #257要件: モデル未導入時に外部へ暗黙fallbackしない)。
     env.cacheDir = options.cacheDir;
+    env.allowRemoteModels = false;
   }
 
   get state(): TranslationRuntimeState { return this.#state; }
