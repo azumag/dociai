@@ -130,6 +130,97 @@ test("install() downloads every catalog file, verifies each one, and only then m
   } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test("install() rejects a back-to-back second call with CONFLICT even before the first call's initial await resolves (PR review regression)", async () => {
+  const { modules, directory } = await loadModules();
+  const files = { "config.json": Buffer.from("ok") };
+  const { server, url } = await startServer(files);
+  try {
+    const modelsDir = path.join(directory, "models");
+    const catalogFile = path.join(directory, "catalog.json");
+    await writeCatalog(catalogFile, files, url);
+    const repository = makeRepository(modules, { modelsDir, catalogFile, downloadFile: (input) => insecureDownloadFile(modules, input) });
+
+    // #installAbort must now be set synchronously, before ANY await (including the catalog load) —
+    // calling install() twice back-to-back, with no await in between, used to let BOTH calls pass
+    // the CONFLICT guard (it was only set after `await this.#loadCatalog()`), so they'd share the
+    // same staging directory and race each other's writes.
+    const first = repository.install();
+    const second = repository.install();
+    await assert.rejects(second, (error) => error instanceof modules.ServiceError && error.code === "CONFLICT");
+    const installed = await first;
+    assert.equal(installed.id, "Test/fake-model");
+    assert.equal(await repository.isInstalled(), true);
+  } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("a cancel landing right after the last file finishes downloading (before verify/rename) still leaves nothing installed (PR review regression)", async () => {
+  const { modules, directory } = await loadModules();
+  const files = { "config.json": Buffer.from("ok"), "b.bin": Buffer.from("also ok") };
+  const { server, url } = await startServer(files);
+  try {
+    const modelsDir = path.join(directory, "models");
+    const catalogFile = path.join(directory, "catalog.json");
+    await writeCatalog(catalogFile, files, url);
+    let repository;
+    let completedFiles = 0;
+    const totalFiles = Object.keys(files).length;
+    repository = makeRepository(modules, {
+      modelsDir, catalogFile,
+      downloadFile: async (input) => {
+        const result = await insecureDownloadFile(modules, input);
+        completedFiles += 1;
+        // cancelInstall() already returns {cancelled: true} to the caller at this point in real
+        // usage, so install() must not silently finish the verify/rename/registry-write sequence
+        // afterward — it previously never re-checked the abort signal between the download loop
+        // and the atomic rename, so a cancel landing in this exact window still completed the
+        // install (PR review indicated: "UI shows cancelled then installed").
+        if (completedFiles === totalFiles) repository.cancelInstall();
+        return result;
+      },
+    });
+
+    await assert.rejects(repository.install(), (error) => error instanceof modules.ServiceError && error.code === "CANCELLED");
+    assert.equal(await repository.isInstalled(), false, "a cancel landing between the last file's download and the atomic rename must not leave the model installed");
+  } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("status() queried synchronously from within the 'cancelled' progress event handler never reports state:'downloading' (PR review regression — found via live UI verification)", async () => {
+  const { modules, directory } = await loadModules();
+  const files = { "config.json": Buffer.from("ok") };
+  const { server, url } = await startServer(files);
+  try {
+    const modelsDir = path.join(directory, "models");
+    const catalogFile = path.join(directory, "catalog.json");
+    await writeCatalog(catalogFile, files, url);
+    let repository;
+    let statusPromiseFromWithinEmit = null;
+    repository = new modules.TranslationModelRepository({
+      modelsDir,
+      catalogFile,
+      // a real consumer (settings-ui.js) calls status() SYNCHRONOUSLY in reaction to receiving a
+      // "cancelled" progress event. #installAbort must already be cleared by the time this event
+      // fires, or that reactive status() call still observes it set and reports "downloading" —
+      // and since no further progress event will ever arrive, nothing corrects it afterward (the
+      // settings UI chip gets stuck on "ダウンロード中" forever, confirmed via live Electron testing).
+      emitDownloadProgress: (event) => {
+        if (event.state === "cancelled") statusPromiseFromWithinEmit = repository.status();
+      },
+      downloadFile: (input) => new Promise((resolve, reject) => {
+        input.signal.addEventListener("abort", () => reject(new modules.ServiceError("CANCELLED", "download cancelled", { retryable: false })), { once: true });
+      }),
+    });
+
+    const installPromise = repository.install();
+    await new Promise((resolve) => setTimeout(resolve, 20)); // let the download actually start
+    repository.cancelInstall();
+    await assert.rejects(installPromise, (error) => error instanceof modules.ServiceError && error.code === "CANCELLED");
+
+    assert.ok(statusPromiseFromWithinEmit, "emitDownloadProgress must have fired for state: 'cancelled' and captured a status() call");
+    const statusDuringEmit = await statusPromiseFromWithinEmit;
+    assert.equal(statusDuringEmit.state, "not_installed", `status() called synchronously from the cancelled-event handler must not see #installAbort still set, got: ${JSON.stringify(statusDuringEmit)}`);
+  } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("install() leaves nothing installed when one file fails checksum verification", async () => {
   const { modules, directory } = await loadModules();
   const files = { "config.json": Buffer.from("ok"), "onnx/model.onnx": Buffer.from("also ok") };

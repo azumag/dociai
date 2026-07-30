@@ -142,10 +142,15 @@ export class CommentSpeechPipeline {
 
   #enqueue(comment, cr, bodies) {
     const voice = this.#resolveVoice();
-    for (const body of bodies) {
+    bodies.forEach((body, index) => {
       const text = cr.includeAuthor === false ? body : `${comment.author}: ${body}`;
-      this.#speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice, commentId: comment.id });
-    }
+      // bodies.length > 1 は outputMode: originalThenTranslated の [原文, 翻訳] のみ — その
+      // 2件目 (翻訳) は同じコメントの続きであり、SpeechQueue側のコメント間隔待ち
+      // (commentReaderIntervalMs) を挟むと「原文 → 無音N秒 → 同じコメントの翻訳」になって
+      // しまう (PRレビュー指摘)。1件目 (index===0) は他コメントとの間隔を通常どおり尊重する。
+      const metadata = index > 0 ? { skipCommentReaderInterval: true } : undefined;
+      this.#speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice, commentId: comment.id, metadata });
+    });
   }
 
   dispose() {

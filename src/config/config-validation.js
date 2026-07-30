@@ -26,7 +26,12 @@ export function validateConfigStructure(config) {
     const maxResults = Number(config.research.maxResults);
     if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 10) issues.push(issue(["research", "maxResults"], "range", "maxResults must be an integer from 1 to 10"));
   }
-  if (config.commentReader?.translation?.enabled === true) {
+  // commentReader.enabledもゲートに含める — settings-ui.js側は`cr.enabled`がfalseの間
+  // 翻訳カード自体を描画しない (#renderCommentReader()) ため、それと揃えないと
+  // 「commentReaderを無効化しただけなのに、画面から見えなくなった翻訳フィールドの
+  // validationエラーで保存がブロックされ続ける」という直しようのない詰み状態になる
+  // (PRレビュー指摘)。
+  if (config.commentReader?.enabled === true && config.commentReader?.translation?.enabled === true) {
     const t = config.commentReader.translation;
     const sourceLanguages = Array.isArray(t.sourceLanguages) ? t.sourceLanguages : [];
     if (!sourceLanguages.length || sourceLanguages.some((lang) => !registryIds("translationSourceLanguages").includes(lang))) {

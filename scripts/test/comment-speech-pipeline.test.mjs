@@ -74,6 +74,12 @@ test("outputMode: originalThenTranslated enqueues both texts, in order, with the
     "Viewer: Thank you for the stream! That was a great match.",
     "Viewer: 配信ありがとう!",
   ]);
+  // the translation (2nd item) must be marked so SpeechQueue's inter-comment pacing doesn't
+  // insert a full commentReaderIntervalMs pause between a comment and its own translation
+  // (PR review regression) — the original (1st item) is unmarked, pacing normally against
+  // whatever comment came before it.
+  assert.equal(speechQueue.items[0].metadata, undefined);
+  assert.deepEqual(speechQueue.items[1].metadata, { skipCommentReaderInterval: true });
 });
 
 test("onFailure: readOriginal speaks the original text once when translation fails or times out", async () => {

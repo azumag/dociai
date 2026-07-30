@@ -99,7 +99,18 @@ function singleRequest(url: URL, options: Required<Pick<DownloadFileInput, "isAd
     }
     const transport = (url.protocol === "https:" ? options.httpsRequest : options.httpRequest) as unknown as RequestFn;
     const lookup = guardedLookup(options.isAddressAllowed, options.dnsLookup);
-    const request = transport(url, { method: "GET", headers: { "User-Agent": "dociai-translation/1", Accept: "*/*" }, lookup, timeout: options.connectTimeoutMs, signal }, (response) => resolve(response));
+    const request = transport(url, { method: "GET", headers: { "User-Agent": "dociai-translation/1", Accept: "*/*" }, lookup, timeout: options.connectTimeoutMs, signal }, (response) => {
+      // Nodeのrequest `timeout`オプションはsocket全体の生存期間 (接続確立後のbody streaming中も
+      // 含む) に効く仕様であり、接続確立=ヘッダ受信の瞬間だけを守るものではない。ヘッダを受信
+      // できた時点でこの接続timeoutは役目を終えたとみなしclear(setTimeout(0))する — 以降の
+      // stream中の停止監視はdownloadAndVerify()側の専用idleTimer (データ到着ごとにリセットする
+      // より長い許容窓) に完全に委ねる。clearしないままだと、connectTimeoutMs (既定15秒) より
+      // 長い一時的なbody streamingの停止のたびにここが先に発火し、idleTimerの30秒猶予に
+      // 到達する前に630MB級の大容量downloadが打ち切られ最初からやり直しになっていた
+      // (PRレビュー指摘)。
+      request.setTimeout(0);
+      resolve(response);
+    });
     request.on("timeout", () => request.destroy(Object.assign(new Error("connection timed out"), { code: "ETIMEDOUT" })));
     request.on("error", (error) => reject(mapStreamError(error)));
     request.end();

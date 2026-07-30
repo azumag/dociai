@@ -76,6 +76,7 @@ export class SettingsUI {
     this._built = false;
     this._translationModelStatus = null;
     this._translationModelStatusLoading = false;
+    this._translationModelStatusGeneration = 0;
     this._translationModelProgress = null;
     this._translationModelBusy = false;
     this._unsubscribeTranslationModelProgress = null;
@@ -114,7 +115,7 @@ export class SettingsUI {
     this.draft = clone(current);
     this.controller.open(this.draft);
     this.activeTab = "connectors";
-    this._translationModelStatus = null;
+    this.#invalidateTranslationModelStatus();
     this._translationModelProgress = null;
     this.#ensureBuilt();
     if (hasElectronTranslationService()) {
@@ -128,12 +129,12 @@ export class SettingsUI {
         // 進捗イベントの度に再取得しない。
         const alreadyDownloading = this._translationModelStatus?.value?.state === "downloading";
         if (event.state === "installed" || event.state === "failed" || event.state === "cancelled" || (event.state === "downloading" && !alreadyDownloading)) {
-          this._translationModelStatus = null;
+          this.#invalidateTranslationModelStatus();
         }
         if (event.state === "installed") this._announcer?.announce("翻訳モデルの導入が完了しました");
         else if (event.state === "failed") this._announcer?.announce("翻訳モデルの導入に失敗しました");
         else if (event.state === "cancelled") this._announcer?.announce("翻訳モデルの導入をキャンセルしました");
-        if (this.root?.open) this.#render();
+        this.#refreshTranslationModelStatusUI();
       });
     }
     if (!this.root.open) this.root.showModal();
@@ -1219,6 +1220,13 @@ export class SettingsUI {
     const selected = new Set(selectedLanguages);
     const wrap = document.createElement("div");
     wrap.className = "field";
+    // このチェックボックス群には対応する単一の<input>が無いため、他フィールドのように
+    // #attachFieldInput()経由でdata-config-pathが付かない — navigateToIssue()/#applyIssueA11y()
+    // が`[data-config-path="commentReader.translation.sourceLanguages"]`を探しても見つからず、
+    // フッターのエラー一覧から「該当入力を表示できません」となり、aria-invalid/aria-describedby
+    // による通知も届かなかった (PRレビュー指摘)。グループのwrapper自体をfieldとして扱う。
+    wrap.dataset.configPath = "commentReader.translation.sourceLanguages";
+    wrap.tabIndex = -1; // 非interactiveな要素だがnavigateToIssue()がfocus()できるようにする
     const label = document.createElement("span");
     label.className = "field-label";
     label.textContent = "対象言語";
@@ -1242,18 +1250,48 @@ export class SettingsUI {
     return wrap;
   }
 
+  // _translationModelStatusをnullへ戻す全ての箇所をこれ経由にする — generationを一緒に
+  // 進めることで、「古いfetchがまだ飛行中のうちに新しい無効化 (例: downloading中に届いた
+  // cancelledイベント) が起きる」競合を検出できるようにする (下記#ensureTranslationModelStatusLoaded
+  // 参照)。
+  #invalidateTranslationModelStatus() {
+    this._translationModelStatus = null;
+    this._translationModelStatusGeneration += 1;
+  }
+
   #ensureTranslationModelStatusLoaded() {
     if (this._translationModelStatus || this._translationModelStatusLoading) return;
     this._translationModelStatusLoading = true;
+    const generation = this._translationModelStatusGeneration;
     translationModelStatusThroughElectron()
-      .then((result) => { this._translationModelStatus = result; })
+      .then((result) => { if (generation === this._translationModelStatusGeneration) this._translationModelStatus = result; })
       // ipcRenderer.invoke() 自体がreject する経路 (Main process側のResult<T>包み込み以前の
       // 異常) も拾っておく — さもないと「状態を確認しています…」が復帰不能に固定表示される。
-      .catch((error) => { this._translationModelStatus = { ok: false, error: { message: error instanceof Error ? error.message : String(error) } }; })
+      .catch((error) => { if (generation === this._translationModelStatusGeneration) this._translationModelStatus = { ok: false, error: { message: error instanceof Error ? error.message : String(error) } }; })
       .finally(() => {
         this._translationModelStatusLoading = false;
-        if (this.root?.open) this.#render();
+        // このfetchが飛んでいる間に別の無効化 (例: downloading中に届いたcancelledイベント) が
+        // 起きていた場合、上のthen/catchは意図的に結果を捨てている — _translationModelStatusは
+        // まだnullのままなので、この#refreshTranslationModelStatusUI()が
+        // #ensureTranslationModelStatusLoaded()を再度呼び直し、最新のgenerationで
+        // 取り直しになる。取り直さずにここで終えると、古い(downloading時点の)結果で
+        // 上書きされたままcancelled後もチップが固定され続けていた (PRレビュー指摘: 実際に
+        // ライブ検証で再現・特定したrace)。
+        this.#refreshTranslationModelStatusUI();
       });
+  }
+
+  // ダウンロード中は`translation:model:progress`が~500msごとに発火する。以前はここで毎回
+  // 全体の#render()を呼んでおり、replaceChildren()でbody全体を作り直すため、フォーカス中の
+  // 入力・開いていたselect・スクロール位置が0.5秒ごとに吹き飛んでいた — 630MB級のダウンロード中
+  // (数分間) はキーボード/スクリーンリーダー利用者が設定ダイアログを一切操作できなくなっていた
+  // (PRレビュー指摘の重大なaccessibility不具合)。翻訳モデル状態ブロック単体だけを差し替える。
+  #refreshTranslationModelStatusUI() {
+    if (!this.root?.open) return;
+    if (this.activeTab !== "commentReader") return; // 非表示タブの内容は次にそのタブへ切り替わった時の#render()が最新状態を反映する
+    const existing = this._body.querySelector(".translation-model-status");
+    if (!existing) { this.#render(); return; } // まだ一度もブロックが描画されていない (翻訳を初めて有効化した直後など) — この場合だけは全体描画が必要
+    existing.replaceWith(this.#translationModelStatusBlock());
   }
 
   async #installTranslationModel() {
@@ -1261,12 +1299,22 @@ export class SettingsUI {
     this._translationModelBusy = true;
     this._translationModelProgress = null;
     this.#render();
-    const result = await installTranslationModelThroughElectron();
-    this._translationModelBusy = false;
-    this._translationModelProgress = null;
-    this._translationModelStatus = null; // 最新状態を取り直す
-    if (!result.ok && result.error.code !== "CANCELLED") this.log(`翻訳モデルの導入に失敗しました: ${result.error.message}`, "error");
-    if (this.root?.open) this.#render();
+    try {
+      // ipcRenderer.invoke()自体がreject する経路 (#ensureTranslationModelStatusLoaded()が
+      // 既に想定・catchしている異常) をここでも拾う。try/finally無しで単純にawaitしていた旧実装
+      // では、そのrejectがonClickハンドラの`void onClick()`に未処理rejectionとして飲み込まれ、
+      // _translationModelBusyがtrueのまま復帰不能になっていた (「処理中…」が固定表示、ダイアログ
+      // の閉じ直しでも治らない — PRレビュー指摘)。
+      const result = await installTranslationModelThroughElectron();
+      if (!result.ok && result.error.code !== "CANCELLED") this.log(`翻訳モデルの導入に失敗しました: ${result.error.message}`, "error");
+    } catch (error) {
+      this.log(`翻訳モデルの導入に失敗しました: ${error instanceof Error ? error.message : String(error)}`, "error");
+    } finally {
+      this._translationModelBusy = false;
+      this._translationModelProgress = null;
+      this.#invalidateTranslationModelStatus(); // 最新状態を取り直す
+      if (this.root?.open) this.#render();
+    }
   }
 
   async #cancelTranslationModelInstall() {
@@ -1277,11 +1325,16 @@ export class SettingsUI {
     if (this._translationModelBusy) return;
     this._translationModelBusy = true;
     this.#render();
-    const result = await deleteTranslationModelThroughElectron();
-    this._translationModelBusy = false;
-    this._translationModelStatus = null;
-    if (!result.ok) this.log(`翻訳モデルの削除に失敗しました: ${result.error.message}`, "error");
-    if (this.root?.open) this.#render();
+    try {
+      const result = await deleteTranslationModelThroughElectron();
+      if (!result.ok) this.log(`翻訳モデルの削除に失敗しました: ${result.error.message}`, "error");
+    } catch (error) {
+      this.log(`翻訳モデルの削除に失敗しました: ${error instanceof Error ? error.message : String(error)}`, "error");
+    } finally {
+      this._translationModelBusy = false;
+      this.#invalidateTranslationModelStatus();
+      if (this.root?.open) this.#render();
+    }
   }
 
   #translationModelActionButton(label, onClick, { disabled = false } = {}) {
@@ -1370,7 +1423,11 @@ export class SettingsUI {
       body.append(bar);
       const progressText = document.createElement("p");
       progressText.className = "muted";
-      progressText.textContent = `${progress.fileName || ""} (${progress.fileIndex + 1}/${progress.fileCount}) ${Math.round(progress.percent ?? 0)}%`;
+      // fileIndex+1は"downloading"中 (0始まりの現在ファイル番号) にのみ意味がある。
+      // "verifying"/"installed"はrepository.ts側でfileIndex===fileCountとして発火するため、
+      // +1すると「(7/6)」のように総数を超えて表示されてしまっていた (PRレビュー指摘)。
+      const fileLabel = progress.state === "downloading" ? `${progress.fileIndex + 1}/${progress.fileCount}` : `${progress.fileCount}/${progress.fileCount}`;
+      progressText.textContent = `${progress.fileName || ""} (${fileLabel}) ${Math.round(progress.percent ?? 0)}%`;
       body.append(progressText);
     }
 

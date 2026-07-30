@@ -117,12 +117,18 @@ export class TranslationModelRepository {
 
   async install(): Promise<InstalledTranslationModel> {
     if (this.#installAbort) throw new ServiceError("CONFLICT", "a translation model install is already in progress", { serviceId: SERVICE_ID, retryable: false });
-    const model = await this.#loadCatalog();
-    const stagingDir = path.join(this.#modelsDir, STAGING_DIR_NAME, ...model.id.split("/"));
+    // ガード直後、他のいかなるawaitより前に同期でinstallAbortを立てる。以前は#loadCatalog()の
+    // awaitより後に代入していたため、初回呼び出し (catalogがまだキャッシュされていない=実ファイル
+    // I/Oが挟まる) 中に2回目のinstall()が同じガードを通過でき、同じstagingDirを2つのinstall()が
+    // 共有して書き込み合う実レースになっていた (PRレビュー指摘)。
     const controller = new AbortController();
     this.#installAbort = controller;
     this.#lastError = null;
+    let model: TranslationModelCatalogEntry | undefined;
     try {
+      model = await this.#loadCatalog();
+      const catalogModel = model; // a plain const so TS can narrow it inside the closure below
+      const stagingDir = path.join(this.#modelsDir, STAGING_DIR_NAME, ...model.id.split("/"));
       // fs.statfs (inside getDiskSpace) requires the target path to already exist — on a genuinely
       // fresh install (no prior translation model directory at all), modelsDir itself may not
       // exist yet, so it must be created before the disk-space preflight, not just before staging.
@@ -147,10 +153,18 @@ export class TranslationModelRepository {
           signal: controller.signal,
           onProgress: (bytesDownloaded, totalBytes) => {
             const snapshot = tracker.snapshot(bytesDownloaded, totalBytes);
-            emitThrottled({ modelId: model.id, fileName: file.name, fileIndex: index, fileCount: model.files.length, bytesDownloaded, totalBytes, bytesPerSecond: snapshot.bytesPerSecond, percent: snapshot.percent, etaSeconds: snapshot.etaSeconds, state: "downloading", at: new Date().toISOString() });
+            emitThrottled({ modelId: catalogModel.id, fileName: file.name, fileIndex: index, fileCount: catalogModel.files.length, bytesDownloaded, totalBytes, bytesPerSecond: snapshot.bytesPerSecond, percent: snapshot.percent, etaSeconds: snapshot.etaSeconds, state: "downloading", at: new Date().toISOString() });
           },
         });
       }
+
+      // ダウンロードループ自体はファイル単位でsignalを見るが、最後のバイトが届いた直後~rename
+      // までの間に届いたcancelは今までここで見落とされていた — cancelInstall()は既に{cancelled:
+      // true}を返しているのに、install()側はそのままverify/renameを完了させてしまい、
+      // 「キャンセルしたはずのモデルがディスクに導入済みとして残る」不整合になっていた
+      // (PRレビュー指摘)。全ファイルダウンロード後、rename/registry書き込みへ進む直前に
+      // 明示的に再チェックする。
+      if (controller.signal.aborted) throw new ServiceError("CANCELLED", "download cancelled", { serviceId: SERVICE_ID, retryable: false });
 
       // 全ファイルの検証が完了してからatomic renameする — 一部だけ検証済みのファイルが
       // 「導入済み」として見える中間状態を絶対に作らない。
@@ -169,6 +183,13 @@ export class TranslationModelRepository {
         files: model.files.map((file) => ({ name: file.name, sizeBytes: file.sizeBytes, sha256: file.sha256 })),
       };
       await this.#writeRegistry(entry);
+      // 進捗イベントをRenderer側が受け取ってすぐstatus()を取り直すことがある
+      // (settings-ui.jsの購読) — #installAbortをemitより前にクリアしておかないと、その
+      // 即座のstatus()呼び出しがまだ#installAbort!==nullのタイミングを踏んで
+      // state:"downloading"を返してしまい、以降どの進捗イベントも来ないため画面が
+      // 「downloading」に固定されたまま戻らなくなる (PRレビュー指摘の続報として実機ライブ
+      // 検証で再現・特定したrace)。
+      this.#installAbort = null;
       this.#emitDownloadProgress({ modelId: model.id, fileName: "", fileIndex: model.files.length, fileCount: model.files.length, bytesDownloaded: model.totalSizeBytes, totalBytes: model.totalSizeBytes, bytesPerSecond: 0, percent: 100, state: "installed", at: new Date().toISOString() });
       return entry;
     } catch (error) {
@@ -178,14 +199,18 @@ export class TranslationModelRepository {
       // 設定UIが「エラー」チップと再試行ボタンを表示してしまう (PRレビュー指摘)。
       const cancelled = normalized.code === "CANCELLED";
       if (!cancelled) this.#lastError = normalized;
-      this.#emitDownloadProgress({ modelId: model.id, fileName: "", fileIndex: 0, fileCount: model.files.length, bytesDownloaded: 0, totalBytes: model.totalSizeBytes, bytesPerSecond: 0, state: cancelled ? "cancelled" : "failed", at: new Date().toISOString() });
+      // 上のinstalled分岐と同じ理由でemitより前にクリアする。
+      this.#installAbort = null;
+      // modelはロード自体 (#loadCatalog()) が失敗した場合はまだ未代入 — その場合は進捗を
+      // 報告すべき対象のモデルIDすら分からないため、progressイベントは出さない。
+      if (model) {
+        this.#emitDownloadProgress({ modelId: model.id, fileName: "", fileIndex: 0, fileCount: model.files.length, bytesDownloaded: 0, totalBytes: model.totalSizeBytes, bytesPerSecond: 0, state: cancelled ? "cancelled" : "failed", at: new Date().toISOString() });
+      }
       // 失敗・キャンセルいずれでも、中途半端なstagingを次回install()の実行まで放置しない。
       // catalogは常に単一モデルなので、leaf dirだけでなく.staging全体を消してよい
       // (空の親ディレクトリを残さない)。
       await fs.rm(path.join(this.#modelsDir, STAGING_DIR_NAME), { recursive: true, force: true }).catch(() => {});
       throw normalized;
-    } finally {
-      this.#installAbort = null;
     }
   }
 

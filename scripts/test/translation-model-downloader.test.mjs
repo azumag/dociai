@@ -71,6 +71,37 @@ test("downloads a file, streams it to disk, and returns the matching sha256/size
   } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test("a body-streaming stall longer than connectTimeoutMs does not abort the download, as long as it's within idleTimeoutMs (PR review regression)", async () => {
+  const { modules, directory } = await loadModules();
+  const first = crypto.randomBytes(4096);
+  const second = crypto.randomBytes(4096);
+  const buffer = Buffer.concat([first, second]);
+  const { server, url } = await startServer((req, res) => {
+    res.writeHead(200, { "Content-Length": String(buffer.length) });
+    res.write(first);
+    // stall well past connectTimeoutMs (below) but comfortably inside idleTimeoutMs — this must
+    // NOT trip Node's http.request `timeout` option, which (unlike its name near the connect call
+    // site suggests) covers the socket's entire lifetime, not just the initial connect phase.
+    setTimeout(() => res.end(second), 250);
+  });
+  try {
+    const destinationPath = path.join(directory, "out.bin");
+    const result = await modules.downloadVerifiedFile({
+      url: new URL(url("/file.bin")),
+      destinationPath,
+      expectedSizeBytes: buffer.length,
+      expectedSha256: sha256Of(buffer),
+      signal: new AbortController().signal,
+      isAddressAllowed: () => true,
+      allowInsecure: true,
+      connectTimeoutMs: 100,
+      idleTimeoutMs: 5000,
+    });
+    assert.equal(result.sha256, sha256Of(buffer));
+    assert.deepEqual(await fs.readFile(destinationPath), buffer);
+  } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("a sha256 mismatch throws BAD_REQUEST/retryable:false and removes the partial file", async () => {
   const { modules, directory } = await loadModules();
   const buffer = crypto.randomBytes(4096);

@@ -60,6 +60,25 @@ test("Web research requires an existing connector and bounded result count when 
   assert.ok(mockOnOfficialHost.issues.some((entry) => entry.code === "capability" && entry.path.join(".") === "research.connector"));
 });
 
+test("commentReader.translation validation only applies while commentReader itself is enabled, matching what settings-ui.js actually renders", () => {
+  const base = { schemaVersion: CURRENT_SCHEMA_VERSION, connectors: {}, personas: [], triggers: {} };
+  const invalidTranslation = commentReaderDefaults({ enabled: true });
+  invalidTranslation.translation = { ...invalidTranslation.translation, enabled: true, sourceLanguages: [] };
+
+  // with commentReader enabled (the translation card is actually visible), the empty
+  // sourceLanguages selection is correctly flagged.
+  const visible = validateConfigStructure({ ...base, commentReader: invalidTranslation });
+  assert.equal(visible.ok, false);
+  assert.ok(visible.issues.some((entry) => entry.path.join(".") === "commentReader.translation.sourceLanguages"));
+
+  // the same invalid translation config, but with commentReader.enabled: false — settings-ui.js's
+  // #renderCommentReader() never renders the translation card at all in this state, so the user
+  // has no way to fix a flagged field they can't see. Without the commentReader.enabled gate this
+  // used to permanently block saving; it must validate cleanly instead (PR review regression).
+  const hidden = validateConfigStructure({ ...base, commentReader: { ...invalidTranslation, enabled: false } });
+  assert.equal(hidden.ok, true, `expected no issues while the translation card is hidden, got: ${JSON.stringify(hidden.issues)}`);
+});
+
 test("legacy commentReader voice fields migrate only into their selected engine settings", () => {
   const migrated = commentReaderDefaults({ enabled: true, engine: "voicevox", name: "Kyoko", rate: 1.2, pitch: 0.1, speaker: 7, speed: 125, voice: 3, tone: 90, volume: 0.8 });
   assert.deepEqual(migrated.webspeech, { name: "default", rate: 1, pitch: 1 });
