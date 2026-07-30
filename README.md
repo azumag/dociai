@@ -130,6 +130,7 @@ flowchart TD
 | `NewsReader` | `src/news-reader.js` | RSSからニュースを取得し、要約して読み上げキューへ入れる |
 | `TopicReader` | `src/topic-reader.js` | Todoistから話題を取得し、AIコメントとして読み上げキューへ入れる |
 | `CommentSource` | `src/comment-sources.js` | 手動入力/将来のYouTube・Twitchを同じ形で流し込む ([docs/comment-sources.md](docs/comment-sources.md)) |
+| `CommentSpeechPipeline` | `src/comment-speech-pipeline.js` | 英語・フランス語コメントを端末内でローカル翻訳し読み上げる (Electron版のみ、外部API不使用、issue #257)。設定は [docs/configuration.md](docs/configuration.md#翻訳読み上げ-commentreadertranslation-electron版のみ-issue-257) 参照 |
 
 ## GitHub Issues
 

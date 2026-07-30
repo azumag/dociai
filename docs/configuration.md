@@ -260,6 +260,56 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 速度や音高を上書きしません。旧形式のフラットな`name` / `rate` / `pitch` / `speed`
 なども読み込み時に対応するエンジン設定へ移されるため、既存configはそのまま利用できます。
 
+### 翻訳読み上げ (`commentReader.translation`, Electron版のみ, issue #257)
+
+英語・フランス語コメントを端末内で日本語へ翻訳し、**コメント読み上げ用のテキストだけ**を
+差し替える機能。元コメントの表示・履歴 (`CommentStore`)・OBS通知・AIペルソナへの入力は
+常に原文のまま。翻訳は外部AI・翻訳APIへ一切送信せず、下記の翻訳モデルを事前に導入した
+うえで完全にオフラインで動作する (`electron/main/services/translation/`)。Browser版には
+この機能自体が存在しない (`hasElectronTranslationService()` が常にfalse)。
+
+```json
+{
+  "commentReader": {
+    "translation": {
+      "enabled": false,
+      "targetLanguage": "ja",
+      "sourceLanguages": ["en", "fr"],
+      "minimumConfidence": 0.7,
+      "outputMode": "translated",
+      "onFailure": "readOriginal",
+      "timeoutMs": 3000,
+      "maxInputChars": 500,
+      "maxPendingComments": 20
+    }
+  }
+}
+```
+
+| フィールド | 既定 | 説明 |
+|---|---|---|
+| `enabled` | false | 翻訳読み上げを有効化。既存configには影響しないopt-in機能 |
+| `sourceLanguages` | `["en", "fr"]` | 翻訳元として扱う言語。日本語コメント・ここに含まれない言語・言語判定の信頼度が閾値未満のコメントは翻訳せず原文のまま読み上げる |
+| `targetLanguage` | ja | 翻訳先言語。現状 `"ja"` のみ対応 |
+| `minimumConfidence` | 0.7 | ローカル言語判定器 (`tinyld`, `src/comment-language-detector.js`) のtop1/top2相対マージンに対するしきい値 (0〜1)。絶対確率ではない — issue #259のベンチマークで判明した、tinyldの生スコアを絶対しきい値として使うと機能しないという知見に基づく |
+| `outputMode` | translated | `translated` (日本語訳のみ読み上げ) / `originalThenTranslated` (原文の後に日本語訳を読み上げる) |
+| `onFailure` | readOriginal | 翻訳モデル未導入・timeout・翻訳失敗時の挙動。`readOriginal` (原文を読み上げる) / `skip` (読み上げない)。モデル未導入のまま `enabled: true` にした場合も無言で外部APIへ切り替えず、このポリシーに従う |
+| `timeoutMs` | 3000 | 翻訳1件あたりの待ち上限 (500〜15000ms)。Main process側は初回モデルロード (約20〜30秒) を別途考慮した、より長い内部上限を持つ |
+| `maxInputChars` | 500 | この文字数を超えるコメントは翻訳せず原文のまま読み上げる (1〜1000) |
+| `maxPendingComments` | 20 | 翻訳待ちコメントの上限 (1〜200)。超過時は最も古い項目を読み上げずに破棄する |
+
+#### 翻訳モデルの導入・削除
+
+設定UIの「外国語コメントの翻訳読み上げ」カード、またはIPC経由 (`dociai.translation.model.*`)
+でモデルを導入・削除する。採用モデルは `Xenova/m2m100_418M` (MIT License、量子化ONNX一式で
+約630MB、`resources/catalog/translation-models.json` にファイル一覧・sha256を記録)。
+ダウンロードした各ファイルはsha256で検証し、全ファイルの検証が完了してからのみ
+atomicに導入済みとして確定する (`electron/main/services/translation/
+translation-model-repository.ts`)。導入後はネットワーク接続なしで翻訳できる。
+
+モデル選定の経緯・ベンチマーク結果 (レイテンシ実測・言語判定器の精度評価等) は
+GitHub issue [#259](https://github.com/azumag/dociai/issues/259) に記録されている。
+
 ## triggers
 
 | type | フィールド | 動作 |

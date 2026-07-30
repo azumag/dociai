@@ -26,9 +26,8 @@ import type { BuildInfo } from "../../shared/build-info";
 import type { ModelRepository } from "../services/local-llm/models/model-repository";
 import type { DownloadStartInput, ModelLicense } from "../../shared/local-llm/model-contract";
 import type { TranslationService } from "../services/translation/translation-service";
-import type { TranslateInput } from "../../shared/services/translation-contract";
-import { MAX_TRANSLATE_INPUT_CHARS } from "../../shared/services/translation-contract";
 import type { TranslationModelRepository } from "../services/translation/translation-model-repository";
+import { requestMetadata, parseTranslateInput } from "./translation-input";
 import type { StreamEventBus } from "../services/stream-events/stream-event-bus";
 import type { TwitchComposition } from "../services/twitch/twitch-composition";
 import type { UpdateService } from "../services/update/update-service";
@@ -47,14 +46,6 @@ function parseAiMessages(value: unknown): AiMessage[] {
     if (!("content" in message)) throw new PublicIpcError("INVALID_INPUT", "message contentが必要です");
     return { role: message.role, content: message.content };
   });
-}
-
-function requestMetadata(payload: Record<string, unknown>): Pick<FeedFetchInput, "requestId" | "generation" | "ownerId"> {
-  return {
-    ...(typeof payload.requestId === "string" ? { requestId: payload.requestId } : {}),
-    ...(typeof payload.generation === "number" && Number.isSafeInteger(payload.generation) ? { generation: payload.generation } : {}),
-    ...(typeof payload.ownerId === "string" ? { ownerId: payload.ownerId } : {}),
-  };
 }
 
 function parseOptionalFeatures(input: unknown): string[] | undefined {
@@ -114,14 +105,6 @@ function parseDownloadStartInput(value: unknown): DownloadStartInput {
     };
   }
   throw new PublicIpcError("INVALID_INPUT", "download start kindが不正です");
-}
-
-function parseTranslateInput(value: unknown): TranslateInput {
-  const payload = expectRecord(value, "translation request");
-  const text = expectString(payload.text, "text", MAX_TRANSLATE_INPUT_CHARS);
-  if (payload.sourceLanguage !== "en" && payload.sourceLanguage !== "fr") throw new PublicIpcError("INVALID_INPUT", "sourceLanguageはen/frのいずれかで指定してください");
-  if (payload.targetLanguage !== "ja") throw new PublicIpcError("INVALID_INPUT", "targetLanguageはjaのみ対応しています");
-  return { text, sourceLanguage: payload.sourceLanguage, targetLanguage: payload.targetLanguage, ...requestMetadata(payload) };
 }
 
 function register<T>(channel: string, handler: Handler<T>, options: RegisterOptions, roles: WindowRole[] = ["console"]): void {

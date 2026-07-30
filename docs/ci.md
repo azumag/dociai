@@ -11,3 +11,13 @@ The jobs are intentionally independent so a Browser or Electron failure still pr
 Only failure paths create `test-results` uploads. Logs are written through the shared redaction helper, screenshots are captured only for a failed Electron page, and artifact retention is 14 days.
 
 After a short stabilization period, `quality`, `browser-e2e`, and `electron-smoke` are the required-check candidates. A maintainer should mark them required after 7–14 days of green pull-request runs and review any platform-specific flake before enabling branch protection.
+
+## Opt-in, network-dependent tests (not run by CI)
+
+`npm run test:electron:translation` (`scripts/electron/translation-e2e.mjs`, issue #257 Phase 5)
+exercises the local comment-translation feature end-to-end against the real
+`Xenova/m2m100_418M` model — it downloads ~630MB on its first run in a given `userDataDir`. It is
+deliberately excluded from `electron-smoke`/CI so pull requests never require network access or
+pay a ~30s+ download on every run. Run it manually after touching
+`electron/main/services/translation/`, `src/comment-speech-pipeline.js`,
+`src/comment-language-detector.js`, or `src/comment-translation-adapter.js`.
