@@ -12,7 +12,22 @@
 //
 // signalによるキャンセルは「結果を待たない」ベストエフォートに限られる: onnxruntime-nodeの
 // 推論呼び出し自体には外部からの中断機構が無く、一度開始した推論はネイティブ側で最後まで走る。
-import { pipeline, env } from "@huggingface/transformers";
+//
+// @huggingface/transformersは動的import()で遅延読み込みする — electron/main/services/local-llm/
+// native-loader.tsが`import("node-llama-cpp")`をNativeLoader#loadOnce()内でのみ実行するのと
+// 同じ理由・同じパターン。これは単なるスタイルの一致ではなく実際に踏んだ地雷の回避策:
+// トップレベルでの静的import (`import { pipeline, env } from "@huggingface/transformers"`) は
+// electron/main/index.tsからこのファイルまでのimport連鎖がMain processのapp.whenReady()より
+// 前、モジュール評価の最初の一撃で同期的に走ってしまう。packaged buildではonnxruntime-node
+// (ネイティブ.nodeバイナリ) がelectron-builder.ymlのnode_modules除外設定により存在せず、
+// @huggingface/transformers側のbackend選択処理がこれを検知して無応答になり、Main process
+// 全体がapp.whenReady()にすら到達できず起動できなくなることをpackaged build (`npm run
+// test:packaged`, CI `package-macos`) で実際に確認した。動的importなら、この読み込み自体が
+// 失敗/停止しても翻訳機能だけがunavailableになるだけで、アプリ全体の起動は妨げない。
+const LOAD_TIMEOUT_MS = 120_000; // モデルロード自体(~20-30秒)に加え、import自体が異常に
+// 遅い/停止するケースに備えた上限。TranslationService側のSERVICE_TIMEOUT_MSより長く取り、
+// 「読み込みタイムアウト」と「翻訳1件のtimeout」を混同しないようにする。
+
 import type { TranslationRuntimeState } from "../../../shared/services/translation-contract";
 
 const DEFAULT_MODEL_ID = "Xenova/m2m100_418M";
@@ -23,24 +38,36 @@ type Translator = (
   options: { src_lang: string; tgt_lang: string },
 ) => Promise<Array<{ translation_text?: unknown }> | { translation_text?: unknown }>;
 
+type TransformersModule = {
+  pipeline: (task: string, model: string, options?: unknown) => Promise<unknown>;
+  env: { cacheDir: string; allowRemoteModels: boolean };
+};
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 export class TranslationRuntime {
   #modelId: string;
+  #cacheDir: string;
   #translator: Translator | null = null;
   #loadPromise: Promise<Translator> | null = null;
   #state: TranslationRuntimeState = "idle";
   #lastError: Error | null = null;
+  readonly #importModule: () => Promise<unknown>;
+  readonly #loadTimeoutMs: number;
 
-  constructor(options: { cacheDir: string; modelId?: string }) {
+  constructor(options: { cacheDir: string; modelId?: string; importModule?: () => Promise<unknown>; loadTimeoutMs?: number }) {
     this.#modelId = options.modelId ?? DEFAULT_MODEL_ID;
-    // アプリ起動時・翻訳時に外部へ利用状況やtelemetryを送信しない (issue #257要件)。
-    // transformers.js自体はHTTPアクセス統計等を送らない実装のため、追加の抑止設定は不要。
-    // cacheDirはTranslationModelRepository (issue #257 Phase 3, #262) が導入するファイルと
-    // 同じ場所を指す — `{cacheDir}/{modelId}/...` というtransformers.jsの既定キャッシュ配置に
-    // repository側が合わせて配置するので、導入済みなら追加のダウンロードなしで見つかる。
-    // allowRemoteModels: false により、未導入のまま呼ばれた場合は無言でHFから取得しにいかず
-    // 明示的なエラーになる (issue #257要件: モデル未導入時に外部へ暗黙fallbackしない)。
-    env.cacheDir = options.cacheDir;
-    env.allowRemoteModels = false;
+    this.#cacheDir = options.cacheDir;
+    this.#importModule = options.importModule ?? (() => import("@huggingface/transformers"));
+    this.#loadTimeoutMs = options.loadTimeoutMs ?? LOAD_TIMEOUT_MS;
   }
 
   get state(): TranslationRuntimeState { return this.#state; }
@@ -51,12 +78,12 @@ export class TranslationRuntime {
     if (this.#translator) return this.#translator;
     if (!this.#loadPromise) {
       this.#state = "loading";
-      this.#loadPromise = (pipeline("translation", this.#modelId, { dtype: DEFAULT_DTYPE } as never) as Promise<unknown>)
+      this.#loadPromise = withTimeout(this.#load(), this.#loadTimeoutMs, "translation model failed to load within the timeout")
         .then((translator) => {
-          this.#translator = translator as Translator;
+          this.#translator = translator;
           this.#state = "ready";
           this.#lastError = null;
-          return this.#translator;
+          return translator;
         })
         .catch((error: unknown) => {
           this.#state = "error";
@@ -66,6 +93,21 @@ export class TranslationRuntime {
         });
     }
     return this.#loadPromise;
+  }
+
+  async #load(): Promise<Translator> {
+    const imported = (await this.#importModule()) as TransformersModule;
+    // アプリ起動時・翻訳時に外部へ利用状況やtelemetryを送信しない (issue #257要件)。
+    // transformers.js自体はHTTPアクセス統計等を送らない実装のため、追加の抑止設定は不要。
+    // cacheDirはTranslationModelRepository (issue #257 Phase 3, #262) が導入するファイルと
+    // 同じ場所を指す — `{cacheDir}/{modelId}/...` というtransformers.jsの既定キャッシュ配置に
+    // repository側が合わせて配置するので、導入済みなら追加のダウンロードなしで見つかる。
+    // allowRemoteModels: false により、未導入のまま呼ばれた場合は無言でHFから取得しにいかず
+    // 明示的なエラーになる (issue #257要件: モデル未導入時に外部へ暗黙fallbackしない)。
+    imported.env.cacheDir = this.#cacheDir;
+    imported.env.allowRemoteModels = false;
+    const translator = await imported.pipeline("translation", this.#modelId, { dtype: DEFAULT_DTYPE });
+    return translator as Translator;
   }
 
   async translate(text: string, sourceLanguage: string, targetLanguage: string, signal?: AbortSignal): Promise<string> {
