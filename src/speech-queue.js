@@ -218,6 +218,10 @@ export class SpeechQueue {
 
   #commentReaderWaitMs(item) {
     if (!this.commentReaderIntervalMs || this.lastCommentReaderFinishedAt == null || !this.isCommentReaderItem(item)) return 0;
+    // 同じコメントの原文→翻訳という一続きの2件 (issue #257, outputMode: originalThenTranslated)
+    // には、他コメントとの間隔と同じ待ち時間を挟まない。挟むと「原文 → intervalSeconds秒の
+    // 無音 → 同じコメントの翻訳」になってしまう (PRレビュー指摘)。
+    if (item.metadata?.skipCommentReaderInterval) return 0;
     return Math.max(0, this.commentReaderIntervalMs - (Date.now() - this.lastCommentReaderFinishedAt));
   }
 

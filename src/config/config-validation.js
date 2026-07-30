@@ -26,6 +26,29 @@ export function validateConfigStructure(config) {
     const maxResults = Number(config.research.maxResults);
     if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 10) issues.push(issue(["research", "maxResults"], "range", "maxResults must be an integer from 1 to 10"));
   }
+  // commentReader.enabledもゲートに含める — settings-ui.js側は`cr.enabled`がfalseの間
+  // 翻訳カード自体を描画しない (#renderCommentReader()) ため、それと揃えないと
+  // 「commentReaderを無効化しただけなのに、画面から見えなくなった翻訳フィールドの
+  // validationエラーで保存がブロックされ続ける」という直しようのない詰み状態になる
+  // (PRレビュー指摘)。
+  if (config.commentReader?.enabled === true && config.commentReader?.translation?.enabled === true) {
+    const t = config.commentReader.translation;
+    const sourceLanguages = Array.isArray(t.sourceLanguages) ? t.sourceLanguages : [];
+    if (!sourceLanguages.length || sourceLanguages.some((lang) => !registryIds("translationSourceLanguages").includes(lang))) {
+      issues.push(issue(["commentReader", "translation", "sourceLanguages"], "enum", "翻訳元言語を選択してください", { meta: { options: registryIds("translationSourceLanguages") } }));
+    }
+    if (t.targetLanguage !== "ja") issues.push(issue(["commentReader", "translation", "targetLanguage"], "enum", "翻訳先言語はjaのみ対応しています"));
+    if (!registryIds("translationOutputModes").includes(t.outputMode)) issues.push(issue(["commentReader", "translation", "outputMode"], "enum", "Unsupported outputMode", { meta: { options: registryIds("translationOutputModes") } }));
+    if (!registryIds("translationFailurePolicies").includes(t.onFailure)) issues.push(issue(["commentReader", "translation", "onFailure"], "enum", "Unsupported onFailure policy", { meta: { options: registryIds("translationFailurePolicies") } }));
+    const minimumConfidence = Number(t.minimumConfidence);
+    if (!Number.isFinite(minimumConfidence) || minimumConfidence < 0 || minimumConfidence > 1) issues.push(issue(["commentReader", "translation", "minimumConfidence"], "range", "minimumConfidence must be between 0 and 1"));
+    const timeoutMs = Number(t.timeoutMs);
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 500 || timeoutMs > 15000) issues.push(issue(["commentReader", "translation", "timeoutMs"], "range", "timeoutMs must be an integer from 500 to 15000"));
+    const maxInputChars = Number(t.maxInputChars);
+    if (!Number.isInteger(maxInputChars) || maxInputChars < 1 || maxInputChars > 1000) issues.push(issue(["commentReader", "translation", "maxInputChars"], "range", "maxInputChars must be an integer from 1 to 1000"));
+    const maxPendingComments = Number(t.maxPendingComments);
+    if (!Number.isInteger(maxPendingComments) || maxPendingComments < 1 || maxPendingComments > 200) issues.push(issue(["commentReader", "translation", "maxPendingComments"], "range", "maxPendingComments must be an integer from 1 to 200"));
+  }
   const eventTriggersResult = validateEventTriggersConfig(config.eventTriggers);
   for (const entry of eventTriggersResult.issues) issues.push(issue(entry.path, entry.code, entry.message, { severity: entry.severity, meta: entry.meta }));
   const errors = issues.filter((entry) => entry.severity === "error");

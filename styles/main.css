@@ -210,6 +210,12 @@ a { color: var(--focus); }
 .chip.is-ok { color: var(--ok); border-color: var(--ok-edge); }
 .chip.is-warn { color: var(--cue); border-color: var(--cue-edge); }
 
+/* 翻訳モデルの状態チップ (issue #257 Phase 4) */
+.translation-model-chip.is-installed { color: var(--ok); border-color: var(--ok-edge); }
+.translation-model-chip.is-downloading { color: var(--cue); border-color: var(--cue-edge); }
+.translation-model-chip.is-error { color: var(--onair); border-color: var(--onair-edge); }
+.translation-model-chip.is-not_installed { color: var(--ink-dim); }
+
 /* ---- レイアウト: 3本のラック ---- */
 .console {
   display: grid;
@@ -651,6 +657,25 @@ a { color: var(--focus); }
   inset: 0;
   background: repeating-linear-gradient(90deg, transparent 0 5px, var(--well) 5px 7px);
   pointer-events: none;
+}
+
+/* 翻訳モデルのダウンロード進捗バー (issue #257 Phase 4) */
+.translation-model-status-body { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.translation-model-error { color: var(--onair); }
+.translation-model-license-link { display: inline-block; }
+.download-progress {
+  position: relative;
+  height: 8px;
+  background: var(--well);
+  border: 1px solid var(--edge);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.download-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--ok);
+  transition: width 200ms linear;
 }
 
 /* ---- ラック内リスト (ペルソナ/トリガー/コネクタ/キュー) ---- */

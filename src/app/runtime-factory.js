@@ -20,7 +20,8 @@ import { ResponseCoordinator } from "./response-coordinator.js";
 import { AutomationCoordinator } from "./automation-coordinator.js";
 import { SourceCoordinator } from "./source-coordinator.js";
 import { WebResearcher } from "./web-researcher.js";
-import { TwitchChatSource, collapseConsecutiveEmojiRuns, stripEmotes } from "../comment-sources.js";
+import { TwitchChatSource } from "../comment-sources.js";
+import { CommentSpeechPipeline, COMMENT_READER_ID } from "../comment-speech-pipeline.js";
 import { ElectronTwitchSource, subscribeStreamEventsThroughElectron } from "../platform/electron-services.js";
 import { listCaptureSources, selectCaptureSource } from "../platform/capture-adapter.js";
 import { ElectronIpcTransport } from "../obs/transports/electron-ipc-transport.js";
@@ -29,8 +30,6 @@ import { GlobalActionBudget } from "../actions/global-action-budget.js";
 import { ActionRateLimiter } from "../actions/action-rate-limiter.js";
 import { ActionRunner } from "../actions/action-runner.js";
 import { runProductionStreamEvent } from "../simulation/stream-event-simulator.js";
-
-const COMMENT_READER_ID = "__comment_reader__";
 
 const nonNullEntries = (value) => Object.fromEntries(Object.entries(value ?? {}).filter(([, entry]) => entry != null));
 
@@ -564,21 +563,25 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     (instance) => ({ start: () => instance.start(), stop: () => instance.stop() }),
   );
 
-  const readCommentAloud = expose("readCommentAloud", (comment) => {
-    const cr = config.commentReader;
-    if (!cr?.enabled) return;
-    if ((cr.ignoreUsers ?? []).some((user) => String(user).trim().toLowerCase() === comment.author.toLowerCase())) return;
-    let body = cr.skipEmotes && comment.emotes ? stripEmotes(comment.text, comment.emotes) : comment.text;
-    if (cr.collapseConsecutiveEmoji) body = collapseConsecutiveEmojiRuns(body);
-    if (!body.trim()) return;
-    const text = cr.includeAuthor === false ? body : `${comment.author}: ${body}`;
-    speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice: resolveCommentReaderVoice(cr, config), commentId: comment.id });
-  });
+  // Issue #257 Phase 1 (#260): 翻訳を挟める非同期・順序保証パイプラインへ置き換え。
+  // translationAdapterは既定でPhase 2 (#261)実装までのUNAVAILABLE_TRANSLATION_ADAPTERが使われる。
+  const commentSpeechPipeline = define(
+    "commentSpeechPipeline",
+    () => new CommentSpeechPipeline({
+      config,
+      speechQueue,
+      resolveVoice: () => resolveCommentReaderVoice(config.commentReader, config),
+      isCurrent,
+      translationAdapter: deps.translationAdapter,
+      log: deps.log,
+    }),
+    (instance) => ({ dispose: () => instance.dispose() }),
+  );
 
   const addComment = expose("addComment", (raw) => {
     const comment = deps.commentStore.add(raw);
     deps.broadcast("comment", { author: comment.author, text: comment.text, time: Date.now() });
-    readCommentAloud(comment);
+    commentSpeechPipeline.submit(comment);
     triggerEngine.handleComment(comment);
     return comment;
   });

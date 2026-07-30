@@ -127,6 +127,28 @@ export async function saveConfigThroughElectron(config, expectedRevision) {
 }
 export async function setSecretThroughElectron(key, value) { return globalThis.dociai.secrets.set({ key, value }); }
 
+// issue #257 Phase 2 (#261): コメント読み上げのローカル翻訳。他のhasElectronXService()/
+// xThroughElectron()と同じ「capability確認 + Result<T>をそのまま返す」流儀。Result<T>を
+// unwrapしてCommentSpeechPipelineの期待する形へ変換する処理はsrc/comment-translation-adapter.js
+// が担う (このファイル自身は他の関数と同じくunwrapしない)。
+export function hasElectronTranslationService() {
+  return typeof globalThis.dociai?.translation?.translate === "function";
+}
+export async function translateThroughElectron(input) { return globalThis.dociai.translation.translate(input); }
+export async function cancelElectronTranslationRequest(requestId) { return globalThis.dociai.translation.cancel(requestId); }
+export async function translationStatusThroughElectron() { return globalThis.dociai.translation.status(); }
+
+// issue #257 Phase 4 (#263): 翻訳モデルの導入状態・導入・削除 (設定UI・health表示から使う)。
+export async function translationModelStatusThroughElectron() { return globalThis.dociai.translation.model.status(); }
+export async function installTranslationModelThroughElectron() { return globalThis.dociai.translation.model.install(); }
+export async function cancelTranslationModelInstallThroughElectron() { return globalThis.dociai.translation.model.cancelInstall(); }
+export async function deleteTranslationModelThroughElectron() { return globalThis.dociai.translation.model.delete(); }
+// "translation:model:progress" is the same literal electron/main/index.ts's
+// emitDownloadProgress(...)/controller.emitToConsole(...) call site duplicates — see
+// hasElectronStreamEventsService's own comment above for why this repo duplicates the string per
+// call site instead of sharing a constant across the Renderer/Main boundary.
+export function subscribeTranslationModelProgressThroughElectron(listener) { return globalThis.dociai.events.subscribe("translation:model:progress", listener); }
+
 export class ElectronTwitchSource {
   id = "twitch"; label = "Twitch";
   constructor(config = {}, { onStatus = () => {} } = {}) { this.config = config; this.onStatus = onStatus; this.unsubComment = null; this.unsubStatus = null; this.status = { state: "idle", channels: [] }; }

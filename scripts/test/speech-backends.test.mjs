@@ -354,6 +354,34 @@ test("commentReaderIntervalMs paces successive comment reads", async () => {
   queue.dispose();
 });
 
+test("metadata.skipCommentReaderInterval lets a same-comment follow-up (originalThenTranslated's translation) skip the inter-comment pace (PR review regression)", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({
+    webSpeech: { synthesis, Utterance: FakeUtterance },
+    commentReaderIntervalMs: 5000,
+    isCommentReaderItem: (item) => item.personaId === "reader",
+  });
+
+  const original = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "Thank you", voice: { engine: "webspeech" }, commentId: "c1" });
+  assert.equal(original.state, "speaking");
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  assert.equal(original.state, "done");
+
+  const translation = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "ありがとう", voice: { engine: "webspeech" }, commentId: "c1", metadata: { skipCommentReaderInterval: true } });
+  assert.equal(translation.state, "speaking", "the translation of the SAME comment must not wait out commentReaderIntervalMs behind its own original text");
+
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+
+  // a genuinely later, unrelated comment still respects the full interval as normal.
+  const nextComment = queue.enqueue({ personaId: "reader", personaName: "コメント読み上げ", text: "next comment", voice: { engine: "webspeech" }, commentId: "c2" });
+  assert.equal(nextComment.state, "waiting", "an unrelated later comment must still be paced normally");
+
+  queue.dispose();
+});
+
 test("commentReaderIntervalMs does not delay a persona item queued after a comment finished reading", async () => {
   FakeUtterance.items = [];
   const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };

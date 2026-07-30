@@ -14,7 +14,7 @@ export const DEFAULT_COMMON_RULES = [
 export function commentReaderDefaults(input = {}) {
   const {
     name, rate, pitch, speaker, speed, intonation, volume, voice, tone,
-    webspeech, voicevox, bouyomi,
+    webspeech, voicevox, bouyomi, translation,
     ...common
   } = input ?? {};
   const engine = common.engine ?? "webspeech";
@@ -40,6 +40,19 @@ export function commentReaderDefaults(input = {}) {
     // 未指定値はruntimeでbouyomi共通設定へフォールバックする。ここで0/-1を
     // 埋めると、旧configが使っていたbouyomi.voice/tone/volumeを上書きしてしまう。
     bouyomi: section(bouyomi, legacyBouyomi),
+    // コメント読み上げの英語・フランス語→日本語ローカル翻訳 (issue #257)。既定で無効の
+    // opt-in機能なので、schemaVersionを上げずここへ追加するだけで既存configに影響しない。
+    translation: section(translation, {
+      enabled: false,
+      targetLanguage: "ja",
+      sourceLanguages: ["en", "fr"],
+      minimumConfidence: 0.7,
+      outputMode: "translated",
+      onFailure: "readOriginal",
+      timeoutMs: 3000,
+      maxInputChars: 500,
+      maxPendingComments: 20,
+    }),
   };
 }
 

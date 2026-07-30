@@ -29,6 +29,7 @@ export function createAppState(overrides = {}) {
     generation: 0,
     lastTeardown: null,
     twitchStatus: null,
+    translationModelStatus: null,
     systemLogs: [],
     ...overrides,
   };

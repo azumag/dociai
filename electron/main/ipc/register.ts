@@ -25,6 +25,9 @@ import type { CaptureService } from "../services/capture/capture-service";
 import type { BuildInfo } from "../../shared/build-info";
 import type { ModelRepository } from "../services/local-llm/models/model-repository";
 import type { DownloadStartInput, ModelLicense } from "../../shared/local-llm/model-contract";
+import type { TranslationService } from "../services/translation/translation-service";
+import type { TranslationModelRepository } from "../services/translation/translation-model-repository";
+import { requestMetadata, parseTranslateInput } from "./translation-input";
 import type { StreamEventBus } from "../services/stream-events/stream-event-bus";
 import type { TwitchComposition } from "../services/twitch/twitch-composition";
 import type { UpdateService } from "../services/update/update-service";
@@ -32,7 +35,7 @@ import type { OverlayAssetService } from "../services/overlay-assets/overlay-ass
 import type { OverlayAssetUrlResolver } from "../services/overlay-assets/overlay-asset-url-resolver";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; newsSourceService: NewsSourceService; newsSearchService: NewsSearchService; wikipediaService: WikipediaService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; overlayAssetService: OverlayAssetService | null; overlayAssetUrlResolver: OverlayAssetUrlResolver | null; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; newsSourceService: NewsSourceService; newsSearchService: NewsSearchService; wikipediaService: WikipediaService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; translationService: TranslationService; translationModelRepository: TranslationModelRepository; overlayAssetService: OverlayAssetService | null; overlayAssetUrlResolver: OverlayAssetUrlResolver | null; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -43,14 +46,6 @@ function parseAiMessages(value: unknown): AiMessage[] {
     if (!("content" in message)) throw new PublicIpcError("INVALID_INPUT", "message contentが必要です");
     return { role: message.role, content: message.content };
   });
-}
-
-function requestMetadata(payload: Record<string, unknown>): Pick<FeedFetchInput, "requestId" | "generation" | "ownerId"> {
-  return {
-    ...(typeof payload.requestId === "string" ? { requestId: payload.requestId } : {}),
-    ...(typeof payload.generation === "number" && Number.isSafeInteger(payload.generation) ? { generation: payload.generation } : {}),
-    ...(typeof payload.ownerId === "string" ? { ownerId: payload.ownerId } : {}),
-  };
 }
 
 function parseOptionalFeatures(input: unknown): string[] | undefined {
@@ -281,6 +276,13 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
   register(CHANNELS.LOCAL_LLM_DOWNLOAD_RETRY, (event, input) => options.modelRepository.retryDownload(expectString(input, "jobId", 256)), options);
   register(CHANNELS.LOCAL_LLM_DOWNLOAD_LIST, async (event, input) => { expectNoInput(input); return { jobs: await options.modelRepository.listDownloads() }; }, options);
   register(CHANNELS.LOCAL_LLM_DOWNLOAD_STATUS, async (event, input) => ({ job: await options.modelRepository.getDownload(expectString(input, "jobId", 256)) }), options);
+  register(CHANNELS.TRANSLATION_TRANSLATE, (event, input) => options.translationService.translate(parseTranslateInput(input)), options);
+  register(CHANNELS.TRANSLATION_CANCEL, (event, input) => ({ cancelled: options.translationService.cancel(expectString(input, "requestId", 256)) }), options);
+  register(CHANNELS.TRANSLATION_STATUS, (event, input) => { expectNoInput(input); return options.translationService.status(); }, options);
+  register(CHANNELS.TRANSLATION_MODEL_STATUS, (event, input) => { expectNoInput(input); return options.translationModelRepository.status(); }, options);
+  register(CHANNELS.TRANSLATION_MODEL_INSTALL, (event, input) => { expectNoInput(input); return options.translationModelRepository.install(); }, options);
+  register(CHANNELS.TRANSLATION_MODEL_INSTALL_CANCEL, (event, input) => { expectNoInput(input); return { cancelled: options.translationModelRepository.cancelInstall() }; }, options);
+  register(CHANNELS.TRANSLATION_MODEL_DELETE, (event, input) => { expectNoInput(input); return options.translationModelRepository.delete(); }, options);
   register(CHANNELS.STREAM_EVENTS_LIST, (event, input) => {
     const payload = input === undefined || input === null ? {} : expectRecord(input, "stream events list");
     let limit: number | undefined;

@@ -152,7 +152,7 @@ test("buildDociaiRuntime wires a candidate bundle in dependency order without st
     "connectors", "personaRouter", "speechQueue", "webResearcher", "contextBuilder",
     "responseCoordinator", "eventTriggerRunner", "automationCoordinator", "newsPipeline", "newsReader",
     "newsBufferPipeline", "newsBufferedReader", "topicReader", "topicBufferedReader",
-    "triggerEngine", "newsScheduleRunner", "sourceCoordinator",
+    "triggerEngine", "newsScheduleRunner", "commentSpeechPipeline", "sourceCoordinator",
   ]);
   assert.equal(calls.onSecrets.length, 1);
   assert.equal(bundle.get("connectors").size, 1);
