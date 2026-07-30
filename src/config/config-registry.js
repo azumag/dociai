@@ -9,6 +9,9 @@ export const CONFIG_REGISTRY = Object.freeze({
   topicSourceTypes: Object.freeze([descriptor("todoist", "Todoist", { secretFields: ["token"] })]),
   eventTypes: Object.freeze([descriptor("comment", "コメント"), descriptor("follow", "フォロー"), descriptor("subscribe", "サブスク"), descriptor("bits", "Bits"), descriptor("reward", "チャネルポイント")]),
   actionTypes: Object.freeze([descriptor("ai-response", "AI応答"), descriptor("speech", "読み上げ"), descriptor("obs", "OBS表示")]),
+  translationSourceLanguages: Object.freeze([descriptor("en", "English"), descriptor("fr", "Français")]),
+  translationOutputModes: Object.freeze([descriptor("translated", "日本語訳のみ"), descriptor("originalThenTranslated", "原文の後に日本語訳")]),
+  translationFailurePolicies: Object.freeze([descriptor("readOriginal", "原文を読み上げる"), descriptor("skip", "読み上げない")]),
 });
 export const registryIds = (key) => CONFIG_REGISTRY[key].map((entry) => entry.id);
 export const registryOptions = (key) => CONFIG_REGISTRY[key].map(({ id, label }) => Object.freeze({ value: id, label }));
