@@ -108,8 +108,9 @@ function singleRequest(url: URL, options: Required<Pick<DownloadFileInput, "isAd
 
 /** https-only, bounded-redirect, SSRF-guarded download of a single file to `destinationPath`,
  * hashing the stream incrementally and verifying both size and sha256 once fully written. Throws
- * (and leaves no file behind) on any mismatch — callers must not treat a thrown call as "partially
- * downloaded, safe to resume"; the caller should discard `destinationPath` and retry from scratch. */
+ * (and leaves no file behind, on ANY failure path — stream errors and cancellation included, not
+ * just a verification mismatch) — callers must not treat a thrown call as "partially downloaded,
+ * safe to resume"; the caller should discard `destinationPath` and retry from scratch. */
 export async function downloadVerifiedFile(input: DownloadFileInput): Promise<{ sha256: string; sizeBytes: number }> {
   const isAddressAllowed = input.isAddressAllowed ?? isPublicAddress;
   const dnsLookup = input.dnsLookup ?? (dns.lookup as unknown as DnsLookupOne);
@@ -122,6 +123,22 @@ export async function downloadVerifiedFile(input: DownloadFileInput): Promise<{ 
   await fsp.mkdir(path.dirname(input.destinationPath), { recursive: true, mode: 0o700 });
   await fsp.rm(input.destinationPath, { force: true }).catch(() => {});
 
+  try {
+    return await downloadAndVerify(input, { isAddressAllowed, dnsLookup, httpsRequest, httpRequest, maxRedirects, connectTimeoutMs, idleTimeoutMs });
+  } catch (error) {
+    // 全ての失敗経路 (redirect/ステータスエラー、streamエラー、idle timeout、cancel、
+    // サイズ/sha256不一致) で共通してdestinationPathを消す — 一部の経路だけ個別に
+    // rmしていた旧実装はdocstringの「leaves no file behind」保証と食い違っていた (PRレビュー指摘)。
+    await fsp.rm(input.destinationPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function downloadAndVerify(
+  input: DownloadFileInput,
+  options: { isAddressAllowed: AddressPolicy; dnsLookup: DnsLookupOne; httpsRequest: typeof https.request; httpRequest: typeof http.request; maxRedirects: number; connectTimeoutMs: number; idleTimeoutMs: number },
+): Promise<{ sha256: string; sizeBytes: number }> {
+  const { isAddressAllowed, dnsLookup, httpsRequest, httpRequest, maxRedirects, connectTimeoutMs, idleTimeoutMs } = options;
   let currentUrl = input.url;
   const insecureOk = input.allowInsecure === true && currentUrl.protocol === "http:";
   if (currentUrl.protocol !== "https:" && !insecureOk) throw new ServiceError("BAD_REQUEST", "download URL must use https", { serviceId: SERVICE_ID, retryable: false });
@@ -195,12 +212,10 @@ export async function downloadVerifiedFile(input: DownloadFileInput): Promise<{ 
   });
 
   if (bytesDownloaded !== input.expectedSizeBytes) {
-    await fsp.rm(input.destinationPath, { force: true }).catch(() => {});
     throw new ServiceError("NETWORK", `downloaded ${bytesDownloaded} bytes, expected ${input.expectedSizeBytes}`, { serviceId: SERVICE_ID, retryable: true });
   }
   const sha256 = hash.digest("hex");
   if (sha256.toLowerCase() !== input.expectedSha256.toLowerCase()) {
-    await fsp.rm(input.destinationPath, { force: true }).catch(() => {});
     // retryable: false — a checksum mismatch after a fully-downloaded, size-correct file means the
     // bytes themselves are wrong (bad mirror, tampering, or a stale catalog hash), not a transient
     // network issue. Retrying re-downloads the exact same content and fails the same way every

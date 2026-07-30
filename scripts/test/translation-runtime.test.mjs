@@ -118,6 +118,33 @@ test("a hanging import is bounded by loadTimeoutMs instead of blocking forever (
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test("a load that times out is not abandoned — a retry while it's still in flight reuses the same import instead of starting a second concurrent one (PR review regression)", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    let importCount = 0;
+    let resolveImport;
+    const gate = new Promise((resolve) => { resolveImport = resolve; });
+    const runtime = new modules.TranslationRuntime({
+      cacheDir: "/tmp/unused",
+      loadTimeoutMs: 30,
+      importModule: async () => { importCount += 1; await gate; return fakeTransformersModule(); },
+    });
+    await assert.rejects(runtime.translate("hello", "en", "ja"), /timeout/i);
+    assert.equal(runtime.state, "error");
+    assert.equal(importCount, 1);
+
+    // the underlying import is still pending (native load has no cancellation mechanism) —
+    // retrying now must reuse it, not kick off a second concurrent ~600MB model load.
+    const retryPromise = runtime.translate("hello again", "en", "ja");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(importCount, 1, "a retry while the original load is still in flight must not start a second import");
+    resolveImport();
+    assert.equal(await retryPromise, "translated: hello again");
+    assert.equal(importCount, 1);
+    assert.equal(runtime.state, "ready");
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("concurrent translate() calls during the initial load share the same in-flight import (no duplicate imports)", async () => {
   const { modules, directory } = await loadModules();
   try {

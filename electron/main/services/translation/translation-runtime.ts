@@ -58,6 +58,12 @@ export class TranslationRuntime {
   #cacheDir: string;
   #translator: Translator | null = null;
   #loadPromise: Promise<Translator> | null = null;
+  // #load()自体の生promise。withTimeout()がtimeoutで先にrejectしても、この生promiseは
+  // ネイティブ側でロードが実際に終わるまで裏で走り続ける (signalによる中断機構が無いため)。
+  // #loadPromiseだけをnullに戻すと、次のtranslate()が#load()を再度呼んでしまい、前のロードと
+  // 並行に2つ目のモデルロード(~600MB分のメモリ)が走る (PRレビュー指摘)。この生promiseを
+  // 別途保持し、まだ決着していなければ再利用することでその二重ロードを防ぐ。
+  #rawLoadPromise: Promise<Translator> | null = null;
   #state: TranslationRuntimeState = "idle";
   #lastError: Error | null = null;
   readonly #importModule: () => Promise<unknown>;
@@ -76,9 +82,12 @@ export class TranslationRuntime {
 
   async #ensureLoaded(): Promise<Translator> {
     if (this.#translator) return this.#translator;
+    if (!this.#rawLoadPromise) {
+      this.#rawLoadPromise = this.#load().finally(() => { this.#rawLoadPromise = null; });
+    }
     if (!this.#loadPromise) {
       this.#state = "loading";
-      this.#loadPromise = withTimeout(this.#load(), this.#loadTimeoutMs, "translation model failed to load within the timeout")
+      this.#loadPromise = withTimeout(this.#rawLoadPromise, this.#loadTimeoutMs, "translation model failed to load within the timeout")
         .then((translator) => {
           this.#translator = translator;
           this.#state = "ready";
@@ -122,6 +131,7 @@ export class TranslationRuntime {
   dispose(): void {
     this.#translator = null;
     this.#loadPromise = null;
+    this.#rawLoadPromise = null;
     this.#state = "idle";
   }
 }

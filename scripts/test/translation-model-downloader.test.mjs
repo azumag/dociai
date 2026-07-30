@@ -118,6 +118,62 @@ test("a declared size mismatch throws and removes the partial file", async () =>
   } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test("a connection that closes mid-stream (before the declared size is reached) also removes the partial file, not just size/sha256 mismatches (PR review regression)", async () => {
+  const { modules, directory } = await loadModules();
+  const buffer = crypto.randomBytes(64 * 1024);
+  const { server, url } = await startServer((req, res) => {
+    res.writeHead(200, { "Content-Length": String(buffer.length) });
+    res.write(buffer.subarray(0, 4096));
+    res.destroy(); // simulate a dropped connection partway through, not a clean end()
+  });
+  try {
+    const destinationPath = path.join(directory, "out.bin");
+    await assert.rejects(
+      modules.downloadVerifiedFile({
+        url: new URL(url("/file.bin")),
+        destinationPath,
+        expectedSizeBytes: buffer.length,
+        expectedSha256: sha256Of(buffer),
+        signal: new AbortController().signal,
+        isAddressAllowed: () => true,
+        allowInsecure: true,
+      }),
+      // the exact message varies (a request-level "socket hang up" vs. a stream "close" before
+      // "end") depending on exactly where Node observes the dropped connection — either way it's
+      // the stream-error cleanup path this test exists to cover, not a verification mismatch.
+      (error) => error instanceof modules.ServiceError,
+    );
+    await assert.rejects(fs.access(destinationPath), "the partial file must not be left behind on a stream-error failure, matching the function's documented guarantee");
+  } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("cancelling mid-download also removes the partial file", async () => {
+  const { modules, directory } = await loadModules();
+  const buffer = crypto.randomBytes(256 * 1024);
+  const { server, url } = await startServer((req, res) => {
+    res.writeHead(200, { "Content-Length": String(buffer.length) });
+    res.write(buffer.subarray(0, 4096));
+    // deliberately never end() — the abort is what ends this download, not the server
+  });
+  try {
+    const destinationPath = path.join(directory, "out.bin");
+    const controller = new AbortController();
+    const downloadPromise = modules.downloadVerifiedFile({
+      url: new URL(url("/file.bin")),
+      destinationPath,
+      expectedSizeBytes: buffer.length,
+      expectedSha256: sha256Of(buffer),
+      signal: controller.signal,
+      isAddressAllowed: () => true,
+      allowInsecure: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    controller.abort();
+    await assert.rejects(downloadPromise, (error) => error instanceof modules.ServiceError && error.code === "CANCELLED");
+    await assert.rejects(fs.access(destinationPath), "a cancelled download must not leave a partial file behind either");
+  } finally { await closeServer(server); await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("follows a same-protocol redirect to the final URL", async () => {
   const { modules, directory } = await loadModules();
   const buffer = crypto.randomBytes(2048);
