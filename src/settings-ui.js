@@ -78,6 +78,7 @@ export class SettingsUI {
     this._translationModelStatusLoading = false;
     this._translationModelStatusGeneration = 0;
     this._translationModelProgress = null;
+    this._translationModelRenderedState = null;
     this._translationModelBusy = false;
     this._unsubscribeTranslationModelProgress = null;
     this.controller = new SettingsController({
@@ -1285,13 +1286,43 @@ export class SettingsUI {
   // 全体の#render()を呼んでおり、replaceChildren()でbody全体を作り直すため、フォーカス中の
   // 入力・開いていたselect・スクロール位置が0.5秒ごとに吹き飛んでいた — 630MB級のダウンロード中
   // (数分間) はキーボード/スクリーンリーダー利用者が設定ダイアログを一切操作できなくなっていた
-  // (PRレビュー指摘の重大なaccessibility不具合)。翻訳モデル状態ブロック単体だけを差し替える。
+  // (PRレビュー指摘の重大なaccessibility不具合)。翻訳モデル状態ブロック単体だけを差し替える —
+  // ここまでが最初の修正。だが state (チップ) 自体は変わらない純粋な進捗tickでも
+  // existing.replaceWith(...)でブロック全体を毎回作り直していたため、その中にしか無い
+  // キャンセルボタン自体が0.5秒ごとに消えて再生成され、キーボード利用者がタブでフォーカスして
+  // 押そうとした瞬間にボタンが無くなる、という同種の不具合が一段深いところに残っていた
+  // (再レビューで指摘)。state不変の進捗tickでは進捗バー/テキストだけをin-placeで書き換える。
   #refreshTranslationModelStatusUI() {
     if (!this.root?.open) return;
     if (this.activeTab !== "commentReader") return; // 非表示タブの内容は次にそのタブへ切り替わった時の#render()が最新状態を反映する
     const existing = this._body.querySelector(".translation-model-status");
     if (!existing) { this.#render(); return; } // まだ一度もブロックが描画されていない (翻訳を初めて有効化した直後など) — この場合だけは全体描画が必要
+    const currentState = this._translationModelStatus?.ok ? this._translationModelStatus.value.state : null;
+    if (currentState != null && currentState === this._translationModelRenderedState && this.#updateTranslationProgressInPlace(existing)) {
+      return; // stateが変わらない進捗tick — ボタン等はそのまま、フォーカスも維持される
+    }
+    this._translationModelRenderedState = currentState;
     existing.replaceWith(this.#translationModelStatusBlock());
+  }
+
+  // 進捗バーの見た目 (fill幅・aria-valuenow・ファイル番号/%テキスト) だけをin-placeで
+  // 更新できたらtrueを返す。進捗バー自体が現在表示されていない (ダウンロード中でない) 場合は
+  // falseを返し、呼び出し側に通常のフルブロック差し替えへフォールバックさせる。
+  #updateTranslationProgressInPlace(existing) {
+    const bar = existing.querySelector(".download-progress");
+    const progress = this._translationModelProgress;
+    if (!bar || !progress) return false;
+    const percent = Math.round(progress.percent ?? 0);
+    bar.setAttribute("aria-valuenow", String(percent));
+    const fill = bar.querySelector(".download-progress-fill");
+    if (fill) fill.style.width = `${percent}%`;
+    const progressText = bar.nextElementSibling;
+    if (progressText?.tagName === "P") {
+      // fileIndex+1は"downloading"中のみ意味を持つ (verifying/installedはfileIndex===fileCount)。
+      const fileLabel = progress.state === "downloading" ? `${progress.fileIndex + 1}/${progress.fileCount}` : `${progress.fileCount}/${progress.fileCount}`;
+      progressText.textContent = `${progress.fileName || ""} (${fileLabel}) ${percent}%`;
+    }
+    return true;
   }
 
   async #installTranslationModel() {
@@ -1318,7 +1349,13 @@ export class SettingsUI {
   }
 
   async #cancelTranslationModelInstall() {
-    await cancelTranslationModelInstallThroughElectron();
+    try {
+      await cancelTranslationModelInstallThroughElectron();
+    } catch (error) {
+      // #installTranslationModel/#ensureTranslationModelStatusLoadedと同じ、
+      // ipcRenderer.invoke()自体がrejectする経路のガード (再レビュー指摘: ここだけ抜けていた)。
+      this.log(`翻訳モデルの導入キャンセルに失敗しました: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
   }
 
   async #deleteTranslationModel() {
