@@ -240,7 +240,11 @@ function integrationHealthServices() {
   }
   {
     const translationModel = state.translationModelStatus;
-    add("translation", "コメント翻訳", "model", Boolean(config.commentReader?.translation?.enabled), normalizeTranslationModelHealth(translationModel?.state), {
+    // config-validation.js自身がcommentReader.enabledもゲートに含めている (translationカードは
+    // cr.enabledがfalseの間settings-ui.js側で描画されない) — ここのenabled判定もそれに揃えないと、
+    // commentReaderを無効化しただけの状態でも「コメント翻訳」行が有効表示のまま
+    // configuration_required/エラーに留まり続けてしまう (PRレビュー指摘)。
+    add("translation", "コメント翻訳", "model", Boolean(config.commentReader?.enabled && config.commentReader?.translation?.enabled), normalizeTranslationModelHealth(translationModel?.state), {
       critical: false,
       metrics: translationModel?.installed ? { totalSizeBytes: translationModel.installed.totalSizeBytes } : {},
       action: translationModel?.state === "installed" ? "open_diagnostics" : "open_settings",

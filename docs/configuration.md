@@ -310,6 +310,13 @@ translation-model-repository.ts`)。導入後はネットワーク接続なし�
 モデル選定の経緯・ベンチマーク結果 (レイテンシ実測・言語判定器の精度評価等) は
 GitHub issue [#259](https://github.com/azumag/dociai/issues/259) に記録されている。
 
+> **既知の制約 (packaged build):** `electron-builder.yml` は `node_modules/**` をasarから
+> 除外しており、翻訳の実行に必要な `onnxruntime-node` ネイティブバイナリを配置する
+> `build/native` → `extraResources` の仕組みがまだ実装されていない ([#50](https://github.com/azumag/dociai/issues/50) — `node-llama-cpp`/ローカルLLM機能と同じ未解決gap)。
+> そのため **packaged build (配布用にビルドした `.app`/インストーラ) では翻訳モデルの導入・
+> 削除自体は正常に動作するが、実際の翻訳は常に失敗し `onFailure` の設定どおり原文へ
+> フォールバックする**。dev実行 (`npm run electron:dev` 等、unpacked) では影響しない。
+
 ## triggers
 
 | type | フィールド | 動作 |
