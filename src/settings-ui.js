@@ -1212,7 +1212,11 @@ export class SettingsUI {
   }
 
   #translationSourceLanguages(selectedLanguages) {
-    const selected = new Set(selectedLanguages.length ? selectedLanguages : ["en", "fr"]);
+    // draftの値をそのまま描画する — 空配列を["en","fr"]へフォールバックして描画すると、
+    // 両方チェックを外した直後に無関係な再描画 (他フィールドのonChange等) が走った際、
+    // チェックボックスの見た目だけ両方ONに戻りdraftの[]と食い違う (PRレビュー指摘)。
+    // 空選択のフィードバックはvalidationの「翻訳元言語を選択してください」に委ねる。
+    const selected = new Set(selectedLanguages);
     const wrap = document.createElement("div");
     wrap.className = "field";
     const label = document.createElement("span");

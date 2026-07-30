@@ -804,7 +804,10 @@ function setupTranslationModelHealth() {
   subscribeTranslationModelProgressThroughElectron((event) => {
     state.translationModelStatus = { ...(state.translationModelStatus ?? {}), state: event.state === "installed" ? "installed" : event.state === "failed" ? "error" : "downloading" };
     renderIntegrationHealth();
-    if (event.state === "installed" || event.state === "failed") refresh();
+    // "cancelled" は終端状態として扱わないと、キャンセル後もhealthチップが「確認中」相当の
+    // downloading表示に固定されたまま戻らない (PRレビュー指摘)。設定UI側の購読
+    // (src/settings-ui.js) は既にcancelledを終端扱いしており、ここも合わせる。
+    if (event.state === "installed" || event.state === "failed" || event.state === "cancelled") refresh();
   });
 }
 
