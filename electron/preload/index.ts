@@ -133,6 +133,11 @@ const api: DociaiApi = {
       status: (jobId) => invoke(CHANNELS.LOCAL_LLM_DOWNLOAD_STATUS, jobId),
     },
   },
+  translation: {
+    translate: (input) => invoke(CHANNELS.TRANSLATION_TRANSLATE, input),
+    cancel: (requestId) => invoke(CHANNELS.TRANSLATION_CANCEL, requestId),
+    status: () => invoke(CHANNELS.TRANSLATION_STATUS),
+  },
   streamEvents: {
     list: (input) => invoke(CHANNELS.STREAM_EVENTS_LIST, input),
     clear: () => invoke(CHANNELS.STREAM_EVENTS_CLEAR),

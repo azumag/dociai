@@ -22,7 +22,8 @@ import { deriveSimulationStatus } from "../twitch-ui/history/history-store.js";
 import { AppRuntime } from "./app-runtime.js";
 import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } from "./runtime-factory.js";
 import { createAppActions } from "./app-actions.js";
-import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron } from "../platform/electron-services.js";
+import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron, hasElectronTranslationService } from "../platform/electron-services.js";
+import { createElectronTranslationAdapter } from "../comment-translation-adapter.js";
 import { splitConnectorSecrets } from "../config/config-secrets-split.js";
 import { personaTriggerIdsForDisplay } from "../ui/persona-trigger-display.js";
 
@@ -793,6 +794,9 @@ appRuntime = new AppRuntime({
     newsHistoryStore,
     manualSource,
     platform,
+    // issue #257 Phase 2 (#261): Browser版・実IPC未接続の場合はundefinedのまま渡し、
+    // CommentSpeechPipelineの既定 (UNAVAILABLE_TRANSLATION_ADAPTER) にフォールバックさせる。
+    translationAdapter: hasElectronTranslationService() ? createElectronTranslationAdapter() : undefined,
     log: (message, level = "info") => logEvent(message, level),
     broadcast,
     dispatch: handleResponseAction,

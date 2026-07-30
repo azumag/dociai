@@ -18,7 +18,15 @@ await fs.mkdir(outDir, { recursive: true });
 // resolution (see node-llama-cpp's own Electron-bundling guidance). Note this doesn't currently
 // make it *work* in a packaged build either way — see native-loader.ts's header comment and #50 —
 // only that esbuild must never silently inline it once it's imported at all.
-const bundleOptions = { bundle: true, platform: "node", format: "cjs", target: "node22", external: ["electron", "node-llama-cpp"], sourcemap: process.env.NODE_ENV === "development", metafile: true };
+//
+// onnxruntime-node (issue #257 Phase 2, translation-runtime.ts's `@huggingface/transformers`
+// pipeline) is the exact same situation: it ships a platform/arch-specific prebuilt
+// `onnxruntime_binding.node` it locates relative to its own package directory. `sharp` is
+// `@huggingface/transformers`' optional image-processing dependency (unused by the text-only
+// translation pipeline here) and ships prebuilt binaries the same way — kept external for the
+// same reason, not because this app calls into it. `@huggingface/transformers` itself IS bundled
+// (pure JS, no native binary of its own) — only its native-binary dependencies are external.
+const bundleOptions = { bundle: true, platform: "node", format: "cjs", target: "node22", external: ["electron", "node-llama-cpp", "onnxruntime-node", "sharp"], sourcemap: process.env.NODE_ENV === "development", metafile: true };
 const mainResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/main/index.ts")], outfile: path.join(outDir, "main.cjs") });
 const preloadResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/preload/index.ts")], outfile: path.join(outDir, "preload.cjs") });
 for (const relativePath of ["index.html", "obs.html", "src", "styles", "config.local.example.json", "resources"]) {

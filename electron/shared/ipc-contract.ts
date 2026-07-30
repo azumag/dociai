@@ -6,6 +6,7 @@ import type { ArticleFetchInput, ArticleFetchResponse } from "./services/news-so
 import type { NewsSearchInput, NewsSearchResponse, WikipediaSearchInput, WikipediaSearchResponse } from "./services/news-research-contract";
 import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./services/topic-contract";
 import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
+import type { TranslateInput, TranslateResult, TranslationStatus } from "./services/translation-contract";
 import type { StreamEventListInput, StreamEventListResult } from "./services/stream-event-ipc-contract";
 import type { TwitchAuthOverview, TwitchConnectionOverview, TwitchCustomRewardsOverview, TwitchSubscriptionsOverview } from "./twitch/overview-contract";
 import type { UpdateState } from "./services/update-ipc-contract";
@@ -133,6 +134,11 @@ export type DociaiApi = {
       list(): Promise<Result<{ jobs: DownloadJobRecord[] }>>;
       status(jobId: string): Promise<Result<{ job: DownloadJobRecord | null }>>;
     };
+  };
+  translation: {
+    translate(input: TranslateInput): Promise<Result<TranslateResult>>;
+    cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
+    status(): Promise<Result<TranslationStatus>>;
   };
   // macOS-only for now (electron/main/services/update/update-service.ts) — check()/download() are
   // no-ops that resolve to the current (idle/unsupported) state on other platforms rather than

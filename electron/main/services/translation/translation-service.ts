@@ -1,0 +1,94 @@
+// コメント読み上げのローカル翻訳サービス (issue #257 Phase 2, #261)。
+// AiService.chat() (electron/main/services/ai/ai-service.ts) と同じ ServiceRuntime +
+// RequestRegistry + ServiceError の骨格を再利用する — これがこのリポジトリで実際にIPC経由まで
+// 通っている唯一の「requestId/timeout/AbortSignal付きのMain処理」パターンであるため
+// (LocalLlmServiceのGenerationQueueはIPCへ配線されたことが一度も無い、別系統の未使用パターン)。
+//
+// 翻訳はRenderer側のCommentSpeechPipeline (src/comment-speech-pipeline.js) が1件ずつ順番に
+// 呼び出す設計のため、Main側に別途FIFO admission queueは設けていない — 同時に複数の翻訳要求が
+// 飛んでくることは無い前提。将来複数window/複数呼び出し元が増えた場合はGenerationQueue相当の
+// admission制御を追加する余地がある。
+import type { TranslateInput, TranslateResult, TranslationStatus } from "../../../shared/services/translation-contract";
+import { MAX_TRANSLATE_INPUT_CHARS } from "../../../shared/services/translation-contract";
+import { ServiceRuntime } from "../service-runtime";
+import { ServiceError, normalizeServiceError } from "../service-error";
+import { TranslationRuntime } from "./translation-runtime";
+
+// モデルの初回ロードには約22秒かかる (issue #259実測、macOS arm64)。commentReader.translation.
+// timeoutMsの既定値(3000ms)より大幅に長いため、Main側はより寛容な上限を独自に持ち、初回ロード中の
+// 要求をタイムアウトで打ち切ってしまわないようにする。Renderer側のtimeoutMsは「翻訳1件あたりの
+// 待ち上限」であり、Main側のこの値は「モデルロード+翻訳1件」の絶対上限という別の意味を持つ。
+const SERVICE_TIMEOUT_MS = 30_000;
+
+function assertInput(input: TranslateInput): void {
+  if (typeof input.text !== "string" || !input.text.trim()) {
+    throw new ServiceError("BAD_REQUEST", "text is required", { serviceId: "translation", retryable: false });
+  }
+  if (input.text.length > MAX_TRANSLATE_INPUT_CHARS) {
+    throw new ServiceError("BAD_REQUEST", "text is too long", { serviceId: "translation", retryable: false });
+  }
+  if (input.sourceLanguage !== "en" && input.sourceLanguage !== "fr") {
+    throw new ServiceError("BAD_REQUEST", "unsupported sourceLanguage", { serviceId: "translation", retryable: false });
+  }
+  if (input.targetLanguage !== "ja") {
+    throw new ServiceError("BAD_REQUEST", "unsupported targetLanguage", { serviceId: "translation", retryable: false });
+  }
+}
+
+export class TranslationService {
+  readonly runtime = new ServiceRuntime("translation");
+  readonly #modelRuntime: TranslationRuntime;
+  readonly #timeoutMs: number;
+
+  constructor(deps: { cacheDir: string; modelRuntime?: TranslationRuntime; timeoutMs?: number }) {
+    this.#modelRuntime = deps.modelRuntime ?? new TranslationRuntime({ cacheDir: deps.cacheDir });
+    this.#timeoutMs = deps.timeoutMs ?? SERVICE_TIMEOUT_MS;
+  }
+
+  cancel(requestId: string): boolean {
+    return this.runtime.registry.cancel(requestId, "cancelled");
+  }
+
+  status(): TranslationStatus {
+    const error = this.#modelRuntime.lastError;
+    return { state: this.#modelRuntime.state, modelId: this.#modelRuntime.modelId, ...(error ? { lastError: { message: error.message } } : {}) };
+  }
+
+  async translate(input: TranslateInput): Promise<TranslateResult> {
+    assertInput(input);
+    const generation = input.generation ?? this.runtime.generation;
+    if (generation !== this.runtime.generation) {
+      throw new ServiceError("CANCELLED", "request generation is stale", { serviceId: "translation", retryable: false });
+    }
+    const handle = this.runtime.registry.create({ serviceId: "translation", generation, ownerId: input.ownerId ?? "console", requestId: input.requestId, timeoutMs: this.#timeoutMs });
+    const startedAt = Date.now();
+    try {
+      const text = await this.#modelRuntime.translate(input.text, input.sourceLanguage, input.targetLanguage, handle.context.signal);
+      if (handle.context.generation !== this.runtime.generation || handle.context.signal.aborted) {
+        throw new ServiceError("CANCELLED", "request generation is stale", { serviceId: "translation", retryable: false });
+      }
+      if (!text.trim()) throw new ServiceError("UNKNOWN", "translation produced an empty result", { serviceId: "translation", retryable: false });
+      const result: TranslateResult = {
+        text: text.trim(),
+        sourceLanguage: input.sourceLanguage,
+        targetLanguage: input.targetLanguage,
+        requestId: handle.context.requestId,
+        durationMs: Date.now() - startedAt,
+        modelId: this.#modelRuntime.modelId,
+      };
+      handle.complete(result);
+      this.runtime.health.report({ type: "completed", serviceId: "translation", requestId: handle.context.requestId, at: Date.now() });
+      return result;
+    } catch (error) {
+      const normalized = normalizeServiceError(error, handle.context);
+      handle.fail(normalized);
+      this.runtime.health.report({ type: "failed", serviceId: "translation", requestId: handle.context.requestId, at: Date.now(), error: normalized.toJSON() });
+      throw normalized;
+    }
+  }
+
+  dispose(): void {
+    this.runtime.dispose();
+    this.#modelRuntime.dispose();
+  }
+}

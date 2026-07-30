@@ -24,6 +24,7 @@ import { ShortcutService } from "./services/shortcut-service";
 import { CaptureService } from "./services/capture/capture-service";
 import { installDisplayMediaHandler } from "./services/capture/display-media-handler";
 import { ModelRepository } from "./services/local-llm/models/model-repository";
+import { TranslationService } from "./services/translation/translation-service";
 import { resolveRuntimeLayout, readBuildInfo } from "./runtime-layout";
 import { StreamEventBus } from "./services/stream-events/stream-event-bus";
 import { STREAM_EVENT_APP_EVENT_TYPE } from "../shared/services/stream-event-ipc-contract";
@@ -246,6 +247,10 @@ if (!hasLock) {
     // candidates (#76) before any IPC request can observe a stale "downloading" job with no
     // active controller behind it.
     await modelRepository.initializeDownloads();
+    // issue #257 Phase 2: モデル導入・checksum検証・専用catalogはPhase 3 (#262) の対象。
+    // ここでは翻訳runtime自体の常駐・IPC公開だけを配線する。cacheDirはmodelsDirとは別に
+    // 分離しておき、Phase 3で導入管理下に置く際に既存のGGUFモデル群と混在しないようにする。
+    const translationService = new TranslationService({ cacheDir: path.join(paths.cacheDir, "translation-models") });
     const currentConfig = await configRepository.getPublic();
     const findAssetReferences = async (assetId: string): Promise<string[]> => {
       const loaded = await configRepository.getPublic(); const found: string[] = [];
@@ -333,7 +338,7 @@ if (!hasLock) {
       log: (message, fields) => console.error(`[dociai:twitch-composition] ${message}`, fields ?? {}),
     });
     await twitchComposition.initialize();
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, newsSourceService, newsSearchService, wikipediaService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, overlayAssetService, overlayAssetUrlResolver, streamEventBus, updateService, buildInfo, devServerUrl });
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, newsSourceService, newsSearchService, wikipediaService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, translationService, overlayAssetService, overlayAssetUrlResolver, streamEventBus, updateService, buildInfo, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
     app.once("before-quit", () => feedService.dispose());
@@ -347,6 +352,7 @@ if (!hasLock) {
     app.once("before-quit", () => shortcutService.dispose());
     app.once("before-quit", () => { uninstallDisplayMediaHandler(); captureService.dispose(); });
     app.once("before-quit", () => modelRepository.dispose());
+    app.once("before-quit", () => translationService.dispose());
     app.once("before-quit", () => overlayAssetUrlResolver?.clear());
     app.once("before-quit", () => streamEventBus.dispose());
     app.once("before-quit", () => { if (updateCheckInterval) clearInterval(updateCheckInterval); updateService.dispose(); });
