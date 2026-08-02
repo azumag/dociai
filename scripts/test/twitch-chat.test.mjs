@@ -22,7 +22,7 @@ class FakeSocket {
 async function loadModules() {
   const result = await build({
     stdin: {
-      contents: `export { decodeIrcTag, parseIrcFrame, parseIrcTags } from "./src/twitch-chat/twitch-irc-parser.js"; export { TwitchChatSession } from "./src/twitch-chat/twitch-chat-session.js"; export { ReconnectPolicy } from "./src/twitch-chat/reconnect-policy.js"; export { TwitchChatSource, collapseConsecutiveEmojiRuns, parseTwitchIrcLine } from "./src/comment-sources.js";`,
+      contents: `export { decodeIrcTag, parseIrcFrame, parseIrcTags } from "./src/twitch-chat/twitch-irc-parser.js"; export { TwitchChatSession } from "./src/twitch-chat/twitch-chat-session.js"; export { ReconnectPolicy } from "./src/twitch-chat/reconnect-policy.js"; export { TwitchChatSource, collapseConsecutiveEmojiRuns, collapseConsecutiveEmoteRuns, parseTwitchIrcLine } from "./src/comment-sources.js";`,
       resolveDir: path.resolve(new URL("../..", import.meta.url).pathname),
       sourcefile: "twitch-chat-test.js",
       loader: "js",
@@ -63,6 +63,18 @@ test("comment reader emoji normalization keeps one emoji per consecutive run", a
     assert.equal(modules.collapseConsecutiveEmojiRuns("肌色🏽🏽🏽"), "肌色🏽");
     assert.equal(modules.collapseConsecutiveEmojiRuns("😂、😂"), "😂、😂", "句読点を挟む絵文字は別の読み上げとして残す");
     assert.equal(modules.collapseConsecutiveEmojiRuns("絵文字なし"), "絵文字なし");
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("Twitch emote code normalization keeps one emote per consecutive run", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    assert.equal(modules.collapseConsecutiveEmoteRuns("Kappa Kappa Kappa", "25:0-4,6-10,12-16"), "Kappa");
+    assert.equal(modules.collapseConsecutiveEmoteRuns("Kappa   Kappa", "25:0-4,8-12"), "Kappa");
+    assert.equal(modules.collapseConsecutiveEmoteRuns("Kappa PogChamp", "25:0-4/88:6-13"), "Kappa");
+    assert.equal(modules.collapseConsecutiveEmoteRuns("Kappa、Kappa", "25:0-4,6-10"), "Kappa、Kappa", "句読点を挟むエモートは別の読み上げとして残す");
+    assert.equal(modules.collapseConsecutiveEmoteRuns("Kappa", "25:0-4"), "Kappa", "単独のエモートはそのまま");
+    assert.equal(modules.collapseConsecutiveEmoteRuns("hello world", null), "hello world");
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 

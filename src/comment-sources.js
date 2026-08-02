@@ -72,6 +72,44 @@ export function stripEmotes(text, emotesTag) {
   return out.replace(/\s+/g, " ").trim();
 }
 
+// Twitchの emotes タグが指す範囲を使い、絵文字コード (Kappa等) の連投を先頭1個へまとめる。
+// collapseConsecutiveEmojiRuns()はUnicode絵文字文字しか見ないため、プレーンテキストの
+// エモートコードは対象外だった。範囲どうしの間が空白のみなら同一の連投とみなし、
+// 句読点や通常文字を挟む場合は別のエモートとして残す (collapseConsecutiveEmojiRunsと同じ規則)。
+export function collapseConsecutiveEmoteRuns(text, emotesTag) {
+  const s = String(text ?? "");
+  if (!emotesTag) return s;
+  const ranges = [];
+  for (const part of String(emotesTag).split("/")) {
+    const rangesStr = part.split(":")[1];
+    if (!rangesStr) continue;
+    for (const r of rangesStr.split(",")) {
+      const [start, end] = r.split("-").map(Number);
+      if (Number.isFinite(start) && Number.isFinite(end) && end >= start) ranges.push([start, end]);
+    }
+  }
+  if (ranges.length < 2) return s;
+  ranges.sort((a, b) => a[0] - b[0]);
+
+  const drop = [];
+  let runEnd = null;
+  for (const [start, end] of ranges) {
+    if (runEnd != null && /^\s*$/.test(s.slice(runEnd, start))) {
+      drop.push([runEnd, end + 1]);
+    }
+    runEnd = end + 1;
+  }
+  if (!drop.length) return s;
+  let out = "";
+  let cursor = 0;
+  for (const [start, end] of drop) {
+    out += s.slice(cursor, start);
+    cursor = end;
+  }
+  out += s.slice(cursor);
+  return out.replace(/\s+/g, " ").trim();
+}
+
 const emojiSegmenter = typeof Intl?.Segmenter === "function"
   ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
   : null;

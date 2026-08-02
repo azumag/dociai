@@ -34,6 +34,7 @@ import {
   cancelTranslationModelInstallThroughElectron,
   deleteTranslationModelThroughElectron,
   subscribeTranslationModelProgressThroughElectron,
+  translationStatusThroughElectron,
 } from "./platform/electron-services.js";
 
 const PROVIDERS = registryOptions("providers");
@@ -77,6 +78,8 @@ export class SettingsUI {
     this._translationModelStatus = null;
     this._translationModelStatusLoading = false;
     this._translationModelStatusGeneration = 0;
+    this._translationRuntimeStatus = null;
+    this._translationRuntimeStatusLoading = false;
     this._translationModelProgress = null;
     this._translationModelRenderedState = null;
     this._translationModelBusy = false;
@@ -1180,7 +1183,7 @@ export class SettingsUI {
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。「読み上げ間隔 (秒)」は、あるコメントの読み上げが終わってから次のコメントの読み上げを始めるまでの最短待機時間です (既定0=間隔なし)。コメントが連続で届いても機関銃のように読み上げ続けないよう調整できます。同じキューにコメント読み上げより後ろに積まれたAI応答は、この待機の間も自分の順番を待つため、間隔を長くするとAI応答の開始も遅れる場合があります。「連続する絵文字を1つにまとめる」は、単独の絵文字は残し、空白を挟んだ絵文字の連投も先頭1つだけ読み上げます。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
+    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。「読み上げ間隔 (秒)」は、あるコメントの読み上げが終わってから次のコメントの読み上げを始めるまでの最短待機時間です (既定0=間隔なし)。コメントが連続で届いても機関銃のように読み上げ続けないよう調整できます。同じキューにコメント読み上げより後ろに積まれたAI応答は、この待機の間も自分の順番を待つため、間隔を長くするとAI応答の開始も遅れる場合があります。「連続する絵文字を1つにまとめる」は、単独の絵文字は残し、空白を挟んだ絵文字の連投も先頭1つだけ読み上げます (Twitchのエモートコードの連投も同様にまとめます)。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
     this._body.append(note);
     if (cr.enabled) this.#renderCommentReaderTranslation(cr);
   }
@@ -1279,6 +1282,23 @@ export class SettingsUI {
         // 上書きされたままcancelled後もチップが固定され続けていた (PRレビュー指摘: 実際に
         // ライブ検証で再現・特定したrace)。
         this.#refreshTranslationModelStatusUI();
+      });
+  }
+
+  // モデルファイルの導入状態 (_translationModelStatus) とは別に、翻訳runtime (onnxruntime-node
+  // 経由でのモデルロード・推論の実行可否) 自体の状態を取得する。モデルファイルは導入済みでも
+  // packaged buildでruntimeの読み込みが失敗する既知の問題があり (#257関連)、その場合ここだけが
+  // 実際の失敗理由 (lastError) を持っている。#ensureTranslationModelStatusLoadedと違い進捗
+  // イベントは無いため、開くたびに一度だけ取得する簡易版でよい。
+  #ensureTranslationRuntimeStatusLoaded() {
+    if (this._translationRuntimeStatus || this._translationRuntimeStatusLoading) return;
+    this._translationRuntimeStatusLoading = true;
+    translationStatusThroughElectron()
+      .then((result) => { this._translationRuntimeStatus = result; })
+      .catch((error) => { this._translationRuntimeStatus = { ok: false, error: { message: error instanceof Error ? error.message : String(error) } }; })
+      .finally(() => {
+        this._translationRuntimeStatusLoading = false;
+        if (this.root?.open && this.activeTab === "commentReader") this.#refreshTranslationModelStatusUI();
       });
   }
 
@@ -1401,6 +1421,7 @@ export class SettingsUI {
     }
 
     this.#ensureTranslationModelStatusLoaded();
+    this.#ensureTranslationRuntimeStatusLoaded();
     const body = document.createElement("div");
     body.className = "translation-model-status-body";
     const result = this._translationModelStatus;
@@ -1473,6 +1494,17 @@ export class SettingsUI {
       errP.className = "muted translation-model-error";
       errP.textContent = `エラー: ${lastError.message}`;
       body.append(errP);
+    }
+
+    // モデルファイルは導入済み (installed) でも、runtime側 (onnxruntime-node) が実行時に
+    // ロードできず翻訳自体は一度も成功していない場合がある — 上のlastErrorはモデル
+    // ダウンロード側のエラーであり、こちらとは別物。
+    if (state === "installed" && this._translationRuntimeStatus?.ok && this._translationRuntimeStatus.value.state === "error") {
+      const runtimeErrP = document.createElement("p");
+      runtimeErrP.className = "muted translation-model-error";
+      const runtimeMessage = this._translationRuntimeStatus.value.lastError?.message ?? "不明なエラー";
+      runtimeErrP.textContent = `モデルは導入済みですが、翻訳を実行できません: ${runtimeMessage}`;
+      body.append(runtimeErrP);
     }
 
     const actions = document.createElement("div");

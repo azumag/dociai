@@ -128,7 +128,10 @@ export class CommentSpeechPipeline {
     });
     const translated = this.#translationAdapter
       .translate({ text, sourceLanguage, targetLanguage: "ja", signal: controller.signal })
-      .catch(() => null);
+      .catch((error) => {
+        this.#log(`翻訳に失敗したため原文のまま読み上げます: ${error?.message ?? String(error)}`, "warn");
+        return null;
+      });
     const outcome = await Promise.race([translated, timedOut]);
     clearTimeout(timer);
     if (outcome === TRANSLATE_TIMED_OUT) return null;

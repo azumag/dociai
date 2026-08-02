@@ -35,6 +35,18 @@ test("consecutive emoji are collapsed before the empty check and before detectio
   assert.deepEqual(result, { kind: "speak", originalText: "😂", translated: false });
 });
 
+test("consecutive Twitch emote codes are collapsed to the first one, using the emotes tag ranges", () => {
+  const config = crWithTranslation({}, { collapseConsecutiveEmoji: true });
+  const result = processCommentForSpeech({ author: "V", text: "Kappa Kappa Kappa", emotes: "25:0-4,6-10,12-16" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "Kappa", translated: false });
+});
+
+test("skipEmotes takes priority over collapseConsecutiveEmoji: emotes are stripped entirely, not collapsed", () => {
+  const config = crWithTranslation({}, { skipEmotes: true, collapseConsecutiveEmoji: true });
+  const result = processCommentForSpeech({ author: "V", text: "Kappa Kappa nice stream", emotes: "25:0-4,6-10" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "nice stream", translated: false });
+});
+
 test("translation disabled (the default) speaks the original text without running detection", () => {
   const config = cr(); // translation.enabled defaults to false
   const result = processCommentForSpeech({ author: "V", text: "Thank you for the stream!" }, config);

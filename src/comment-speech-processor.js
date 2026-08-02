@@ -2,7 +2,7 @@
 // 旧 readCommentAloud() 内に直接あった処理を、テスト可能な純関数へ分離したもの。
 // 翻訳の実行そのものはここでは行わない (非同期IO・timeoutはCommentSpeechPipelineの責務) —
 // このモジュールは常に同期・副作用なしで完結する。
-import { collapseConsecutiveEmojiRuns, stripEmotes } from "./comment-sources.js";
+import { collapseConsecutiveEmojiRuns, collapseConsecutiveEmoteRuns, stripEmotes } from "./comment-sources.js";
 import { detectCommentLanguage } from "./comment-language-detector.js";
 
 // 戻り値:
@@ -16,7 +16,12 @@ export function processCommentForSpeech(comment, commentReader) {
     return { kind: "skip", reason: "ignored-user" };
   }
 
-  let body = cr.skipEmotes && comment.emotes ? stripEmotes(comment.text, comment.emotes) : comment.text;
+  let body = comment.text;
+  if (cr.skipEmotes && comment.emotes) {
+    body = stripEmotes(body, comment.emotes);
+  } else if (cr.collapseConsecutiveEmoji && comment.emotes) {
+    body = collapseConsecutiveEmoteRuns(body, comment.emotes);
+  }
   if (cr.collapseConsecutiveEmoji) body = collapseConsecutiveEmojiRuns(body);
   if (!body.trim()) return { kind: "skip", reason: "empty" };
 

@@ -92,6 +92,20 @@ test("onFailure: readOriginal speaks the original text once when translation fai
   assert.equal(speechQueue.items[0].text, "Thank you for the stream! That was a great match.");
 });
 
+test("a translation failure is logged with the underlying error message, instead of being silently swallowed", async () => {
+  const config = baseConfig({ onFailure: "readOriginal" }, { includeAuthor: false });
+  const speechQueue = fakeSpeechQueue();
+  const adapter = delayedAdapter({ "Thank you for the stream! That was a great match.": { error: new Error("translation model failed to load") } });
+  const logs = [];
+  const pipeline = new CommentSpeechPipeline({
+    config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true, translationAdapter: adapter,
+    log: (message, level) => logs.push({ message, level }),
+  });
+  pipeline.submit({ id: "c1", author: "Viewer", text: "Thank you for the stream! That was a great match." });
+  await waitFor(() => speechQueue.items.length === 1);
+  assert.ok(logs.some((entry) => entry.level === "warn" && entry.message.includes("translation model failed to load")));
+});
+
 test("onFailure: skip drops the comment entirely on translation failure", async () => {
   const config = baseConfig({ onFailure: "skip" }, { includeAuthor: false });
   const speechQueue = fakeSpeechQueue();
