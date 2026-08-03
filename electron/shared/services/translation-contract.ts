@@ -35,3 +35,12 @@ export type TranslationStatus = {
   modelId: string;
   lastError?: { message: string };
 };
+
+// issue #267: a real `require("onnxruntime-node")` (via electron/main/native/onnxruntime-node-shim.cjs),
+// separate from TranslationStatus above. Unlike TranslationStatus (a passive read of
+// TranslationRuntime's own lazily-populated state), this permanently dlopens the native binary
+// into the Main process the moment it's called — there is no unload path. It exists only for
+// scripts/release/smoke-packaged.mjs and scripts/release/probe-native.mjs's automated CI proof
+// that the bundled binary actually loads; no renderer production code calls it (see the IPC
+// handler registration for the full rationale).
+export type NativeRuntimeProbeResult = { ok: true; version: string } | { ok: false; reason: string };

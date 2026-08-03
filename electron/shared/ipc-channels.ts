@@ -64,6 +64,7 @@ export const CHANNELS = Object.freeze({
   TRANSLATION_TRANSLATE: "translation:translate",
   TRANSLATION_CANCEL: "translation:cancel",
   TRANSLATION_STATUS: "translation:status",
+  TRANSLATION_RUNTIME_PROBE: "translation:runtime:probe",
   TRANSLATION_MODEL_STATUS: "translation:model:status",
   TRANSLATION_MODEL_INSTALL: "translation:model:install",
   TRANSLATION_MODEL_INSTALL_CANCEL: "translation:model:install-cancel",

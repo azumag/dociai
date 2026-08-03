@@ -20,13 +20,31 @@ await fs.mkdir(outDir, { recursive: true });
 // only that esbuild must never silently inline it once it's imported at all.
 //
 // onnxruntime-node (issue #257 Phase 2, translation-runtime.ts's `@huggingface/transformers`
-// pipeline) is the exact same situation: it ships a platform/arch-specific prebuilt
-// `onnxruntime_binding.node` it locates relative to its own package directory. `sharp` is
+// pipeline) was the exact same situation until issue #267: it ships a platform/arch-specific
+// prebuilt `onnxruntime_binding.node` it locates relative to its own package directory. Rather
+// than leaving it external+broken like node-llama-cpp, #267 aliases the bare "onnxruntime-node"
+// specifier to electron/main/native/onnxruntime-node-shim.cjs (bundled/inlined like any other
+// first-party file) — the shim redirects to collect-native.mjs's packaged-build copy under
+// extraResources, or falls back to a real node_modules lookup in dev. `sharp` is
 // `@huggingface/transformers`' optional image-processing dependency (unused by the text-only
-// translation pipeline here) and ships prebuilt binaries the same way — kept external for the
-// same reason, not because this app calls into it. `@huggingface/transformers` itself IS bundled
-// (pure JS, no native binary of its own) — only its native-binary dependencies are external.
-const bundleOptions = { bundle: true, platform: "node", format: "cjs", target: "node22", external: ["electron", "node-llama-cpp", "onnxruntime-node", "sharp"], sourcemap: process.env.NODE_ENV === "development", metafile: true };
+// translation pipeline here) and ships prebuilt binaries the same way; it's aliased to
+// electron/main/native/sharp-stub.cjs instead, since dociai never needs a working sharp, only a
+// truthy import (see that file's header comment for why). `@huggingface/transformers` itself IS
+// bundled (pure JS, no native binary of its own).
+const NATIVE_DIR = path.join(repoRoot, "electron/main/native");
+const bundleOptions = {
+  bundle: true,
+  platform: "node",
+  format: "cjs",
+  target: "node22",
+  external: ["electron", "node-llama-cpp"],
+  alias: {
+    "onnxruntime-node": path.join(NATIVE_DIR, "onnxruntime-node-shim.cjs"),
+    sharp: path.join(NATIVE_DIR, "sharp-stub.cjs"),
+  },
+  sourcemap: process.env.NODE_ENV === "development",
+  metafile: true,
+};
 const mainResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/main/index.ts")], outfile: path.join(outDir, "main.cjs") });
 const preloadResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/preload/index.ts")], outfile: path.join(outDir, "preload.cjs") });
 for (const relativePath of ["index.html", "obs.html", "src", "styles", "config.local.example.json", "resources"]) {
@@ -46,7 +64,9 @@ await writeBuildInfo(path.join(outDir, "build-info.json"), buildInfo);
 await writeBuildInfo(path.join(repoRoot, "build/generated/build-info.json"), buildInfo);
 
 // license/resource manifest: 実際にMain/Preload bundleへ含まれたnode_modulesだけを機械的に列挙する。
-const licenseManifest = await buildLicenseManifest(repoRoot, [mainResult.metafile, preloadResult.metafile]);
+// onnxruntime-node/onnxruntime-common (issue #267) はaliasされておりmetafileに現れないため
+// 明示的に追加する — 実体はcollect-native.mjsがbuild/native/ -> extraResources経由で同梱する。
+const licenseManifest = await buildLicenseManifest(repoRoot, [mainResult.metafile, preloadResult.metafile], () => new Date(), ["onnxruntime-node", "onnxruntime-common"]);
 await writeLicenseManifest(path.join(repoRoot, "build/generated/licenses.json"), licenseManifest);
 
 console.log(`Electron build ready: ${outDir} (build-info: ${buildInfo.version}@${buildInfo.gitSha.slice(0, 12)} ${buildInfo.channel}/${buildInfo.platform}/${buildInfo.arch}, licenses: ${licenseManifest.packages.length} package(s))`);

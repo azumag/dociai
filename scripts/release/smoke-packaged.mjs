@@ -23,14 +23,25 @@ function argValue(name) {
   return idx !== -1 && process.argv[idx + 1] ? process.argv[idx + 1] : undefined;
 }
 
-function locateExecutable() {
-  const explicit = argValue("app-dir");
-  if (explicit) return path.resolve(explicit);
-  const layout = resolveLayout({ mode: "packaged", repoRoot });
-  return layout.executable;
+// issue #267: <bundle>.app/Contents/MacOS/<exe> -> <bundle>.app/Contents/Resources (mac);
+// <appDir>/<exe>.exe -> <appDir>/resources (windows) — mirrors resolvePackagedLayout's own
+// construction in runtime-layout.mjs, needed here because --app-dir bypasses that helper.
+function resourcesDirFromExecutable(execPath) {
+  if (process.platform === "darwin") return path.join(path.dirname(path.dirname(execPath)), "Resources");
+  return path.join(path.dirname(execPath), "resources");
 }
 
-const executablePath = locateExecutable();
+function locateExecutableAndResourcesDir() {
+  const explicit = argValue("app-dir");
+  if (explicit) {
+    const executable = path.resolve(explicit);
+    return { executable, resourcesDir: resourcesDirFromExecutable(executable) };
+  }
+  const layout = resolveLayout({ mode: "packaged", repoRoot });
+  return { executable: layout.executable, resourcesDir: layout.resourcesDir };
+}
+
+const { executable: executablePath, resourcesDir } = locateExecutableAndResourcesDir();
 if (!executablePath || !fsSync.existsSync(executablePath)) {
   console.error(`FAIL | smoke-packaged | packaged executable not found: ${executablePath ?? "(unresolved)"}`);
   console.error('Run "npm run electron:package:dir" first, or pass --app-dir <path-to-packaged-executable>.');
@@ -118,6 +129,22 @@ try {
   assert.match(checks.csp ?? "", /object-src 'none'/);
   assert.doesNotMatch(checks.rendererConfig, /sk-\.\.\.|or-\.\.\.|smoke-secret/);
   assert.deepEqual(checks.browserGlobals, { require: "undefined", process: "undefined", ipcRenderer: "undefined" });
+
+  // issue #267: cross-check collect-native.mjs's collection-time manifest against a REAL
+  // require("onnxruntime-node") attempt made by the running packaged app — these are two
+  // independent code paths (static metadata vs. dynamic native load) that must always agree.
+  // This is the automated proof that the fix for "translation model downloads fine but never
+  // actually translates in a packaged build" (#267) actually works, on every mac/windows CI run.
+  const manifestPath = path.join(resourcesDir, "native", "onnxruntime-node", `${checks.platform.value.platform}-${checks.platform.value.arch}`, "manifest.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  const runtimeProbe = await consolePage.evaluate(() => window.dociai.translation.probeRuntime());
+  assert.equal(runtimeProbe.ok, true, `translation:runtime:probe IPC call itself failed: ${JSON.stringify(runtimeProbe)}`);
+  if (manifest.supported) {
+    assert.equal(runtimeProbe.value.ok, true, `expected the bundled onnxruntime-node native binary to load successfully on ${manifest.platform}/${manifest.arch}: ${JSON.stringify(runtimeProbe.value)}`);
+  } else {
+    assert.equal(runtimeProbe.value.ok, false, `expected the native onnxruntime-node load to fail on an unsupported target (${manifest.platform}/${manifest.arch}), but it reported success`);
+    assert.equal(runtimeProbe.value.reason, manifest.reason, "the runtime's unsupported-target error must match collect-native.mjs's own recorded reason");
+  }
   const overlayAssets = await consolePage.evaluate(async (assetId) => {
     const list = await window.dociai.overlayAssets.list(); const playback = await window.dociai.overlayAssets.getPlaybackHandle({ assetId });
     if (!playback.ok) return { list, playback };

@@ -37,10 +37,20 @@ export const FORBIDDEN_NAME_PATTERNS = [
 
 const FORBIDDEN_PATH_SEGMENTS = new Set([".git", "node_modules"]);
 
+// issue #267: collect-native.mjs synthesizes a node_modules/onnxruntime-common/ nesting inside
+// the collected onnxruntime-node package (required for Node's normal module resolution to find
+// it at runtime — see electron/main/native/onnxruntime-node-shim.cjs). This is the one
+// intentional, narrowly-scoped exception to the node_modules ban above; it must not broaden into
+// a general node_modules allowance (see this file's own module comment for why that ban exists).
+const NATIVE_NODE_MODULES_EXEMPTION = /^native\/onnxruntime-node\/[^/]+-[^/]+\/package\/node_modules\/onnxruntime-common(\/|$)/;
+
 export function classifyRelativePath(relativePath) {
-  const segments = relativePath.split(/[\\/]/).filter(Boolean);
+  const normalized = relativePath.split(/[\\/]/).filter(Boolean).join("/");
+  const segments = normalized.split("/");
   const basename = segments[segments.length - 1] ?? relativePath;
+  const exemptNodeModules = NATIVE_NODE_MODULES_EXEMPTION.test(normalized);
   for (const segment of segments.slice(0, -1)) {
+    if (segment === "node_modules" && exemptNodeModules) continue;
     if (FORBIDDEN_PATH_SEGMENTS.has(segment)) return { forbidden: true, reason: `forbidden directory: ${segment}/` };
   }
   if (FORBIDDEN_EXACT_NAMES.has(basename)) return { forbidden: true, reason: `forbidden file: ${basename}` };
@@ -133,6 +143,90 @@ export async function verifyArtifactTree(resourcesDir) {
   };
 }
 
+const NATIVE_BINARY_EXTENSIONS = new Set([".node", ".dylib", ".dll"]);
+
+function isNativeBinaryPath(relPath) {
+  return NATIVE_BINARY_EXTENSIONS.has(path.extname(relPath));
+}
+
+// issue #267: collect-native.mjs always emits exactly one <platform>-<arch> directory under
+// native/onnxruntime-node/ (a manifest-only {supported:false} entry when no upstream binary
+// exists for that target, e.g. darwin/x64 today) and after-pack.mjs prunes every other target's
+// directory before packaging. "Absent entirely" must always fail, on every arch, forever — no
+// hardcoded arch exemption here (a prior version of this check special-cased darwin-x64, which
+// would have kept silently passing even if a future onnxruntime-node release added real
+// darwin/x64 support and collection then regressed).
+export async function verifyNativeOnnxruntimeLayout(resourcesDir, buildInfo) {
+  const problems = [];
+  const nativeRoot = path.join(resourcesDir, "native", "onnxruntime-node");
+  let entries;
+  try {
+    entries = await fsp.readdir(nativeRoot, { withFileTypes: true });
+  } catch {
+    problems.push(`native/onnxruntime-node/ is missing under ${resourcesDir}`);
+    return problems;
+  }
+  const dirs = entries.filter((entry) => entry.isDirectory());
+  if (dirs.length !== 1) {
+    problems.push(`expected exactly one arch directory under native/onnxruntime-node/, found ${dirs.length}${dirs.length ? `: ${dirs.map((d) => d.name).join(", ")}` : ""}`);
+    return problems;
+  }
+  const dirName = dirs[0].name;
+  const expectedDirName = `${buildInfo?.platform}-${buildInfo?.arch}`;
+  if (dirName !== expectedDirName) problems.push(`native/onnxruntime-node/${dirName} does not match build-info.json's platform/arch (expected ${expectedDirName})`);
+  const archDir = path.join(nativeRoot, dirName);
+
+  let manifest;
+  try {
+    manifest = JSON.parse(await fsp.readFile(path.join(archDir, "manifest.json"), "utf8"));
+  } catch (error) {
+    problems.push(`native/onnxruntime-node/${dirName}/manifest.json is missing or unparsable: ${error instanceof Error ? error.message : String(error)}`);
+    return problems;
+  }
+
+  if (!manifest.supported) {
+    const siblingEntries = await fsp.readdir(archDir);
+    const extra = siblingEntries.filter((name) => name !== "manifest.json");
+    if (extra.length) problems.push(`native/onnxruntime-node/${dirName}/ is marked unsupported but contains unexpected entries: ${extra.join(", ")}`);
+    return problems;
+  }
+
+  const files = Array.isArray(manifest.files) ? manifest.files : [];
+  // 「files[]が空/欠落」は以下のfor文をゼロ回で通り抜け、walkDirectoryもpackage/自体が
+  // 存在しなければENOENTを[]へ握りつぶす — package/がまるごと欠落した収集失敗を、この関数が
+  // 検出すべき本来の対象そのものなのに素通りさせてしまう (issue #267 review指摘)。
+  if (!files.length || !files.some((file) => isNativeBinaryPath(file.path))) {
+    problems.push(`native/onnxruntime-node/${dirName}/manifest.json is marked supported but lists no native binary file — package/ may be entirely missing or the collection produced an empty manifest`);
+    return problems;
+  }
+
+  const packageRoot = path.join(archDir, "package");
+  const onDisk = new Set(await walkDirectory(packageRoot, ""));
+  const listed = new Set();
+  for (const file of files) {
+    listed.add(file.path);
+    let stat;
+    try {
+      stat = await fsp.stat(path.join(packageRoot, file.path));
+    } catch {
+      problems.push(`native/onnxruntime-node/${dirName}/package/${file.path} is listed in manifest.json but missing on disk`);
+      continue;
+    }
+    if (isNativeBinaryPath(file.path)) {
+      // codesign/signtool rewrite native binaries in place during signing (typically growing
+      // them), so an exact-size match would false-fail on signed artifacts — a non-zero,
+      // not-shrunk floor still catches a truncated/corrupted copy.
+      if (stat.size <= 0 || stat.size < file.size) problems.push(`native/onnxruntime-node/${dirName}/package/${file.path} is smaller than the collected size (${stat.size} < ${file.size} bytes) — possibly truncated`);
+    } else if (stat.size !== file.size) {
+      problems.push(`native/onnxruntime-node/${dirName}/package/${file.path} size mismatch (expected ${file.size}, found ${stat.size})`);
+    }
+  }
+  for (const relPath of onDisk) {
+    if (!listed.has(relPath)) problems.push(`native/onnxruntime-node/${dirName}/package/${relPath} exists on disk but is not listed in manifest.json`);
+  }
+  return problems;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const target = process.argv[2];
   if (!target) {
@@ -147,6 +241,10 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (!result.hasBuildInfo) failures.push("build-info.json missing from app resources");
   if (!result.hasLicenses) failures.push("licenses.json missing from app resources");
   if (result.hasModelsOrUserDataDir) failures.push("a models/ or userData/ directory was found inside app resources; those must live outside the app bundle");
+  if (result.hasBuildInfo) {
+    const buildInfo = JSON.parse(await fsp.readFile(path.join(resourcesDir, "build-info.json"), "utf8"));
+    failures.push(...(await verifyNativeOnnxruntimeLayout(resourcesDir, buildInfo)));
+  }
 
   if (failures.length) {
     console.error(`FAIL | verify-artifact | ${resourcesDir}`);

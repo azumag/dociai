@@ -28,6 +28,7 @@ import type { DownloadStartInput, ModelLicense } from "../../shared/local-llm/mo
 import type { TranslationService } from "../services/translation/translation-service";
 import type { TranslationModelRepository } from "../services/translation/translation-model-repository";
 import { requestMetadata, parseTranslateInput } from "./translation-input";
+import { probeNativeRuntime } from "../services/translation/native-runtime-probe";
 import type { StreamEventBus } from "../services/stream-events/stream-event-bus";
 import type { TwitchComposition } from "../services/twitch/twitch-composition";
 import type { UpdateService } from "../services/update/update-service";
@@ -279,6 +280,11 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
   register(CHANNELS.TRANSLATION_TRANSLATE, (event, input) => options.translationService.translate(parseTranslateInput(input)), options);
   register(CHANNELS.TRANSLATION_CANCEL, (event, input) => ({ cancelled: options.translationService.cancel(expectString(input, "requestId", 256)) }), options);
   register(CHANNELS.TRANSLATION_STATUS, (event, input) => { expectNoInput(input); return options.translationService.status(); }, options);
+  // issue #267: a real onnxruntime-node load-proof, intentionally separate from
+  // TRANSLATION_STATUS above (see native-runtime-probe.ts's header comment for why this
+  // permanently dlopens the native binary and must not be called from renderer production code —
+  // only scripts/release/smoke-packaged.mjs's packaged-app CI check calls this today).
+  register(CHANNELS.TRANSLATION_RUNTIME_PROBE, (event, input) => { expectNoInput(input); return probeNativeRuntime(); }, options);
   register(CHANNELS.TRANSLATION_MODEL_STATUS, (event, input) => { expectNoInput(input); return options.translationModelRepository.status(); }, options);
   register(CHANNELS.TRANSLATION_MODEL_INSTALL, (event, input) => { expectNoInput(input); return options.translationModelRepository.install(); }, options);
   register(CHANNELS.TRANSLATION_MODEL_INSTALL_CANCEL, (event, input) => { expectNoInput(input); return { cancelled: options.translationModelRepository.cancelInstall() }; }, options);
