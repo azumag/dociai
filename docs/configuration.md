@@ -278,7 +278,7 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
       "minimumConfidence": 0.7,
       "outputMode": "translated",
       "onFailure": "readOriginal",
-      "timeoutMs": 3000,
+      "timeoutMs": 25000,
       "maxInputChars": 500,
       "maxPendingComments": 20
     }
@@ -294,7 +294,7 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 | `minimumConfidence` | 0.7 | ローカル言語判定器 (`tinyld`, `src/comment-language-detector.js`) のtop1/top2相対マージンに対するしきい値 (0〜1)。絶対確率ではない — issue #259のベンチマークで判明した、tinyldの生スコアを絶対しきい値として使うと機能しないという知見に基づく |
 | `outputMode` | translated | `translated` (日本語訳のみ読み上げ) / `originalThenTranslated` (原文の後に日本語訳を読み上げる) |
 | `onFailure` | readOriginal | 翻訳モデル未導入・timeout・翻訳失敗時の挙動。`readOriginal` (原文を読み上げる) / `skip` (読み上げない)。モデル未導入のまま `enabled: true` にした場合も無言で外部APIへ切り替えず、このポリシーに従う |
-| `timeoutMs` | 3000 | 翻訳1件あたりの待ち上限 (500〜15000ms)。Main process側は初回モデルロード (約20〜30秒) を別途考慮した、より長い内部上限を持つ |
+| `timeoutMs` | 25000 | 翻訳1件あたりの待ち上限 (500〜30000ms)。モデル初回ロードは実測約22秒 (macOS arm64、環境によってはより遅い) かかり、既定値はこれを上回るよう設定してある。翻訳有効化時にboot.js側でモデルを事前ウォームアップするため通常は待たないはずだが、その保険としてこの値自体もロード時間を賄える大きさにしてある |
 | `maxInputChars` | 500 | この文字数を超えるコメントは翻訳せず原文のまま読み上げる (1〜1000) |
 | `maxPendingComments` | 20 | 翻訳待ちコメントの上限 (1〜200)。超過時は最も古い項目を読み上げずに破棄する |
 

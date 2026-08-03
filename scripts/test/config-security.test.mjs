@@ -41,7 +41,7 @@ test("ConfigRepository is atomic, revision-checked, and rejects plaintext secret
     await fs.writeFile(path.join(directory, "legacy.json"), JSON.stringify({ connectors: { main: { apiKey: "secret-value", model: "mock" } } }));
     const repository = new modules.ConfigRepository(paths, path.join(directory, "legacy.json"));
     const initial = await repository.getPublic();
-    assert.equal(initial.config.schemaVersion, 2);
+    assert.equal(initial.config.schemaVersion, 3);
     await assert.rejects(repository.save({ connectors: { main: { apiKey: "secret-value" } } }), /secret IPC/);
     const saved = await repository.save({ schemaVersion: 1, connectors: { main: { provider: "mock" } }, personas: [], triggers: {} });
     await assert.rejects(repository.save({ schemaVersion: 1 }, "wrong-revision"), /別のwindow/);

@@ -82,6 +82,41 @@ test("translate() imports the module exactly once, sets env.cacheDir/allowRemote
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test("warmUp() loads the model without translating anything, and a later translate() reuses that same load", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    let importCount = 0;
+    let pipelineCallCount = 0;
+    const runtime = new modules.TranslationRuntime({
+      cacheDir: "/tmp/unused",
+      importModule: async () => {
+        importCount += 1;
+        const fake = fakeTransformersModule();
+        const originalPipeline = fake.pipeline.bind(fake);
+        fake.pipeline = async (...args) => { pipelineCallCount += 1; return originalPipeline(...args); };
+        return fake;
+      },
+    });
+    await runtime.warmUp();
+    assert.equal(runtime.state, "ready");
+    assert.equal(importCount, 1);
+    assert.equal(pipelineCallCount, 1);
+
+    assert.equal(await runtime.translate("hello", "en", "ja"), "translated: hello");
+    assert.equal(importCount, 1, "translate() after warmUp() must reuse the already-loaded translator, not re-import");
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("warmUp() surfaces a load failure via state/lastError, same as a failed translate() would", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    const runtime = new modules.TranslationRuntime({ cacheDir: "/tmp/unused", importModule: async () => { throw new Error("boom"); } });
+    await assert.rejects(() => runtime.warmUp(), /boom/);
+    assert.equal(runtime.state, "error");
+    assert.equal(runtime.lastError?.message, "boom");
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("a rejecting import surfaces as state: error without throwing uncaught, and a later call retries", async () => {
   const { modules, directory } = await loadModules();
   try {

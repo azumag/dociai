@@ -16,9 +16,10 @@ import { TranslationRuntime } from "./translation-runtime";
 import type { TranslationModelRepository } from "./translation-model-repository";
 
 // モデルの初回ロードには約22秒かかる (issue #259実測、macOS arm64)。commentReader.translation.
-// timeoutMsの既定値(3000ms)より大幅に長いため、Main側はより寛容な上限を独自に持ち、初回ロード中の
-// 要求をタイムアウトで打ち切ってしまわないようにする。Renderer側のtimeoutMsは「翻訳1件あたりの
-// 待ち上限」であり、Main側のこの値は「モデルロード+翻訳1件」の絶対上限という別の意味を持つ。
+// timeoutMsの既定値(25000ms、issue #257 PRレビュー指摘で3000msから引き上げ済み)に近い/超える
+// こともあるため、Main側はより寛容な上限を独自に持ち、初回ロード中の要求をタイムアウトで
+// 打ち切ってしまわないようにする。Renderer側のtimeoutMsは「翻訳1件あたりの待ち上限」であり、
+// Main側のこの値は「モデルロード+翻訳1件」の絶対上限という別の意味を持つ。
 const SERVICE_TIMEOUT_MS = 30_000;
 
 function assertInput(input: TranslateInput): void {
@@ -57,6 +58,21 @@ export class TranslationService {
   status(): TranslationStatus {
     const error = this.#modelRuntime.lastError;
     return { state: this.#modelRuntime.state, modelId: this.#modelRuntime.modelId, ...(error ? { lastError: { message: error.message } } : {}) };
+  }
+
+  // issue #257: 翻訳が有効化された時点でモデルロード(~22秒)を先に走らせておき、実際のコメントが
+  // 届いた時点では既に常駐済みにする (renderer側のtimeoutMsがロード時間を賄えない問題への対策、
+  // translation-runtime.tsのwarmUp()コメント参照)。失敗時はここで例外を投げず飲み込む —
+  // #modelRuntime.lastError/status()に既に反映されるため、実際の翻訳要求が来た際に通常の
+  // エラー経路 (ログ・設定画面) でユーザーへ可視化される。ここで投げてもfire-and-forgetの
+  // 呼び出し元 (boot.js) には意味のある届け先が無い。
+  async warmUp(): Promise<void> {
+    try {
+      if (this.#modelRepository && !(await this.#modelRepository.isInstalled())) return;
+      await this.#modelRuntime.warmUp();
+    } catch {
+      // status()経由で可視化されるため、ここでは何もしない (上のコメント参照)。
+    }
   }
 
   async translate(input: TranslateInput): Promise<TranslateResult> {

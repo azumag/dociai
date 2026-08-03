@@ -35,6 +35,7 @@ import {
   deleteTranslationModelThroughElectron,
   subscribeTranslationModelProgressThroughElectron,
   translationStatusThroughElectron,
+  warmUpTranslationThroughElectron,
 } from "./platform/electron-services.js";
 
 const PROVIDERS = registryOptions("providers");
@@ -1211,7 +1212,7 @@ export class SettingsUI {
       g.append(this.#pathSelect("読み上げ方法", TRANSLATION_OUTPUT_MODES, "commentReader.translation.outputMode", { value: t.outputMode ?? "translated" }));
       g.append(this.#pathSelect("翻訳失敗時", TRANSLATION_FAILURE_POLICIES, "commentReader.translation.onFailure", { value: t.onFailure ?? "readOriginal" }));
       g.append(this.#pathField("言語判定の信頼度 (0〜1)", "commentReader.translation.minimumConfidence", { type: "number", value: t.minimumConfidence ?? 0.7, attrs: { min: 0, max: 1, step: 0.05 } }));
-      g.append(this.#pathField("翻訳timeout (ms)", "commentReader.translation.timeoutMs", { type: "number", value: t.timeoutMs ?? 3000, attrs: { min: 500, max: 15000, step: 100 } }));
+      g.append(this.#pathField("翻訳timeout (ms)", "commentReader.translation.timeoutMs", { type: "number", value: t.timeoutMs ?? 25000, attrs: { min: 500, max: 30000, step: 100 } }));
       g.append(this.#pathField("翻訳する最大文字数", "commentReader.translation.maxInputChars", { type: "number", value: t.maxInputChars ?? 500, attrs: { min: 1, max: 1000, step: 10 } }));
       cardBody.append(g);
       cardBody.append(this.#translationModelStatusBlock());
@@ -1365,6 +1366,12 @@ export class SettingsUI {
       // の閉じ直しでも治らない — PRレビュー指摘)。
       const result = await installTranslationModelThroughElectron();
       if (!result.ok && result.error.code !== "CANCELLED") this.log(`翻訳モデルの導入に失敗しました: ${result.error.message}`, "error");
+      // issue #257 (PR #269 review指摘): 翻訳を有効化した後にモデルを導入するという順序 (この
+      // ボタン自体、翻訳有効化チェックボックスがONの時にしか表示されない) では、boot.jsの
+      // applyLoadedConfig()経由のウォームアップは既にconfig適用時に一度発火済みだが、その時点
+      // ではモデル未導入で早期returnしていた。導入完了のこの瞬間にも改めて発火させないと、
+      // 実際のコメントが届くまでモデルが常駐しないまま (#257要件のwarmUpの意味が無くなる)。
+      if (result.ok) void warmUpTranslationThroughElectron();
     } catch (error) {
       this.log(`翻訳モデルの導入に失敗しました: ${error instanceof Error ? error.message : String(error)}`, "error");
     } finally {

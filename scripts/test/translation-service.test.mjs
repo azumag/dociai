@@ -47,6 +47,7 @@ function fakeRuntime(overrides = {}) {
     modelId: "fake-translation-model",
     lastError: null,
     translate: async (text) => `翻訳結果: ${text}`,
+    warmUp: async () => {},
     dispose() {},
     ...overrides,
   };
@@ -148,6 +149,38 @@ test("when a modelRepository is supplied and the model IS installed, translate()
     const service = new modules.TranslationService({ cacheDir: "/tmp/unused", modelRuntime: fakeRuntime(), modelRepository });
     const result = await service.translate(validInput);
     assert.equal(result.text, `翻訳結果: ${validInput.text}`);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("warmUp() calls the model runtime's warmUp() so the model is resident before any real comment arrives", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    let called = false;
+    const runtime = fakeRuntime({ warmUp: async () => { called = true; } });
+    const service = new modules.TranslationService({ cacheDir: "/tmp/unused", modelRuntime: runtime });
+    await service.warmUp();
+    assert.equal(called, true);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("warmUp() never touches the model runtime when a modelRepository says the model isn't installed", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    let called = false;
+    const runtime = fakeRuntime({ warmUp: async () => { called = true; } });
+    const modelRepository = { isInstalled: async () => false };
+    const service = new modules.TranslationService({ cacheDir: "/tmp/unused", modelRuntime: runtime, modelRepository });
+    await service.warmUp();
+    assert.equal(called, false);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("warmUp() swallows a model runtime load failure instead of throwing — it's fire-and-forget, failures surface via status() when a real translate() is attempted", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    const runtime = fakeRuntime({ warmUp: async () => { throw new Error("boom"); } });
+    const service = new modules.TranslationService({ cacheDir: "/tmp/unused", modelRuntime: runtime });
+    await service.warmUp(); // must not throw/reject
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 

@@ -11,7 +11,7 @@ export const CONFIG_UI_METADATA = Object.freeze({
   "research.maxResults": Object.freeze({ label: "最大検索結果数", min: 1, max: 10, default: 5 }),
   "topics.sources.*.token": Object.freeze({ label: "Token", secret: true }),
   "commentReader.translation.minimumConfidence": Object.freeze({ label: "言語判定の信頼度", min: 0, max: 1, default: 0.7 }),
-  "commentReader.translation.timeoutMs": Object.freeze({ label: "翻訳timeout(ms)", min: 500, max: 15000, default: 3000, advanced: true }),
+  "commentReader.translation.timeoutMs": Object.freeze({ label: "翻訳timeout(ms)", min: 500, max: 30000, default: 25000, advanced: true }),
   "commentReader.translation.maxInputChars": Object.freeze({ label: "翻訳する最大文字数", min: 1, max: 1000, default: 500, advanced: true }),
   "commentReader.translation.maxPendingComments": Object.freeze({ label: "翻訳待ちコメントの上限", min: 1, max: 200, default: 20, advanced: true }),
 });

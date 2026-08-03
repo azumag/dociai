@@ -80,6 +80,17 @@ export class TranslationRuntime {
   get modelId(): string { return this.#modelId; }
   get lastError(): Error | null { return this.#lastError; }
 
+  // issue #257初回ロード時間(~22秒、macOS arm64実測、上のコメント参照)は、コメント読み上げ側の
+  // 既定timeoutMs(1件あたりの待ち上限)より大幅に長い。#ensureLoaded()はtranslate()経由でのみ
+  // 呼ばれていたため、最初の翻訳対象コメントが必ずこのロード時間を1件分のtimeoutの中に収めよう
+  // としてしまい、ロード中にtimeoutで打ち切られる — 翻訳自体はその後裏で成功するが、
+  // TranslationService側は既にcancel済みのrequestとして結果を捨てる ("request generation is
+  // stale")。呼び出し元 (boot.js) が翻訳有効化時に先んじてこれを呼び、実際のコメントが
+  // 届く前にモデルを常駐させておくためのpublicな入口。
+  async warmUp(): Promise<void> {
+    await this.#ensureLoaded();
+  }
+
   async #ensureLoaded(): Promise<Translator> {
     if (this.#translator) return this.#translator;
     if (!this.#rawLoadPromise) {

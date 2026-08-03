@@ -97,7 +97,10 @@ export class CommentSpeechPipeline {
     }
 
     const translation = cr.translation ?? {};
-    const timeoutMs = Math.max(500, Number(translation.timeoutMs) || 3000);
+    // 3000msのままだと、config-defaults.jsの既定値(25000ms)がここまで正しく渡ってこなかった
+    // 場合に、モデルのコールドロード(~22秒)より短いtimeoutへ静かに戻ってしまう — まさに
+    // issue #257で踏んだ不具合と同じ壊れ方になる (PRレビュー指摘: このfallbackだけ更新漏れ)。
+    const timeoutMs = Math.max(500, Number(translation.timeoutMs) || 25000);
     const translatedText = await this.#translateWithTimeout(result.originalText, result.detectedLanguage, timeoutMs);
     // reload/config変更でgenerationが進んだ、またはdispose済みなら、古いgenerationの
     // speechQueueへ翻訳結果をenqueueしない (issue #257要件: stale generationの結果を混入させない)。
