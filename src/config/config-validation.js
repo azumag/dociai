@@ -43,7 +43,7 @@ export function validateConfigStructure(config) {
     const minimumConfidence = Number(t.minimumConfidence);
     if (!Number.isFinite(minimumConfidence) || minimumConfidence < 0 || minimumConfidence > 1) issues.push(issue(["commentReader", "translation", "minimumConfidence"], "range", "minimumConfidence must be between 0 and 1"));
     const timeoutMs = Number(t.timeoutMs);
-    if (!Number.isInteger(timeoutMs) || timeoutMs < 500 || timeoutMs > 15000) issues.push(issue(["commentReader", "translation", "timeoutMs"], "range", "timeoutMs must be an integer from 500 to 15000"));
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 500 || timeoutMs > 30000) issues.push(issue(["commentReader", "translation", "timeoutMs"], "range", "timeoutMs must be an integer from 500 to 30000"));
     const maxInputChars = Number(t.maxInputChars);
     if (!Number.isInteger(maxInputChars) || maxInputChars < 1 || maxInputChars > 1000) issues.push(issue(["commentReader", "translation", "maxInputChars"], "range", "maxInputChars must be an integer from 1 to 1000"));
     const maxPendingComments = Number(t.maxPendingComments);

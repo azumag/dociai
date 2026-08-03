@@ -285,6 +285,10 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
   // permanently dlopens the native binary and must not be called from renderer production code —
   // only scripts/release/smoke-packaged.mjs's packaged-app CI check calls this today).
   register(CHANNELS.TRANSLATION_RUNTIME_PROBE, (event, input) => { expectNoInput(input); return probeNativeRuntime(); }, options);
+  // 実際のコメントが届く前にモデルロード(~22秒)を終わらせておくためのfire-and-forget呼び出し
+  // (boot.js側)。translationService.warmUp()自体が失敗を飲み込むため、ここも{warmedUp:true}を
+  // 返すだけで失敗をrejectしない — 呼び出し元は結果を待たない設計。
+  register(CHANNELS.TRANSLATION_WARM_UP, async (event, input) => { expectNoInput(input); await options.translationService.warmUp(); return { warmedUp: true }; }, options);
   register(CHANNELS.TRANSLATION_MODEL_STATUS, (event, input) => { expectNoInput(input); return options.translationModelRepository.status(); }, options);
   register(CHANNELS.TRANSLATION_MODEL_INSTALL, (event, input) => { expectNoInput(input); return options.translationModelRepository.install(); }, options);
   register(CHANNELS.TRANSLATION_MODEL_INSTALL_CANCEL, (event, input) => { expectNoInput(input); return { cancelled: options.translationModelRepository.cancelInstall() }; }, options);

@@ -59,6 +59,21 @@ export class TranslationService {
     return { state: this.#modelRuntime.state, modelId: this.#modelRuntime.modelId, ...(error ? { lastError: { message: error.message } } : {}) };
   }
 
+  // issue #257: 翻訳が有効化された時点でモデルロード(~22秒)を先に走らせておき、実際のコメントが
+  // 届いた時点では既に常駐済みにする (renderer側のtimeoutMsがロード時間を賄えない問題への対策、
+  // translation-runtime.tsのwarmUp()コメント参照)。失敗時はここで例外を投げず飲み込む —
+  // #modelRuntime.lastError/status()に既に反映されるため、実際の翻訳要求が来た際に通常の
+  // エラー経路 (ログ・設定画面) でユーザーへ可視化される。ここで投げてもfire-and-forgetの
+  // 呼び出し元 (boot.js) には意味のある届け先が無い。
+  async warmUp(): Promise<void> {
+    try {
+      if (this.#modelRepository && !(await this.#modelRepository.isInstalled())) return;
+      await this.#modelRuntime.warmUp();
+    } catch {
+      // status()経由で可視化されるため、ここでは何もしない (上のコメント参照)。
+    }
+  }
+
   async translate(input: TranslateInput): Promise<TranslateResult> {
     assertInput(input);
     // issue #257要件: モデル未導入のまま呼ばれた場合、無言で外部APIへ切り替えたりダウンロードを

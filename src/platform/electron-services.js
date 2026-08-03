@@ -137,6 +137,7 @@ export function hasElectronTranslationService() {
 export async function translateThroughElectron(input) { return globalThis.dociai.translation.translate(input); }
 export async function cancelElectronTranslationRequest(requestId) { return globalThis.dociai.translation.cancel(requestId); }
 export async function translationStatusThroughElectron() { return globalThis.dociai.translation.status(); }
+export async function warmUpTranslationThroughElectron() { return globalThis.dociai.translation.warmUp(); }
 
 // issue #257 Phase 4 (#263): 翻訳モデルの導入状態・導入・削除 (設定UI・health表示から使う)。
 export async function translationModelStatusThroughElectron() { return globalThis.dociai.translation.model.status(); }

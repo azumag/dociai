@@ -1211,7 +1211,7 @@ export class SettingsUI {
       g.append(this.#pathSelect("読み上げ方法", TRANSLATION_OUTPUT_MODES, "commentReader.translation.outputMode", { value: t.outputMode ?? "translated" }));
       g.append(this.#pathSelect("翻訳失敗時", TRANSLATION_FAILURE_POLICIES, "commentReader.translation.onFailure", { value: t.onFailure ?? "readOriginal" }));
       g.append(this.#pathField("言語判定の信頼度 (0〜1)", "commentReader.translation.minimumConfidence", { type: "number", value: t.minimumConfidence ?? 0.7, attrs: { min: 0, max: 1, step: 0.05 } }));
-      g.append(this.#pathField("翻訳timeout (ms)", "commentReader.translation.timeoutMs", { type: "number", value: t.timeoutMs ?? 3000, attrs: { min: 500, max: 15000, step: 100 } }));
+      g.append(this.#pathField("翻訳timeout (ms)", "commentReader.translation.timeoutMs", { type: "number", value: t.timeoutMs ?? 20000, attrs: { min: 500, max: 30000, step: 100 } }));
       g.append(this.#pathField("翻訳する最大文字数", "commentReader.translation.maxInputChars", { type: "number", value: t.maxInputChars ?? 500, attrs: { min: 1, max: 1000, step: 10 } }));
       cardBody.append(g);
       cardBody.append(this.#translationModelStatusBlock());

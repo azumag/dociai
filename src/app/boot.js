@@ -22,7 +22,7 @@ import { deriveSimulationStatus } from "../twitch-ui/history/history-store.js";
 import { AppRuntime } from "./app-runtime.js";
 import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } from "./runtime-factory.js";
 import { createAppActions } from "./app-actions.js";
-import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron, hasElectronTranslationService, translationModelStatusThroughElectron, subscribeTranslationModelProgressThroughElectron } from "../platform/electron-services.js";
+import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron, hasElectronTranslationService, translationModelStatusThroughElectron, subscribeTranslationModelProgressThroughElectron, warmUpTranslationThroughElectron } from "../platform/electron-services.js";
 import { createElectronTranslationAdapter } from "../comment-translation-adapter.js";
 import { splitConnectorSecrets } from "../config/config-secrets-split.js";
 import { personaTriggerIdsForDisplay } from "../ui/persona-trigger-display.js";
@@ -119,6 +119,15 @@ async function applyLoadedConfig({ config, warnings = [], source, migration = nu
   state.configSource = source;
   state.configLoadedAt = new Date();
   state.lastTeardown = result.teardownReport;
+
+  // issue #257: 翻訳が有効な設定が適用されるたび (起動時の初回読込含む) に、実際のコメントが
+  // 届く前にモデルロード(~22秒)を裏で終わらせておく。warmUp()はMain側で既に常駐/ロード中なら
+  // 即resolveする冪等な呼び出しなので、毎回無条件に呼んでもコストは無い — 「有効化した瞬間だけ
+  // 呼ぶ」ための変更検知は不要。fire-and-forget: 失敗はTranslationRuntimeのlastError/status()
+  // 経由で既存の可視化経路(ログ・設定画面)に載るため、ここでは待たず結果も見ない。
+  if (hasElectronTranslationService() && config.commentReader?.enabled && config.commentReader?.translation?.enabled) {
+    void warmUpTranslationThroughElectron();
+  }
 
   for (const w of warnings) logEvent(`設定の警告: ${w}`, "warn");
   if (migration?.steps?.length) logEvent(`設定migrationを適用: ${migration.steps.join(" → ")}`, "warn");

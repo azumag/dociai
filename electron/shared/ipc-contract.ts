@@ -141,6 +141,7 @@ export type DociaiApi = {
     cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
     status(): Promise<Result<TranslationStatus>>;
     probeRuntime(): Promise<Result<NativeRuntimeProbeResult>>;
+    warmUp(): Promise<Result<{ warmedUp: true }>>;
     model: {
       status(): Promise<Result<TranslationModelStatus>>;
       install(): Promise<Result<InstalledTranslationModel>>;
