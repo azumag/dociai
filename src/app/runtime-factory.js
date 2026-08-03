@@ -574,6 +574,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       isCurrent,
       translationAdapter: deps.translationAdapter,
       log: deps.log,
+      onTranslated: (comment, translatedText) => deps.commentStore.setTranslation(comment.id, translatedText),
     }),
     (instance) => ({ dispose: () => instance.dispose() }),
   );

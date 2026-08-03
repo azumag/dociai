@@ -63,6 +63,37 @@ test("includeAuthor prefixing is applied to the translated text, after translati
   assert.equal(speechQueue.items[0].text, "Viewer: 配信ありがとう!");
 });
 
+test("onTranslated(comment, translatedText) fires exactly once on a successful translation, independent of speech outputMode/enqueueing", async () => {
+  const config = baseConfig({ outputMode: "originalThenTranslated", onFailure: "skip" }, { includeAuthor: true });
+  const speechQueue = fakeSpeechQueue();
+  const adapter = delayedAdapter({ "Thank you for the stream! That was a great match.": { translated: "配信ありがとう!" } });
+  const calls = [];
+  const pipeline = new CommentSpeechPipeline({
+    config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true, translationAdapter: adapter,
+    onTranslated: (comment, translatedText) => calls.push({ comment, translatedText }),
+  });
+  const submitted = { id: "c1", author: "Viewer", text: "Thank you for the stream! That was a great match." };
+  pipeline.submit(submitted);
+  await waitFor(() => speechQueue.items.length === 2);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].comment, submitted);
+  assert.equal(calls[0].translatedText, "配信ありがとう!");
+});
+
+test("onTranslated is never called when translation fails or times out", async () => {
+  const config = baseConfig({ onFailure: "readOriginal", timeoutMs: 500 }, { includeAuthor: false });
+  const speechQueue = fakeSpeechQueue();
+  const adapter = delayedAdapter({ "Thank you for the stream! That was a great match.": { error: new Error("boom") } });
+  let called = false;
+  const pipeline = new CommentSpeechPipeline({
+    config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true, translationAdapter: adapter,
+    onTranslated: () => { called = true; },
+  });
+  pipeline.submit({ id: "c1", author: "Viewer", text: "Thank you for the stream! That was a great match." });
+  await waitFor(() => speechQueue.items.length === 1);
+  assert.equal(called, false);
+});
+
 test("outputMode: originalThenTranslated enqueues both texts, in order, with the author prefix on each", async () => {
   const config = baseConfig({ outputMode: "originalThenTranslated", onFailure: "skip" }, { includeAuthor: true });
   const speechQueue = fakeSpeechQueue();

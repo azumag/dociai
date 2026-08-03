@@ -126,6 +126,12 @@ export class ConsoleView {
     for (const comment of comments) {
       const li = this.document.createElement("li"); li.innerHTML = `<span class="time">${comment.time}</span><span class="author"></span>`;
       li.querySelector(".author").textContent = comment.author; li.append(comment.text);
+      if (comment.translatedText) {
+        const translated = this.document.createElement("span");
+        translated.className = "comment-translation";
+        translated.textContent = `→ ${comment.translatedText}`;
+        li.append(translated);
+      }
       if (comment.speechState) {
         const badge = this.document.createElement("span");
         badge.className = `badge state-${comment.speechState}`;

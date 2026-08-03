@@ -43,17 +43,19 @@ export class CommentSpeechPipeline {
   #isCurrent;
   #translationAdapter;
   #log;
+  #onTranslated;
   #queue = [];
   #draining = false;
   #disposed = false;
 
-  constructor({ config, speechQueue, resolveVoice, isCurrent, translationAdapter = UNAVAILABLE_TRANSLATION_ADAPTER, log = () => {} }) {
+  constructor({ config, speechQueue, resolveVoice, isCurrent, translationAdapter = UNAVAILABLE_TRANSLATION_ADAPTER, log = () => {}, onTranslated = () => {} }) {
     this.#config = config;
     this.#speechQueue = speechQueue;
     this.#resolveVoice = resolveVoice;
     this.#isCurrent = isCurrent;
     this.#translationAdapter = translationAdapter;
     this.#log = log;
+    this.#onTranslated = onTranslated;
   }
 
   submit(comment) {
@@ -111,6 +113,11 @@ export class CommentSpeechPipeline {
       this.#enqueue(comment, cr, [result.originalText]);
       return;
     }
+
+    // コメント欄表示用 (issue #257要件外の追加要望): 読み上げキューとは独立に、翻訳結果を
+    // 呼び出し元 (CommentStore) へ伝える。読み上げの成否・outputModeに関わらず、翻訳が
+    // 実際に成功した時点で常に届ける — 原文はこの呼び出しでは一切書き換えない。
+    this.#onTranslated(comment, translatedText);
 
     const bodies = translation.outputMode === "originalThenTranslated"
       ? [result.originalText, translatedText]
