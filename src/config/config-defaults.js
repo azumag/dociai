@@ -49,12 +49,14 @@ export function commentReaderDefaults(input = {}) {
       minimumConfidence: 0.7,
       outputMode: "translated",
       onFailure: "readOriginal",
-      // モデル初回ロードは~22秒 (macOS arm64実測、translation-runtime.ts参照) かかる。boot.js側で
-      // 翻訳有効化時に事前ウォームアップするため通常はここまで待たないはずだが、ウォームアップが
-      // 間に合わなかった場合の保険としてロード時間そのものを賄える値にしておく — 3000msのままだと
-      // 初回コメントは必ずロード完了前にtimeoutし、実際には成功した翻訳結果までもが
-      // TranslationService側で「request generation is stale」として捨てられていた (実際の不具合)。
-      timeoutMs: 20000,
+      // モデル初回ロードは~22秒 (macOS arm64実測、translation-runtime.ts参照、他環境ではより
+      // 遅い可能性が高い) かかる。boot.js側で翻訳有効化時に事前ウォームアップするため通常は
+      // ここまで待たないはずだが、ウォームアップが間に合わなかった場合の保険としてロード時間
+      // そのものを実測値より確実に上回る値にしておく (PRレビュー指摘: 20000msは22秒の実測値
+      // 未満で安全マージンが無かった) — 3000msのままだと初回コメントは必ずロード完了前に
+      // timeoutし、実際には成功した翻訳結果までもがTranslationService側で「request generation
+      // is stale」として捨てられていた (実際の不具合)。
+      timeoutMs: 25000,
       maxInputChars: 500,
       maxPendingComments: 20,
     }),

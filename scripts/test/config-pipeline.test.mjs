@@ -11,12 +11,32 @@ const legacy = { connectors: { mock: { provider: "mock", apiKey: "secret" } }, p
 test("v0 migrates stepwise to current without mutating input", () => {
   const before = structuredClone(legacy);
   const result = processConfig(legacy);
-  assert.equal(result.ok, true); assert.deepEqual(result.migrations, ["v0-to-v1", "v1-to-v2"]);
-  assert.equal(result.config.schemaVersion, 2); assert.deepEqual(result.config.personas[0].triggers, ["a", "b"]);
+  assert.equal(result.ok, true); assert.deepEqual(result.migrations, ["v0-to-v1", "v1-to-v2", "v2-to-v3"]);
+  assert.equal(result.config.schemaVersion, 3); assert.deepEqual(result.config.personas[0].triggers, ["a", "b"]);
   assert.deepEqual(result.config.commentSources.twitch.channels, ["mychannel"]);
   assert.equal(result.config.topics.sources[0].type, "todoist"); assert.deepEqual(legacy, before);
   assert.ok(result.secretCandidates.some((entry) => entry.path.join(".") === "connectors.mock.apiKey"));
   assert.equal(result.canonical.includes("secret"), false);
+});
+
+// issue #257 (PR #269 review指摘): commentReader.translation.timeoutMsの旧既定値3000msが、
+// 翻訳を有効化したことがあるユーザーの設定へ明示的に永続化されてしまっていた問題への migration。
+test("v2-to-v3 bumps a persisted timeoutMs that exactly matches the OLD default (3000) to the new default, but leaves a genuinely customized value alone", () => {
+  const withOldDefault = { schemaVersion: 2, commentReader: { translation: { enabled: true, timeoutMs: 3000 } } };
+  const migrated = processConfig(withOldDefault);
+  assert.equal(migrated.ok, true);
+  assert.deepEqual(migrated.migrations, ["v2-to-v3"]);
+  assert.equal(migrated.config.commentReader.translation.timeoutMs, 25000);
+
+  const withCustomValue = { schemaVersion: 2, commentReader: { translation: { enabled: true, timeoutMs: 8000 } } };
+  const untouched = processConfig(withCustomValue);
+  assert.equal(untouched.ok, true);
+  assert.equal(untouched.config.commentReader.translation.timeoutMs, 8000, "a value the user actually chose must survive the migration unchanged");
+
+  const withoutTranslation = { schemaVersion: 2, commentReader: { enabled: true } };
+  const noop = processConfig(withoutTranslation);
+  assert.equal(noop.ok, true);
+  assert.equal(noop.config.schemaVersion, 3, "schemaVersion still advances even when there's nothing to bump");
 });
 
 test("future versions are rejected without downgrade", () => {
