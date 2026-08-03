@@ -22,7 +22,7 @@ class FakeSocket {
 async function loadModules() {
   const result = await build({
     stdin: {
-      contents: `export { decodeIrcTag, parseIrcFrame, parseIrcTags } from "./src/twitch-chat/twitch-irc-parser.js"; export { TwitchChatSession } from "./src/twitch-chat/twitch-chat-session.js"; export { ReconnectPolicy } from "./src/twitch-chat/reconnect-policy.js"; export { TwitchChatSource, collapseConsecutiveEmojiRuns, collapseConsecutiveEmoteRuns, parseTwitchIrcLine } from "./src/comment-sources.js";`,
+      contents: `export { decodeIrcTag, parseIrcFrame, parseIrcTags } from "./src/twitch-chat/twitch-irc-parser.js"; export { TwitchChatSession } from "./src/twitch-chat/twitch-chat-session.js"; export { ReconnectPolicy } from "./src/twitch-chat/reconnect-policy.js"; export { TwitchChatSource, collapseConsecutiveEmojiRuns, collapseConsecutiveEmoteRuns, stripEmotes, parseTwitchIrcLine } from "./src/comment-sources.js";`,
       resolveDir: path.resolve(new URL("../..", import.meta.url).pathname),
       sourcefile: "twitch-chat-test.js",
       loader: "js",
@@ -75,6 +75,32 @@ test("Twitch emote code normalization keeps one emote per consecutive run", asyn
     assert.equal(modules.collapseConsecutiveEmoteRuns("Kappa、Kappa", "25:0-4,6-10"), "Kappa、Kappa", "句読点を挟むエモートは別の読み上げとして残す");
     assert.equal(modules.collapseConsecutiveEmoteRuns("Kappa", "25:0-4"), "Kappa", "単独のエモートはそのまま");
     assert.equal(modules.collapseConsecutiveEmoteRuns("hello world", null), "hello world");
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test("Twitch emotes tag offsets are Unicode code points, not UTF-16 code units (PR review: confirmed via Twitch developer forum)", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    // 👍 (U+1F44D) is an astral character: 1 code point, but 2 UTF-16 code units. Twitch counts
+    // "Kappa" as starting at code point index 1 (right after the single 👍 code point), which is
+    // UTF-16 index 2 (right after the surrogate pair) — NOT UTF-16 index 1, which would land
+    // mid-surrogate-pair and corrupt the emoji while also cutting the final "a" off "Kappa".
+    const text = "👍Kappa";
+    assert.equal(text.length, 7, "sanity check: UTF-16 length includes the surrogate pair (2) + Kappa (5)");
+    assert.equal(modules.stripEmotes(text, "25:1-5"), "👍", "code-point range 1-5 must strip exactly 'Kappa', leaving the emoji intact");
+
+    const text2 = "👍Kappa Kappa";
+    assert.equal(modules.collapseConsecutiveEmoteRuns(text2, "25:1-5,7-11"), "👍Kappa", "the second Kappa (code-point range 7-11) must collapse away without corrupting the leading emoji");
+
+    // A ZWJ sequence (family emoji: MAN+ZWJ+WOMAN+ZWJ+GIRL+ZWJ+BOY = 7 code points, 11 UTF-16
+    // units) before an emote, matching the exact class of message a real Twitch chat
+    // astral-character report described (multiple surrogate pairs stacking the UTF-16/code-point
+    // drift further apart the longer the string gets).
+    const family = "👨‍👩‍👧‍👦";
+    assert.equal(family.length, 11, "sanity check: 4 astral people (2 UTF-16 units each) + 3 ZWJ (1 unit each) = 11");
+    assert.equal([...family].length, 7, "sanity check: 7 code points total");
+    const withEmote = `${family}Kappa`;
+    assert.equal(modules.stripEmotes(withEmote, "25:7-11"), family, "code-point range 7-11 (right after the 7-code-point ZWJ sequence) must strip exactly 'Kappa'");
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 

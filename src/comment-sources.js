@@ -46,13 +46,17 @@ export function parseTwitchIrcLine(line) {
   return { type: "message", author: event.author, text: event.text, channel: event.channel, ...(event.emotes ? { emotes: event.emotes } : {}), ...(bits ? { bits } : {}) };
 }
 
-// Twitchの emotes タグ ("id:start-end,start-end/id2:start-end") が指す文字範囲を
-// 本文から取り除く。範囲はUTF-16コード単位・両端含む (Twitch IRC仕様)。
-export function stripEmotes(text, emotesTag) {
-  const s = String(text ?? "");
-  if (!emotesTag) return s;
+// Twitchのemotesタグのstart/endは、開発者フォーラムで確認された通りUnicodeコードポイント
+// 単位で数えられており、UTF-16コード単位ではない (公式ドキュメントは単に「character
+// index」としか書かず曖昧だが、絵文字等のサロゲートペア文字がemoteより前にある実例で
+// 確認されている — 例: "👩‍❤️‍💋‍👩 Kappa" に対しTwitchはKappaの開始位置を6と報告するが、
+// これは文字列のUTF-16長9とは一致せず、コードポイント数として初めて一致する)。
+// JavaScriptの文字列操作 (slice等) はUTF-16コード単位を使うため、パース直後にコードポイント
+// →UTF-16オフセットへ変換してから使う。両端含む区間という点は変わらない。
+// stripEmotes/collapseConsecutiveEmoteRunsの両方が使う共通処理。
+function parseTwitchEmoteRanges(text, emotesTag) {
   const ranges = [];
-  for (const part of String(emotesTag).split("/")) {
+  for (const part of String(emotesTag ?? "").split("/")) {
     const rangesStr = part.split(":")[1];
     if (!rangesStr) continue;
     for (const r of rangesStr.split(",")) {
@@ -60,6 +64,29 @@ export function stripEmotes(text, emotesTag) {
       if (Number.isFinite(start) && Number.isFinite(end) && end >= start) ranges.push([start, end]);
     }
   }
+  if (!ranges.length) return ranges;
+
+  // codePointToUtf16[i] = i番目のコードポイントが始まるUTF-16オフセット。末尾に文字列全体の
+  // UTF-16長を番兵として足し、end+1 (排他境界) の変換にも使えるようにする。
+  const codePointToUtf16 = [];
+  let utf16Offset = 0;
+  for (const ch of String(text ?? "")) {
+    codePointToUtf16.push(utf16Offset);
+    utf16Offset += ch.length;
+  }
+  codePointToUtf16.push(utf16Offset);
+
+  return ranges
+    .map(([start, end]) => [codePointToUtf16[start], codePointToUtf16[end + 1] - 1])
+    .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end >= start);
+}
+
+// Twitchの emotes タグ ("id:start-end,start-end/id2:start-end") が指す文字範囲を
+// 本文から取り除く。
+export function stripEmotes(text, emotesTag) {
+  const s = String(text ?? "");
+  if (!emotesTag) return s;
+  const ranges = parseTwitchEmoteRanges(s, emotesTag);
   if (!ranges.length) return s;
   ranges.sort((a, b) => a[0] - b[0]);
   let out = "";
@@ -79,15 +106,7 @@ export function stripEmotes(text, emotesTag) {
 export function collapseConsecutiveEmoteRuns(text, emotesTag) {
   const s = String(text ?? "");
   if (!emotesTag) return s;
-  const ranges = [];
-  for (const part of String(emotesTag).split("/")) {
-    const rangesStr = part.split(":")[1];
-    if (!rangesStr) continue;
-    for (const r of rangesStr.split(",")) {
-      const [start, end] = r.split("-").map(Number);
-      if (Number.isFinite(start) && Number.isFinite(end) && end >= start) ranges.push([start, end]);
-    }
-  }
+  const ranges = parseTwitchEmoteRanges(s, emotesTag);
   if (ranges.length < 2) return s;
   ranges.sort((a, b) => a[0] - b[0]);
 

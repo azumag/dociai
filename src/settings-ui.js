@@ -120,6 +120,13 @@ export class SettingsUI {
     this.controller.open(this.draft);
     this.activeTab = "connectors";
     this.#invalidateTranslationModelStatus();
+    // _translationRuntimeStatusはdialogの生存期間ずっとcacheされ、open()のたびに取り直される
+    // 前提の下のコメント (#ensureTranslationRuntimeStatusLoaded参照) と実装が食い違っていた
+    // (PRレビュー指摘)。翻訳失敗はdialogを開いたまま起きるわけではなく、大抵はコメント読み上げ
+    // 中 (dialogが閉じている間) に起きるため、ここでリセットしないと「翻訳に失敗した後で
+    // 設定を開き直しても、まだ試行前だった頃のidle状態が表示され続ける」という、この機能の
+    // 目的そのものを損なう不具合になっていた。
+    this._translationRuntimeStatus = null;
     this._translationModelProgress = null;
     this.#ensureBuilt();
     if (hasElectronTranslationService()) {
