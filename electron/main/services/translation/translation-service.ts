@@ -16,9 +16,10 @@ import { TranslationRuntime } from "./translation-runtime";
 import type { TranslationModelRepository } from "./translation-model-repository";
 
 // モデルの初回ロードには約22秒かかる (issue #259実測、macOS arm64)。commentReader.translation.
-// timeoutMsの既定値(3000ms)より大幅に長いため、Main側はより寛容な上限を独自に持ち、初回ロード中の
-// 要求をタイムアウトで打ち切ってしまわないようにする。Renderer側のtimeoutMsは「翻訳1件あたりの
-// 待ち上限」であり、Main側のこの値は「モデルロード+翻訳1件」の絶対上限という別の意味を持つ。
+// timeoutMsの既定値(25000ms、issue #257 PRレビュー指摘で3000msから引き上げ済み)に近い/超える
+// こともあるため、Main側はより寛容な上限を独自に持ち、初回ロード中の要求をタイムアウトで
+// 打ち切ってしまわないようにする。Renderer側のtimeoutMsは「翻訳1件あたりの待ち上限」であり、
+// Main側のこの値は「モデルロード+翻訳1件」の絶対上限という別の意味を持つ。
 const SERVICE_TIMEOUT_MS = 30_000;
 
 function assertInput(input: TranslateInput): void {

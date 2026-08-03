@@ -43,6 +43,19 @@ test("registry, schema enums, UI options, and security unknown policy stay align
   assert.ok(CONFIG_REGISTRY.topicSourceTypes[0].secretFields.includes("token"));
 });
 
+// issue #257 (PR #269 review指摘): settings-ui.js#pathFieldはCONFIG_UI_METADATAのmin/maxを
+// 呼び出し側のattrsより後にspreadして上書きする (settings-ui.js:511) — inline attrsだけ
+// config-validation.jsのrangeへ合わせても、ここのmetadataが古い値のままだと入力欄のmaxが
+// 静かに古い値へ巻き戻り、config-validation.js側では既に有効な範囲が入力できなくなる。
+test("commentReader.translation.timeoutMs UI metadata's max matches config-validation.js's actual accepted range (not the inline attrs.max settings-ui.js sets, which this metadata silently overrides)", () => {
+  const metadata = CONFIG_UI_METADATA["commentReader.translation.timeoutMs"];
+  assert.equal(metadata.max, 30000);
+  assert.equal(metadata.min, 500);
+  const commentReader = commentReaderDefaults({ enabled: true, translation: { enabled: true, timeoutMs: metadata.max } });
+  const result = validateConfigStructure({ schemaVersion: CURRENT_SCHEMA_VERSION, connectors: {}, personas: [], triggers: {}, commentReader });
+  assert.equal(result.ok, true, "the metadata's own max must actually be accepted by validation, not just declared");
+});
+
 test("Web research requires an existing connector and bounded result count when enabled", () => {
   const base = { schemaVersion: CURRENT_SCHEMA_VERSION, connectors: { minimax: { provider: "minimax", model: "MiniMax-M3" } }, personas: [], triggers: {} };
   assert.equal(validateConfigStructure({ ...base, research: { enabled: true, connector: "minimax", maxResults: 5 } }).ok, true);
