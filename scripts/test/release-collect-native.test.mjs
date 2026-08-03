@@ -157,15 +157,22 @@ test("resolveUpstreamPackages resolves the real, installed onnxruntime-node/onnx
   assert.equal(commonPkg.name, "onnxruntime-common");
 });
 
-test("collectAll (against the real repo) produces exactly the declared electron-builder targets, each with a valid manifest", async () => {
+test("collectAll (against the real repo) resolves real onnxruntime-node/onnxruntime-common and produces valid manifests for both a supported and an unsupported target", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dociai-collect-native-real-"));
   try {
-    const results = await collectAll({ rootDir: root, log: () => {} });
-    assert.equal(results.length, 3, "must cover every SUPPORTED_TARGETS entry, not just the build host's own platform/arch");
+    // Scoped to darwin only (skips win32-x64's ~59MB DirectML payload) — this test's purpose is
+    // proving resolveUpstreamPackages()/collectTarget() work against the REAL installed
+    // node_modules, not re-verifying per-target collection logic (already covered by the
+    // fixture-based collectTarget tests above with tiny fake files). Copying+hashing the full
+    // real payload for all 3 SUPPORTED_TARGETS entries on every `npm run test:unit` run was a
+    // nontrivial recurring CI cost for coverage this scoped set already provides (PR review
+    // finding).
+    const targets = [{ platform: "darwin", arch: "arm64" }, { platform: "darwin", arch: "x64" }];
+    const results = await collectAll({ rootDir: root, targets, log: () => {} });
+    assert.equal(results.length, 2);
     const byDir = Object.fromEntries(results.map((m) => [`${m.platform}-${m.arch}`, m]));
     assert.equal(byDir["darwin-arm64"].supported, true);
     assert.equal(byDir["darwin-x64"].supported, false);
-    assert.equal(byDir["win32-x64"].supported, true);
     for (const m of results) {
       const archRoot = path.join(root, "build/native/onnxruntime-node", `${m.platform}-${m.arch}`);
       const onDisk = JSON.parse(await fs.readFile(path.join(archRoot, "manifest.json"), "utf8"));
