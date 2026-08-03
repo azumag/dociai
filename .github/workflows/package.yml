@@ -115,6 +115,15 @@ jobs:
       - name: Verify artifact contents (x64)
         run: node scripts/release/verify-artifact.mjs dist/release/mac/dociai.app
 
+      # issue #267: a plain-Node load-proof of the bundled onnxruntime-node binary, independent
+      # of Electron. arm64 gets a second, Electron-independent proof alongside the in-Electron
+      # smoke below; x64 deterministically exercises the {supported:false} manifest-only path
+      # (no darwin/x64 binary exists upstream) that the arm64 CI runner's own smoke can't reach.
+      - name: Probe native onnxruntime-node binary (arm64)
+        run: node scripts/release/probe-native.mjs dist/release/mac-arm64/dociai.app
+      - name: Probe native onnxruntime-node binary (x64, expected unsupported)
+        run: node scripts/release/probe-native.mjs dist/release/mac/dociai.app
+
       - name: Verify code signature (arm64)
         if: ${{ env.HAS_MACOS_CERT == 'true' }}
         run: scripts/release/verify-macos-signing.sh dist/release/mac-arm64/dociai.app
@@ -232,6 +241,12 @@ jobs:
 
       - name: Verify artifact contents
         run: node scripts/release/verify-artifact.mjs dist/release/win-unpacked
+
+      # issue #267: win32-x64 is electron-builder.yml's ONLY declared Windows target, so this
+      # plain-Node load-proof on the windows-latest x64 runner is full coverage of every shipped
+      # Windows arch, not partial (mandatory — Windows otherwise has no smoke step at all).
+      - name: Probe native onnxruntime-node binary
+        run: node scripts/release/probe-native.mjs dist/release/win-unpacked
 
       - name: Verify code signature
         if: ${{ env.HAS_WINDOWS_CERT == 'true' }}

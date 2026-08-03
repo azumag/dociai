@@ -37,9 +37,14 @@ export async function resolvePackageLicense(repoRoot, packageName) {
   }
 }
 
-export async function buildLicenseManifest(repoRoot, metafiles, now = () => new Date()) {
-  const names = collectBundledPackageNames(metafiles);
-  const packages = await Promise.all(names.map((name) => resolvePackageLicense(repoRoot, name)));
+// extraPackages (issue #267): onnxruntime-node/onnxruntime-common are esbuild `alias` targets
+// (electron/main/native/*-shim.cjs), not literal `require("onnxruntime-node")` bundle inputs, so
+// the metafile-based scan above never sees their real package names — yet their binaries are now
+// genuinely redistributed via build/native/ -> extraResources. Callers pass those names explicitly
+// so they still appear in licenses.json.
+export async function buildLicenseManifest(repoRoot, metafiles, now = () => new Date(), extraPackages = []) {
+  const names = new Set([...collectBundledPackageNames(metafiles), ...extraPackages]);
+  const packages = await Promise.all([...names].sort().map((name) => resolvePackageLicense(repoRoot, name)));
   return { formatVersion: 1, generatedAt: now().toISOString(), packages };
 }
 
