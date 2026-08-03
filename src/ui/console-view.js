@@ -126,11 +126,21 @@ export class ConsoleView {
     for (const comment of comments) {
       const li = this.document.createElement("li"); li.innerHTML = `<span class="time">${comment.time}</span><span class="author"></span>`;
       li.querySelector(".author").textContent = comment.author; li.append(comment.text);
+      // badgeを先にappendしてから (PRレビュー指摘) — .comment-log liは4列gridなので、
+      // translationをbadgeより後に置くことで、grid-column:1/-1で幅いっぱいに広がった
+      // translationが自動的に次の行へ折り返り、badgeは本来のcol4に残る。逆順だと
+      // translationがcol4を奪ってbadgeが行2へ落ちる (実機検証で確認)。
       if (comment.speechState) {
         const badge = this.document.createElement("span");
         badge.className = `badge state-${comment.speechState}`;
         badge.textContent = speechLabels[comment.speechState] ?? comment.speechState;
         li.append(badge);
+      }
+      if (comment.translatedText) {
+        const translated = this.document.createElement("span");
+        translated.className = "comment-translation";
+        translated.textContent = `→ ${comment.translatedText}`;
+        li.append(translated);
       }
       list.append(li);
     }

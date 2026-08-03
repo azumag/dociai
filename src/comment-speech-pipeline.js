@@ -43,17 +43,19 @@ export class CommentSpeechPipeline {
   #isCurrent;
   #translationAdapter;
   #log;
+  #onTranslated;
   #queue = [];
   #draining = false;
   #disposed = false;
 
-  constructor({ config, speechQueue, resolveVoice, isCurrent, translationAdapter = UNAVAILABLE_TRANSLATION_ADAPTER, log = () => {} }) {
+  constructor({ config, speechQueue, resolveVoice, isCurrent, translationAdapter = UNAVAILABLE_TRANSLATION_ADAPTER, log = () => {}, onTranslated = () => {} }) {
     this.#config = config;
     this.#speechQueue = speechQueue;
     this.#resolveVoice = resolveVoice;
     this.#isCurrent = isCurrent;
     this.#translationAdapter = translationAdapter;
     this.#log = log;
+    this.#onTranslated = onTranslated;
   }
 
   submit(comment) {
@@ -102,9 +104,25 @@ export class CommentSpeechPipeline {
     // issue #257で踏んだ不具合と同じ壊れ方になる (PRレビュー指摘: このfallbackだけ更新漏れ)。
     const timeoutMs = Math.max(500, Number(translation.timeoutMs) || 25000);
     const translatedText = await this.#translateWithTimeout(result.originalText, result.detectedLanguage, timeoutMs);
-    // reload/config変更でgenerationが進んだ、またはdispose済みなら、古いgenerationの
-    // speechQueueへ翻訳結果をenqueueしない (issue #257要件: stale generationの結果を混入させない)。
-    if (this.#disposed || !this.#isCurrent()) return;
+    if (this.#disposed) return;
+
+    // コメント欄表示用 (issue #257要件外の追加要望): 読み上げキューとは独立に、翻訳結果を
+    // 呼び出し元 (CommentStore) へ伝える。CommentStoreはgenerationをまたいで生存する
+    // (speechQueueのようにgenerationごとに作り直されない) ため、下のisCurrent()チェックより
+    // 前で呼び、stale generationでも取りこぼさない (PRレビュー指摘)。#logと同じ「呼び出し元の
+    // 例外で読み上げ処理全体を止めない」流儀に合わせ、失敗はここで握りつぶしログするだけに
+    // する — DOM描画などの失敗が#drain()のFIFOループごと止まる事態を避ける (PRレビュー指摘)。
+    if (translatedText != null) {
+      try {
+        this.#onTranslated(comment, translatedText);
+      } catch (error) {
+        this.#log(`onTranslatedコールバックが失敗しました: ${error instanceof Error ? error.message : String(error)}`, "warn");
+      }
+    }
+
+    // reload/config変更でgenerationが進んでいたら、古いgenerationのspeechQueueへ翻訳結果を
+    // enqueueしない (issue #257要件: stale generationの結果を混入させない)。
+    if (!this.#isCurrent()) return;
 
     if (translatedText == null) {
       if (translation.onFailure === "skip") return;

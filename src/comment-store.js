@@ -31,6 +31,17 @@ export class CommentStore {
     return this.comments.slice(-n);
   }
 
+  // 翻訳結果はコメント確定後、非同期に (CommentSpeechPipelineでの翻訳完了時に) 届く。issue #257
+  // 要件により元コメント自体は書き換えない (履歴・OBS通知・AIペルソナ入力は原文のまま) ため、
+  // 既存フィールドは一切変更せず追加のtranslatedTextフィールドだけを載せる — 表示側 (コメント欄)
+  // だけが任意にこれを使う。該当コメントが既にlimitで追い出されていた場合は静かに無視する。
+  setTranslation(id, translatedText) {
+    const comment = this.comments.find((c) => c.id === id);
+    if (!comment) return;
+    comment.translatedText = translatedText;
+    this.#notify();
+  }
+
   all() {
     return [...this.comments];
   }

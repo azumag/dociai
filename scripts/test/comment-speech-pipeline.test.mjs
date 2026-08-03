@@ -63,6 +63,74 @@ test("includeAuthor prefixing is applied to the translated text, after translati
   assert.equal(speechQueue.items[0].text, "Viewer: 配信ありがとう!");
 });
 
+test("onTranslated(comment, translatedText) fires exactly once on a successful translation, independent of speech outputMode/enqueueing", async () => {
+  const config = baseConfig({ outputMode: "originalThenTranslated", onFailure: "skip" }, { includeAuthor: true });
+  const speechQueue = fakeSpeechQueue();
+  const adapter = delayedAdapter({ "Thank you for the stream! That was a great match.": { translated: "配信ありがとう!" } });
+  const calls = [];
+  const pipeline = new CommentSpeechPipeline({
+    config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true, translationAdapter: adapter,
+    onTranslated: (comment, translatedText) => calls.push({ comment, translatedText }),
+  });
+  const submitted = { id: "c1", author: "Viewer", text: "Thank you for the stream! That was a great match." };
+  pipeline.submit(submitted);
+  await waitFor(() => speechQueue.items.length === 2);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].comment, submitted);
+  assert.equal(calls[0].translatedText, "配信ありがとう!");
+});
+
+test("onTranslated still fires for a stale-generation translation, even though it's never enqueued for speech — CommentStore (unlike speechQueue) survives generation changes", async () => {
+  const config = baseConfig({ onFailure: "skip" }, { includeAuthor: false });
+  const speechQueue = fakeSpeechQueue();
+  const adapter = delayedAdapter({ "Thank you for the stream! That was a great match.": { translated: "配信ありがとう!" } });
+  const calls = [];
+  let current = true;
+  const pipeline = new CommentSpeechPipeline({
+    config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => current, translationAdapter: adapter,
+    onTranslated: (comment, translatedText) => calls.push({ comment, translatedText }),
+  });
+  pipeline.submit({ id: "c1", author: "Viewer", text: "Thank you for the stream! That was a great match." });
+  current = false; // a config reload landed while the translation was still in flight
+  await waitFor(() => calls.length === 1);
+  assert.equal(calls[0].translatedText, "配信ありがとう!");
+  assert.equal(speechQueue.items.length, 0, "a stale-generation translation must still never reach the (possibly torn-down) speechQueue");
+});
+
+test("a throwing onTranslated callback is logged and does not stop speech enqueueing or block later comments (PR review regression)", async () => {
+  const config = baseConfig({ outputMode: "translated", onFailure: "skip" }, { includeAuthor: false });
+  const speechQueue = fakeSpeechQueue();
+  const adapter = delayedAdapter({
+    "first comment goes here right now": { translated: "最初のコメント" },
+    "the second comment arrives right after that one": { translated: "次のコメント" },
+  });
+  const logs = [];
+  const pipeline = new CommentSpeechPipeline({
+    config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true, translationAdapter: adapter,
+    onTranslated: () => { throw new Error("boom from a display listener"); },
+    log: (message, level) => logs.push({ message, level }),
+  });
+  pipeline.submit({ id: "a", author: "A", text: "first comment goes here right now" });
+  pipeline.submit({ id: "b", author: "B", text: "the second comment arrives right after that one" });
+  await waitFor(() => speechQueue.items.length === 2);
+  assert.deepEqual(speechQueue.items.map((item) => item.text), ["最初のコメント", "次のコメント"]);
+  assert.ok(logs.some((entry) => entry.level === "warn" && entry.message.includes("boom from a display listener")));
+});
+
+test("onTranslated is never called when translation fails or times out", async () => {
+  const config = baseConfig({ onFailure: "readOriginal", timeoutMs: 500 }, { includeAuthor: false });
+  const speechQueue = fakeSpeechQueue();
+  const adapter = delayedAdapter({ "Thank you for the stream! That was a great match.": { error: new Error("boom") } });
+  let called = false;
+  const pipeline = new CommentSpeechPipeline({
+    config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true, translationAdapter: adapter,
+    onTranslated: () => { called = true; },
+  });
+  pipeline.submit({ id: "c1", author: "Viewer", text: "Thank you for the stream! That was a great match." });
+  await waitFor(() => speechQueue.items.length === 1);
+  assert.equal(called, false);
+});
+
 test("outputMode: originalThenTranslated enqueues both texts, in order, with the author prefix on each", async () => {
   const config = baseConfig({ outputMode: "originalThenTranslated", onFailure: "skip" }, { includeAuthor: true });
   const speechQueue = fakeSpeechQueue();
