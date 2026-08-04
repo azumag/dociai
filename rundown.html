@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DOCI 政経ランダウン</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles/rundown.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">DOCI / PROGRAM RUNDOWN</p>
+      <h1>政経ニュース・ランダウン</h1>
+    </div>
+    <div class="header-actions">
+      <span id="save-status" class="status-chip" aria-live="polite">未保存</span>
+      <a class="button ghost" href="./index.html">DOCIへ戻る</a>
+      <button id="btn-import" class="ghost" type="button">JSON読込</button>
+      <button id="btn-export" type="button">JSON保存</button>
+      <input id="file-import" type="file" accept="application/json,.json" hidden>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="panel rundown-panel" aria-label="番組ランダウン">
+      <div class="panel-heading">
+        <div>
+          <p class="panel-kicker">RUNDOWN</p>
+          <h2>スライド</h2>
+        </div>
+        <button id="btn-add-slide" type="button">追加</button>
+      </div>
+      <div class="program-fields">
+        <label>番組名<input id="program-title" type="text"></label>
+        <label>放送日<input id="program-date" type="date"></label>
+      </div>
+      <ol id="slide-list" class="slide-list"></ol>
+      <div class="list-actions">
+        <button id="btn-move-up" class="ghost" type="button">上へ</button>
+        <button id="btn-move-down" class="ghost" type="button">下へ</button>
+        <button id="btn-delete-slide" class="danger" type="button">削除</button>
+      </div>
+    </aside>
+
+    <section class="panel stage-panel" aria-label="スライドプレビュー">
+      <div class="panel-heading stage-heading">
+        <div>
+          <p class="panel-kicker">PROGRAM</p>
+          <h2 id="position-label">1 / 1</h2>
+        </div>
+        <div class="transport">
+          <button id="btn-prev" class="ghost" type="button" aria-label="前のスライド">◀ 前へ</button>
+          <button id="btn-next" type="button" aria-label="次のスライド">次へ ▶</button>
+        </div>
+      </div>
+
+      <div id="slide-preview" class="slide-preview" tabindex="0" aria-label="現在のスライド">
+        <div class="preview-band">
+          <span id="preview-section"></span>
+          <span id="preview-index"></span>
+        </div>
+        <div class="preview-body">
+          <p id="preview-kicker" class="preview-kicker"></p>
+          <h3 id="preview-title"></h3>
+          <p id="preview-subtitle" class="preview-subtitle"></p>
+          <ul id="preview-bullets" class="preview-bullets"></ul>
+        </div>
+        <div id="preview-sources" class="preview-sources"></div>
+      </div>
+
+      <div class="stage-notes">
+        <strong>進行メモ</strong>
+        <p id="preview-notes">—</p>
+      </div>
+    </section>
+
+    <aside class="panel editor-panel" aria-label="スライド編集と読み上げ">
+      <div class="panel-heading">
+        <div>
+          <p class="panel-kicker">EDITOR / VOICE</p>
+          <h2>編集・読み上げ</h2>
+        </div>
+      </div>
+
+      <details class="settings" open>
+        <summary>VOICEVOX設定</summary>
+        <div class="settings-grid">
+          <label>接続先<input id="voicevox-url" type="url" spellcheck="false"></label>
+          <label>話者ID<input id="voicevox-speaker" type="number" min="0" step="1"></label>
+          <label>速度<input id="voicevox-speed" type="number" min="0.5" max="2" step="0.05"></label>
+        </div>
+        <div class="voice-status-row">
+          <button id="btn-voice-check" class="ghost" type="button">接続確認</button>
+          <button id="btn-voice-stop" class="danger" type="button">停止</button>
+          <span id="voice-status" aria-live="polite">未確認</span>
+        </div>
+      </details>
+
+      <div class="editor-fields">
+        <label>セクション<input id="field-section" type="text"></label>
+        <label>小見出し<input id="field-kicker" type="text"></label>
+        <label>タイトル<textarea id="field-title" rows="2"></textarea></label>
+        <label>サブタイトル<textarea id="field-subtitle" rows="2"></textarea></label>
+        <label>要点（1行1項目）<textarea id="field-bullets" rows="5"></textarea></label>
+        <label>出典表示（1行1件）<textarea id="field-sources" rows="3"></textarea></label>
+        <label>進行メモ<textarea id="field-notes" rows="3"></textarea></label>
+      </div>
+
+      <section class="cue-editor" aria-labelledby="cue-heading">
+        <div class="panel-heading cue-heading-row">
+          <div>
+            <p class="panel-kicker">CUES</p>
+            <h3 id="cue-heading">発話項目</h3>
+          </div>
+          <button id="btn-add-cue" type="button">発話を追加</button>
+        </div>
+        <div id="cue-list" class="cue-list"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="app-footer">
+    <span>← → でスライド移動</span>
+    <button id="btn-reset" class="link-button" type="button">初期サンプルへ戻す</button>
+  </footer>
+
+  <script type="module" src="./src/rundown-app.js"></script>
+</body>
+</html>
