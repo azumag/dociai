@@ -201,6 +201,7 @@ test("validateConfig rejects malformed or out-of-range comment reader voice sett
     { voicevox: [] },
     { bouyomi: [] },
     { collapseConsecutiveEmoji: "yes" },
+    { excludeAfterMarker: 123 },
     { webspeech: { name: 3, rate: 0.49, pitch: 2.01 } },
     { voicevox: { speaker: 1.5, speed: 2.01, pitch: 0.16, intonation: -0.01, volume: 2.01 } },
     { bouyomi: { voice: -1, speed: 49, tone: 100.5, volume: 101 } },
@@ -211,6 +212,14 @@ test("validateConfig rejects malformed or out-of-range comment reader voice sett
     const processed = processConfig(raw);
     assert.equal(processed.ok, true);
     assert.ok(validateConfig(processed.config).errors.length > 0, `pipeline: ${JSON.stringify(commentReader)}`);
+  }
+});
+
+test("validateConfig accepts any string (including empty/Japanese/emoji) for commentReader.excludeAfterMarker", () => {
+  const base = { connectors: { mock: { provider: "mock" } }, personas: [{ id: "p", name: "P", connector: "mock" }], triggers: {} };
+  for (const excludeAfterMarker of ["", "ここまで", "🚫🚫", "a".repeat(200)]) {
+    const config = { ...base, commentReader: { enabled: false, excludeAfterMarker } };
+    assert.deepEqual(validateConfig(config).errors, [], excludeAfterMarker);
   }
 });
 
