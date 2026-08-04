@@ -47,6 +47,80 @@ test("skipEmotes takes priority over collapseConsecutiveEmoji: emotes are stripp
   assert.deepEqual(result, { kind: "speak", originalText: "nice stream", translated: false });
 });
 
+test("excludeAfterMarker cuts the marker and everything after it, trimming trailing whitespace", () => {
+  const config = cr({ excludeAfterMarker: "ここまで" });
+  const result = processCommentForSpeech({ author: "V", text: "こんにちは ここまで 個人情報" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "こんにちは", translated: false });
+});
+
+test("excludeAfterMarker unset (default empty string) leaves the text unaffected", () => {
+  const config = cr();
+  const result = processCommentForSpeech({ author: "V", text: "hello ここまで world" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "hello ここまで world", translated: false });
+});
+
+test("excludeAfterMarker at the very start of the comment truncates to empty and is skipped", () => {
+  const config = cr({ excludeAfterMarker: "ここまで" });
+  const result = processCommentForSpeech({ author: "V", text: "ここまで 個人情報" }, config);
+  assert.deepEqual(result, { kind: "skip", reason: "empty" });
+});
+
+test("excludeAfterMarker with multiple occurrences cuts at the first one", () => {
+  const config = cr({ excludeAfterMarker: "NG" });
+  const result = processCommentForSpeech({ author: "V", text: "A NG B NG C" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "A", translated: false });
+});
+
+test("excludeAfterMarker is case-sensitive: a lowercase marker does not match uppercase text", () => {
+  const config = cr({ excludeAfterMarker: "ng" });
+  const result = processCommentForSpeech({ author: "V", text: "A NG B" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "A NG B", translated: false });
+});
+
+test("excludeAfterMarker supports multi-character emoji markers, run before consecutive-emoji collapsing would otherwise eat them", () => {
+  const config = cr({ excludeAfterMarker: "🚫🚫" });
+  const result = processCommentForSpeech({ author: "V", text: "hello 🚫🚫 secret" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "hello", translated: false });
+});
+
+test("excludeAfterMarker runs before Twitch emote stripping, so emote ranges (absolute offsets into the original text) still resolve correctly for the retained prefix", () => {
+  const config = cr({ skipEmotes: true, excludeAfterMarker: "secret" });
+  // "Kappa nice stream secret info" — emote "Kappa" spans codepoints 0-4, entirely within the retained prefix.
+  const result = processCommentForSpeech({ author: "V", text: "Kappa nice stream secret info", emotes: "25:0-4" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "nice stream", translated: false });
+});
+
+test("excludeAfterMarker runs before Twitch emote-run collapsing too, for emotes within the retained prefix", () => {
+  const config = cr({ collapseConsecutiveEmoji: true, excludeAfterMarker: "secret" });
+  // "Kappa Kappa nice stream secret info" — two consecutive Kappa emotes (both within the retained prefix) collapse to one.
+  const result = processCommentForSpeech({ author: "V", text: "Kappa Kappa nice stream secret info", emotes: "25:0-4,6-10" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "Kappa nice stream", translated: false });
+});
+
+test("excludeAfterMarker still finds a marker that coincides with a real Twitch emote code, instead of losing it to skipEmotes first (regression: truncation must run before emote stripping)", () => {
+  const config = cr({ skipEmotes: true, excludeAfterMarker: "Kappa" });
+  // "Kappa" (codepoints 6-10) is a real, Twitch-tagged emote here — if truncation ran after
+  // stripEmotes, stripEmotes would remove it first and the marker could never be found.
+  const result = processCommentForSpeech({ author: "V", text: "hello Kappa world", emotes: "25:6-10" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "hello", translated: false });
+});
+
+test("excludeAfterMarker with internal double spaces is found even when the comment has an unrelated Twitch emote (regression: emote-stripping's whitespace normalization must not run before marker matching)", () => {
+  const config = cr({ skipEmotes: true, excludeAfterMarker: "  MARKER  " });
+  // "keep" (codepoints 0-3) is stripped by skipEmotes, which unconditionally collapses runs of
+  // whitespace in its output — if that ran before marker matching, the marker's own double
+  // spaces would already be gone and indexOf would fail to find it.
+  const result = processCommentForSpeech({ author: "V", text: "keep this  MARKER  drop this", emotes: "25:0-3" }, config);
+  assert.deepEqual(result, { kind: "speak", originalText: "this", translated: false });
+});
+
+test("excludeAfterMarker truncation never mutates the original comment object", () => {
+  const comment = { author: "V", text: "keep this NG drop this" };
+  const config = cr({ excludeAfterMarker: "NG" });
+  processCommentForSpeech(comment, config);
+  assert.equal(comment.text, "keep this NG drop this");
+});
+
 test("translation disabled (the default) speaks the original text without running detection", () => {
   const config = cr(); // translation.enabled defaults to false
   const result = processCommentForSpeech({ author: "V", text: "Thank you for the stream!" }, config);

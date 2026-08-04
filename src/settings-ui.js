@@ -1187,11 +1187,12 @@ export class SettingsUI {
       cardBody.append(this.#pathCheckbox("エモートを読み上げない", "commentReader.skipEmotes", { value: !!cr.skipEmotes }));
       cardBody.append(this.#pathCheckbox("連続する絵文字を1つにまとめる", "commentReader.collapseConsecutiveEmoji", { value: !!cr.collapseConsecutiveEmoji }));
       cardBody.append(this.#pathField("読み上げを無視するユーザー (カンマ区切り)", "commentReader.ignoreUsers", { value: asArray(cr.ignoreUsers).join(", "), csv: true, attrs: { spellcheck: "false" } }));
+      cardBody.append(this.#pathField("読み上げ除外マーカー", "commentReader.excludeAfterMarker", { value: cr.excludeAfterMarker ?? "", placeholder: "例: ここまで", attrs: { spellcheck: "false" } }));
     }
     this._body.append(card);
     const note = document.createElement("p");
     note.className = "muted settings-note";
-    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。「読み上げ間隔 (秒)」は、あるコメントの読み上げが終わってから次のコメントの読み上げを始めるまでの最短待機時間です (既定0=間隔なし)。コメントが連続で届いても機関銃のように読み上げ続けないよう調整できます。同じキューにコメント読み上げより後ろに積まれたAI応答は、この待機の間も自分の順番を待つため、間隔を長くするとAI応答の開始も遅れる場合があります。「連続する絵文字を1つにまとめる」は、単独の絵文字は残し、空白を挟んだ絵文字の連投も先頭1つだけ読み上げます (Twitchのエモートコードの連投も同様にまとめます)。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。";
+    note.textContent = "Twitch等に投稿された全コメントを、トリガー条件やAI応答の有無に関わらずそのまま読み上げます。同じ読み上げキューを使うため、AIペルソナが応答する場合は「コメント読み上げ → AI応答」の順に再生されます。「読み上げ間隔 (秒)」は、あるコメントの読み上げが終わってから次のコメントの読み上げを始めるまでの最短待機時間です (既定0=間隔なし)。コメントが連続で届いても機関銃のように読み上げ続けないよう調整できます。同じキューにコメント読み上げより後ろに積まれたAI応答は、この待機の間も自分の順番を待つため、間隔を長くするとAI応答の開始も遅れる場合があります。「連続する絵文字を1つにまとめる」は、単独の絵文字は残し、空白を挟んだ絵文字の連投も先頭1つだけ読み上げます (Twitchのエモートコードの連投も同様にまとめます)。Web Speech・VOICEVOX・棒読みちゃんの音高/速度は別々に保持され、engineを切り替えても各設定が残ります。棒読みちゃんの待機時間が合わない場合は同engineのspeed、または棒読みちゃんタブのcharsPerSecondを調整してください。「読み上げ除外マーカー」に文字列を設定すると、コメント内にこの文字列がある場合、最初に出現した位置以降は読み上げません (例:「ここまで」と設定すると、「よろしくお願いします ここまで 個人情報」というコメントは「よろしくお願いします」まで読み上げます)。コメント表示自体は変更されません。空欄 (未設定) のときはこの機能は働きません。";
     this._body.append(note);
     if (cr.enabled) this.#renderCommentReaderTranslation(cr);
   }

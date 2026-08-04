@@ -407,6 +407,9 @@ export function validateConfig(cfg) {
     for (const key of ["includeAuthor", "skipEmotes", "collapseConsecutiveEmoji"]) {
       if (cr[key] != null && typeof cr[key] !== "boolean") errors.push(`commentReader.${key} はbooleanで指定してください`);
     }
+    if (cr.excludeAfterMarker != null && typeof cr.excludeAfterMarker !== "string") {
+      errors.push("commentReader.excludeAfterMarker は文字列で指定してください");
+    }
     if (cr.intervalSeconds != null) validateNumber(cr.intervalSeconds, "commentReader.intervalSeconds", errors, { min: 0, max: 3600 });
     validateCommentReaderVoices(cr, errors);
   }

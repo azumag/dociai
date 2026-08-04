@@ -232,7 +232,8 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
     "skipEmotes": false,
     "collapseConsecutiveEmoji": false,
     "ignoreUsers": [],
-    "intervalSeconds": 0
+    "intervalSeconds": 0,
+    "excludeAfterMarker": ""
   }
 }
 ```
@@ -249,6 +250,7 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 | `skipEmotes` | false | trueにするとTwitchのエモートを読み上げから除去する。Twitchが送るIRCの `emotes` タグ (エモートの正確な文字範囲) を使うため、手動入力コメントなど emotes 情報がないソースには影響しない |
 | `collapseConsecutiveEmoji` | false | trueにすると連続するUnicode絵文字を先頭1つへまとめる。単独の絵文字は残し、絵文字間が空白だけの場合も連続として扱う。Twitchエモートの除去は `skipEmotes` で別に設定する |
 | `ignoreUsers` | `[]` | このユーザー名 (大文字小文字区別なし、前後空白は無視) からのコメントは読み上げをスキップする。AI応答のトリガー判定自体には影響しない |
+| `excludeAfterMarker` | `""` | 設定した文字列がコメント本文にあれば、最初に出現した位置以降 (マーカー自体を含む) を読み上げ対象から除外する (issue #254)。リテラル部分文字列一致 (正規表現ではない)、大文字小文字は区別する。空文字 (既定) では無効。`skipEmotes`/`collapseConsecutiveEmoji` より前に適用されるため、エモート除去・絵文字連投まとめの影響を受けずにマーカーを検出できる。コメントの画面表示・保存内容は変更されない |
 
 コメントは `AIConnector` を経由せずそのまま読み上げキューに積まれるため、APIキーなし
 (モック接続すら不要) で動作する。AIペルソナがトリガーで応答する場合、同じキューに
