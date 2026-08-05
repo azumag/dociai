@@ -10,6 +10,9 @@ const repoRoot = path.resolve(scriptDir, "../..");
 const outDir = path.join(repoRoot, "dist/electron");
 await fs.rm(outDir, { recursive: true, force: true });
 await fs.mkdir(outDir, { recursive: true });
+// 前回成功時に残ったworker bundleを先に消す — 今回のビルドが途中失敗しても、electron-builderが
+// build/generated/の古いextraResourcesファイルをそのまま同梱してしまう事故を防ぐ。
+await fs.rm(path.join(repoRoot, "build/generated/translation-worker.cjs"), { force: true });
 
 // node-llama-cpp (#45) is wired into the Local LLM service's import graph
 // (electron/main/services/local-llm/native-loader.ts's single dynamic `import("node-llama-cpp")`)
@@ -47,9 +50,20 @@ const bundleOptions = {
 };
 const mainResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/main/index.ts")], outfile: path.join(outDir, "main.cjs") });
 const preloadResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/preload/index.ts")], outfile: path.join(outDir, "preload.cjs") });
+// 翻訳engine (transformers.js + onnxruntime-node) はworker_threadで動かす (translation-runtime
+// clientのヘッダコメント参照 — 同期ネイティブ呼び出しがMainスレッドをブロックしてUIが固まる
+// 問題への対策)。worker entryを別bundleにし、dev/unpacked実行ではmain.cjsの隣から、packaged
+// buildではextraResources (<resources>/translation-worker.cjs) から読み込む。
+const workerResult = await build({ ...bundleOptions, entryPoints: [path.join(repoRoot, "electron/main/services/translation/translation-worker.ts")], outfile: path.join(outDir, "translation-worker.cjs") });
 for (const relativePath of ["index.html", "obs.html", "src", "styles", "config.local.example.json", "resources"]) {
   await fs.cp(path.join(repoRoot, relativePath), path.join(outDir, relativePath), { recursive: true, force: true });
 }
+// packaged build向けにworker bundleをbuild/generated/へも書き出し、electron-builder.ymlの
+// extraResources (build/generated -> <resources>) 経由でasar外へ配置する — `new Worker()`は
+// asar内のpathを読めないため (Electron実測確認済み)。
+const generatedDir = path.join(repoRoot, "build/generated");
+await fs.mkdir(generatedDir, { recursive: true });
+await fs.copyFile(path.join(outDir, "translation-worker.cjs"), path.join(generatedDir, "translation-worker.cjs"));
 
 // electron-builderの "two package.json" layout (directories.app: dist/electron) 用に、
 // devDependency等を含まない最小package.jsonをapp directory直下へ生成する。
@@ -66,7 +80,7 @@ await writeBuildInfo(path.join(repoRoot, "build/generated/build-info.json"), bui
 // license/resource manifest: 実際にMain/Preload bundleへ含まれたnode_modulesだけを機械的に列挙する。
 // onnxruntime-node/onnxruntime-common (issue #267) はaliasされておりmetafileに現れないため
 // 明示的に追加する — 実体はcollect-native.mjsがbuild/native/ -> extraResources経由で同梱する。
-const licenseManifest = await buildLicenseManifest(repoRoot, [mainResult.metafile, preloadResult.metafile], () => new Date(), ["onnxruntime-node", "onnxruntime-common"]);
+const licenseManifest = await buildLicenseManifest(repoRoot, [mainResult.metafile, preloadResult.metafile, workerResult.metafile], () => new Date(), ["onnxruntime-node", "onnxruntime-common"]);
 await writeLicenseManifest(path.join(repoRoot, "build/generated/licenses.json"), licenseManifest);
 
 console.log(`Electron build ready: ${outDir} (build-info: ${buildInfo.version}@${buildInfo.gitSha.slice(0, 12)} ${buildInfo.channel}/${buildInfo.platform}/${buildInfo.arch}, licenses: ${licenseManifest.packages.length} package(s))`);

@@ -25,6 +25,7 @@ import { CaptureService } from "./services/capture/capture-service";
 import { installDisplayMediaHandler } from "./services/capture/display-media-handler";
 import { ModelRepository } from "./services/local-llm/models/model-repository";
 import { TranslationService } from "./services/translation/translation-service";
+import { resolveTranslationWorkerPath } from "./services/translation/translation-runtime-client";
 import { TranslationModelRepository } from "./services/translation/translation-model-repository";
 import { resolveRuntimeLayout, readBuildInfo } from "./runtime-layout";
 import { StreamEventBus } from "./services/stream-events/stream-event-bus";
@@ -187,7 +188,7 @@ if (!hasLock) {
       catalogFile: path.join(appPath, "resources/catalog/translation-models.json"),
       emitDownloadProgress: (event) => controller?.emitToConsole("translation:model:progress", event),
     });
-    const translationService = new TranslationService({ cacheDir: translationModelsDir, modelRepository: translationModelRepository });
+    const translationService = new TranslationService({ cacheDir: translationModelsDir, modelRepository: translationModelRepository, workerPath: resolveTranslationWorkerPath() });
     const currentConfig = await configRepository.getPublic();
     const findAssetReferences = async (assetId: string): Promise<string[]> => {
       const loaded = await configRepository.getPublic(); const found: string[] = [];

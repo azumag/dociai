@@ -140,6 +140,9 @@ const api: DociaiApi = {
     // issue #267: see native-runtime-probe.ts's header comment — a real, on-demand native-binary
     // load-proof, intentionally not called anywhere in this app's own renderer UI code.
     probeRuntime: () => invoke(CHANNELS.TRANSLATION_RUNTIME_PROBE),
+    // worker_thread版probe (packaged CI検証用): モデルをロードせずworkerが起動して応答するかだけ
+    // を確認する。rendererの本番コードからは呼ばれない (smoke-packaged.mjsのみ)。
+    probeWorker: () => invoke(CHANNELS.TRANSLATION_WORKER_PROBE),
     warmUp: () => invoke(CHANNELS.TRANSLATION_WARM_UP),
     model: {
       status: () => invoke(CHANNELS.TRANSLATION_MODEL_STATUS),

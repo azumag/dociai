@@ -14,9 +14,22 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+// worker_threadではprocess.resourcesPathが未定義になる環境が報告されているため (packaged build、
+// PR #276のClaude Code review指摘)、MainプロセスがworkerData経由で注入した
+// globalThis.__DOCIAI_RESOURCES_PATH__を最優先し、無ければprocess.resourcesPathにフォールバック
+// する。Mainプロセス側はworkerDataを持たないため常に後者を使う (従来挙動)。
+// translation-worker.tsのエントリがworkerData.resourcesPathをこのglobalへ代入する。
+function resolveResourcesPath() {
+  const injected = globalThis.__DOCIAI_RESOURCES_PATH__;
+  if (typeof injected === "string" && injected) return injected;
+  if (process.resourcesPath) return process.resourcesPath;
+  return null;
+}
+
 function packagedManifestPath() {
-  if (!process.resourcesPath) return null;
-  return path.join(process.resourcesPath, "native", "onnxruntime-node", `${process.platform}-${process.arch}`, "manifest.json");
+  const resourcesPath = resolveResourcesPath();
+  if (!resourcesPath) return null;
+  return path.join(resourcesPath, "native", "onnxruntime-node", `${process.platform}-${process.arch}`, "manifest.json");
 }
 
 function loadPackaged(manifestPath) {

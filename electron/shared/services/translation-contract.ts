@@ -44,3 +44,10 @@ export type TranslationStatus = {
 // that the bundled binary actually loads; no renderer production code calls it (see the IPC
 // handler registration for the full rationale).
 export type NativeRuntimeProbeResult = { ok: true; version: string } | { ok: false; reason: string };
+
+// issue: translation-worker.cjs (worker_thread版) が起動して応答するかだけを検証するprobe結果
+// (NativeRuntimeProbeResultのworker版)。モデルは一切ロードしない — worker fileの解決・bundleの
+// ロード・worker_threadの起動がpackaged buildでも通ることをCI (smoke-packaged.mjs) が確認する
+// ための専用パスであり、通常の翻訳フローは使わない。pingだけではonnxruntime-node-shimは評価
+// されない (実翻訳経路はtest:electron:translationが担う)。
+export type TranslationWorkerProbeResult = { ok: true; state: TranslationRuntimeState; modelId: string } | { ok: false; reason: string };

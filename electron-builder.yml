@@ -50,6 +50,11 @@ extraResources:
     to: build-info.json
   - from: build/generated/licenses.json
     to: licenses.json
+  # 翻訳worker bundle (translation-worker.cjs): Main/Preloadと同じくesbuildでbundle済みだが、
+  # worker_threads.Workerはasar内のpathを読めないためasar外 (<resources>) に配置する
+  # (electron/main/services/translation/translation-runtime-client.tsのresolveTranslationWorkerPath)。
+  - from: build/generated/translation-worker.cjs
+    to: translation-worker.cjs
   - from: build/native
     to: native
 

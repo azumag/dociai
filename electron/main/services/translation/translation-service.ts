@@ -12,7 +12,7 @@ import type { TranslateInput, TranslateResult, TranslationStatus } from "../../.
 import { MAX_TRANSLATE_INPUT_CHARS } from "../../../shared/services/translation-contract";
 import { ServiceRuntime } from "../service-runtime";
 import { ServiceError, normalizeServiceError } from "../service-error";
-import { TranslationRuntime } from "./translation-runtime";
+import { TranslationRuntimeClient, probeTranslationWorker, resolveTranslationWorkerPath } from "./translation-runtime-client";
 import type { TranslationModelRepository } from "./translation-model-repository";
 
 // モデルの初回ロードには約22秒かかる (issue #259実測、macOS arm64)。commentReader.translation.
@@ -39,16 +39,27 @@ function assertInput(input: TranslateInput): void {
 
 export class TranslationService {
   readonly runtime = new ServiceRuntime("translation");
-  readonly #modelRuntime: TranslationRuntime;
+  readonly #modelRuntime: TranslationRuntimeClient;
   readonly #modelRepository: TranslationModelRepository | null;
   readonly #timeoutMs: number;
+  readonly #cacheDir: string;
+  readonly #workerPath: string | null;
 
-  constructor(deps: { cacheDir: string; modelRuntime?: TranslationRuntime; modelRepository?: TranslationModelRepository; timeoutMs?: number }) {
-    this.#modelRuntime = deps.modelRuntime ?? new TranslationRuntime({ cacheDir: deps.cacheDir });
+  constructor(deps: { cacheDir: string; modelRuntime?: TranslationRuntimeClient; modelRepository?: TranslationModelRepository | null; timeoutMs?: number; workerPath?: string }) {
+    this.#cacheDir = deps.cacheDir;
+    this.#workerPath = deps.workerPath ?? null;
     // issue #257 Phase 3 (#262): modelRepositoryが無い場合はテスト用途のフォールバック
     // (モデル導入状態の確認をスキップし、モデル自体があるかどうかだけで判断する既存挙動)。
     this.#modelRepository = deps.modelRepository ?? null;
+    this.#modelRuntime = deps.modelRuntime ?? new TranslationRuntimeClient({ cacheDir: deps.cacheDir, ...(deps.workerPath ? { workerPath: deps.workerPath } : {}) });
     this.#timeoutMs = deps.timeoutMs ?? SERVICE_TIMEOUT_MS;
+  }
+
+  // モデルをロードせずにworkerが起動して応答するかを検証するprobe (issue #267の
+  // native-runtime-probe.tsのworker版)。packaged buildで「worker file解決 → bundleロード →
+  // worker_thread起動」が通ることをsmoke-packaged.mjsのCIが確認するための専用パス。
+  probeWorker(): Promise<{ ok: true; state: string; modelId: string } | { ok: false; reason: string }> {
+    return probeTranslationWorker({ cacheDir: this.#cacheDir, workerPath: this.#workerPath ?? resolveTranslationWorkerPath() });
   }
 
   cancel(requestId: string): boolean {

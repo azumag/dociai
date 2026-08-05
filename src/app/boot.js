@@ -591,6 +591,8 @@ function renderNewsPanel() {
   // news.enabled=falseのときだけ手動ボタンも無効にする。
   $("#btn-news-read").disabled = !newsBufferedReader || !configEnabled || newsStatus?.busy;
   $("#btn-news-generate").disabled = !newsBufferedReader || !configEnabled || newsStatus?.busy || newsStatus?.bufferedCount >= 1;
+  // 話題パネルの#topic-busyと同じ「生成/再生中」インジケータ (busyは生成と再生の両方で立つ)。
+  $("#news-busy").hidden = !newsStatus?.busy;
   renderNewsAttribution($("#news-last-attribution"));
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
