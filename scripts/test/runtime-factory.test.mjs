@@ -176,6 +176,61 @@ test("buildDociaiRuntime wires a candidate bundle in dependency order without st
   assert.equal(responseCalls, 0, "an automation trigger must not also dispatch a persona response");
 });
 
+async function sharedTriggerBundle({ automation, random, newsRuntimeEnabled = true, topicsRuntimeEnabled = true } = {}) {
+  const config = minimalConfig({
+    personas: [{ id: "p1", name: "P1", connector: "mock", triggers: ["newsTrigger"] }],
+    news: { enabled: true, trigger: "newsTrigger", sources: [] },
+    topics: { enabled: true, trigger: "newsTrigger", sources: [] },
+    ...(automation !== undefined ? { automation } : {}),
+  });
+  const { deps } = fakeDeps({
+    isNewsRuntimeEnabled: () => newsRuntimeEnabled,
+    isTopicsRuntimeEnabled: () => topicsRuntimeEnabled,
+    ...(random ? { random } : {}),
+  });
+  const bundle = await createDociaiRuntimeFactory().createCandidate({ config, generation: 1, deps });
+  const automationCoordinator = bundle.get("automationCoordinator");
+  const responseCoordinator = bundle.get("responseCoordinator");
+  const runCalls = [];
+  let responseCalls = 0;
+  automationCoordinator.run = (kind) => { runCalls.push(kind); return Promise.resolve(); };
+  responseCoordinator.handleTrigger = () => { responseCalls += 1; return []; };
+  return { handleTrigger: bundle.get("handleTrigger"), runCalls, getResponseCalls: () => responseCalls };
+}
+
+test("handleTrigger: automation.sharedTriggerMode 'random-one' starts only news when the coin flip lands below 0.5, and never dispatches a persona response", async () => {
+  const { handleTrigger, runCalls, getResponseCalls } = await sharedTriggerBundle({ automation: { sharedTriggerMode: "random-one" }, random: () => 0.1 });
+  assert.deepEqual(handleTrigger("newsTrigger"), []);
+  assert.deepEqual(runCalls, ["news"], "the coin flip must pick exactly one automation, not both");
+  assert.equal(getResponseCalls(), 0);
+});
+
+test("handleTrigger: automation.sharedTriggerMode 'random-one' starts only topics when the coin flip lands at/above 0.5", async () => {
+  const { handleTrigger, runCalls } = await sharedTriggerBundle({ automation: { sharedTriggerMode: "random-one" }, random: () => 0.9 });
+  assert.deepEqual(handleTrigger("newsTrigger"), []);
+  assert.deepEqual(runCalls, ["topics"]);
+});
+
+test("handleTrigger: 'random-one' never picks an automation whose runtime toggle is off — the other one always wins regardless of the coin flip", async () => {
+  // random() => 0.1 would pick "news" if both were eligible; news is disabled here, so topics
+  // must run unconditionally instead of the draw silently landing on a no-op.
+  const disabledNews = await sharedTriggerBundle({ automation: { sharedTriggerMode: "random-one" }, random: () => 0.1, newsRuntimeEnabled: false });
+  assert.deepEqual(disabledNews.handleTrigger("newsTrigger"), []);
+  assert.deepEqual(disabledNews.runCalls, ["topics"]);
+
+  // random() => 0.9 would pick "topics" if both were eligible; topics is disabled here, so news
+  // must run unconditionally instead.
+  const disabledTopics = await sharedTriggerBundle({ automation: { sharedTriggerMode: "random-one" }, random: () => 0.9, topicsRuntimeEnabled: false });
+  assert.deepEqual(disabledTopics.handleTrigger("newsTrigger"), []);
+  assert.deepEqual(disabledTopics.runCalls, ["news"]);
+});
+
+test("handleTrigger: omitting automation.sharedTriggerMode (or leaving it 'both') keeps starting every matching automation even with a random() stub installed", async () => {
+  const { handleTrigger, runCalls } = await sharedTriggerBundle({ random: () => 0 });
+  assert.deepEqual(handleTrigger("newsTrigger"), []);
+  assert.deepEqual(runCalls, ["news", "topics"], "default mode must never consult random() at all");
+});
+
 test("micMonitor only interrupts AI speech (speechQueue.hold(\"mic\")) while deps.isMicBargeInEnabled() is true; toggling it off releases an existing hold", async () => {
   const config = minimalConfig({ micMonitor: { enabled: true } });
   let bargeInEnabled = true;

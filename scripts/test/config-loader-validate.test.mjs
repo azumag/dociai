@@ -237,3 +237,24 @@ test("legacy flat comment reader settings remain valid through the real config p
     assert.deepEqual(validateConfig(processed.config).errors, [], JSON.stringify(commentReader));
   }
 });
+
+test("validateConfig accepts 'both'/omitted automation.sharedTriggerMode and rejects unknown values or a non-object automation", () => {
+  const base = { connectors: { mock: { provider: "mock" } }, personas: [{ id: "p", name: "P", connector: "mock" }], triggers: {} };
+  assert.deepEqual(validateConfig(base).errors, [], "automation omitted entirely must be valid");
+  assert.deepEqual(validateConfig({ ...base, automation: { sharedTriggerMode: "both" } }).errors, []);
+  assert.ok(validateConfig({ ...base, automation: { sharedTriggerMode: "sometimes" } }).errors.some((e) => e.includes('automation.sharedTriggerMode "sometimes"')));
+  assert.ok(validateConfig({ ...base, automation: "not-an-object" }).errors.some((e) => e.includes("automation はオブジェクトで指定してください")));
+});
+
+test("validateConfig warns when automation.sharedTriggerMode is 'random-one' but news.trigger/topics.trigger don't actually share a trigger, and stays silent once they do", () => {
+  const base = { connectors: { mock: { provider: "mock" } }, personas: [{ id: "p", name: "P", connector: "mock" }], triggers: {} };
+
+  const notShared = { ...base, news: { trigger: "a" }, topics: { trigger: "b" }, automation: { sharedTriggerMode: "random-one" } };
+  assert.ok(validateConfig(notShared).warnings.some((w) => w.includes("効果がありません")));
+
+  const shared = { ...base, news: { trigger: "a" }, topics: { trigger: "a" }, automation: { sharedTriggerMode: "random-one" } };
+  assert.ok(!validateConfig(shared).warnings.some((w) => w.includes("効果がありません")));
+
+  const bothMode = { ...base, news: { trigger: "a" }, topics: { trigger: "b" }, automation: { sharedTriggerMode: "both" } };
+  assert.ok(!validateConfig(bothMode).warnings.some((w) => w.includes("効果がありません")), "'both' is never a no-op, so it must never warn");
+});

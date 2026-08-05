@@ -44,6 +44,7 @@ const VOICE_ENGINES = registryOptions("voiceEngines");
 const NEWS_MODES = registryOptions("newsModes");
 const NEWS_SOURCE_TYPES = registryOptions("newsSourceTypes");
 const TOPIC_SOURCE_TYPES = registryOptions("topicSourceTypes");
+const AUTOMATION_SHARED_TRIGGER_MODES = registryOptions("automationSharedTriggerModes");
 const TRANSLATION_SOURCE_LANGUAGES = registryOptions("translationSourceLanguages");
 const TRANSLATION_OUTPUT_MODES = registryOptions("translationOutputModes");
 const TRANSLATION_FAILURE_POLICIES = registryOptions("translationFailurePolicies");
@@ -1616,6 +1617,10 @@ export class SettingsUI {
     g.className = "card-grid";
     g.append(this.#pathCheckbox("news.enabled", "news.enabled", { value: n.enabled }));
     g.append(this.#pathSelect("trigger", ["", ...triggerIds], "news.trigger", { value: n.trigger ?? "" }));
+    // news.triggerとtopics.triggerが同じtriggerを指しているときの衝突挙動。設定パスは
+    // newsとtopicsで共有 (automation.sharedTriggerMode) なので、topics側にも同じ項目を置いて
+    // どちらのタブからでも気づけるようにしている (#renderTopics参照)。
+    g.append(this.#pathSelect("トリガーが話題と同じ場合", AUTOMATION_SHARED_TRIGGER_MODES, "automation.sharedTriggerMode", { value: this.draft.automation?.sharedTriggerMode ?? "both" }));
     g.append(this.#pathSelect("persona (固定/フォールバック)", ["", ...personaIds], "news.persona", { value: n.persona ?? "" }));
     g.append(this.#pathSelect("mode", NEWS_MODES, "news.mode", { value: n.mode ?? "topic" }));
     g.append(this.#pathField("maxItems", "news.maxItems", { type: "number", value: n.maxItems ?? 3 }));
@@ -1679,6 +1684,9 @@ export class SettingsUI {
     g.className = "card-grid";
     g.append(this.#pathCheckbox("topics.enabled", "topics.enabled", { value: t.enabled }));
     g.append(this.#pathSelect("trigger", ["", ...triggerIds], "topics.trigger", { value: t.trigger ?? "" }));
+    // #renderNews側と同じconfigパス (automation.sharedTriggerMode) — ニュースと話題どちらの
+    // タブから設定してもよい。
+    g.append(this.#pathSelect("トリガーがニュースと同じ場合", AUTOMATION_SHARED_TRIGGER_MODES, "automation.sharedTriggerMode", { value: this.draft.automation?.sharedTriggerMode ?? "both" }));
     g.append(this.#pathSelect("persona", ["", ...personaIds], "topics.persona", { value: t.persona ?? "" }));
     g.append(this.#pathField("maxItems", "topics.maxItems", { type: "number", value: t.maxItems ?? 3 }));
     g.append(this.#pathCheckbox("dedupe", "topics.dedupe", { value: t.dedupe ?? true }));

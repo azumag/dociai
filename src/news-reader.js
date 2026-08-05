@@ -42,15 +42,21 @@ export class NewsReader {
     return new Set(this.store.list({ states: "read" }).map((record) => record.guid ?? record.key));
   }
 
-  // config.news.enabled (設定保存が必要) と、操作卓のトグル (即時・セッション限りの一時停止)
-  // の両方が立っているときだけ有効。
+  // config.news.enabled (設定保存が必要) と、操作卓のトグル (config.local.jsonではなく
+  // localStorageへ即時反映・再起動後も前回値を保持する自動発火の一時停止スイッチ、
+  // src/ui/reader-toggle-preferences.js参照) の両方が立っているときだけ有効。
   get enabled() {
     return !!this.config.news?.enabled && this.isRuntimeEnabled();
   }
 
-  // トリガー (interval/manual) から呼ばれるエントリポイント
+  // トリガー (interval/manual) から呼ばれるエントリポイント。
+  // context.manual (AutomationCoordinator.run()の manual オプション経由、操作卓の「生成して
+  // 貯める」「再生」ボタン由来) のときだけ操作卓の自動読み上げトグル (isRuntimeEnabled) を
+  // バイパスする — トグルは自動発火 (トリガー/スケジュール) だけを一時停止する対象で、手動操作
+  // まで止めてしまうのは意図しない挙動だったため。config.news.enabled自体はpipeline.run()側で
+  // 無条件にゲートされたまま。
   async run(context = {}) {
-    if (!this.isRuntimeEnabled()) {
+    if (!context.manual && !this.isRuntimeEnabled()) {
       this.log("ニュース機能は操作卓のトグルで一時停止中です");
       return;
     }

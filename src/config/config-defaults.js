@@ -76,6 +76,11 @@ export function applyConfigDefaults(config) {
   copy.research = { enabled: false, connector: "", maxResults: 5, ...(copy.research ?? {}) };
   copy.news = { enabled: false, mode: "topic", maxItems: 3, dedupe: true, randomPersona: false, personas: [], sources: [], ...(copy.news ?? {}), retry: { maxAttempts: 3, initialDelaySeconds: 30, maxDelaySeconds: 900, ...(copy.news?.retry ?? {}) } };
   copy.topics = { enabled: false, maxItems: 3, dedupe: true, sources: [], intro: "上のお題について、あなたのキャラクターとして自由にコメントしてください。", style: "雑談のお題として、自然な自分の言葉で自由にコメントする", randomPersona: false, personas: [], ...(copy.topics ?? {}), retry: { maxAttempts: 3, initialDelaySeconds: 30, maxDelaySeconds: 900, ...(copy.topics?.retry ?? {}) } };
+  // news.trigger と topics.trigger が同じtriggerを指す設定 ("ニュースと話題どちらかをランダムに
+  // 読む"ユースケース) での衝突挙動。既定"both"は両方起動する既存挙動そのものなので、この
+  // セクションを追加しても既存configの動作は一切変わらない (src/app/runtime-factory.jsの
+  // handleTrigger参照)。
+  copy.automation = { sharedTriggerMode: "both", ...(copy.automation ?? {}) };
   copy.commentSources = { ...(copy.commentSources ?? {}), twitch: { enabled: false, ...(copy.commentSources?.twitch ?? {}) } };
   // Issue #94: broadcaster identity + enabled EventSub features for the Twitch auth/EventSub
   // overview screen. Deliberately does NOT include a client id field — that is a build/deploy-time

@@ -174,6 +174,45 @@ test("NewsReader/TopicReader stay enabled per config.news.enabled/config.topics.
   assert.equal(topics.status().counts.read, 0, "paused before any topic is picked up");
 });
 
+test("NewsReader/TopicReader: run({ manual: true }) bypasses the isRuntimeEnabled() pause (manual panel buttons), but config.news.enabled/config.topics.enabled still gate everything", async () => {
+  const now = { value: 1_000 };
+  const news = new NewsReader({
+    config: { news: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    isRuntimeEnabled: () => false,
+  });
+  news.fetchAll = async () => news.refineItems([{ guid: "manual-news", title: "manual-news", sourceName: "source", publishedAt: "2026-07-02T10:00:00Z" }]);
+  await news.run({ generation: 1, manual: true });
+  assert.equal(news.status().counts.read, 1, "context.manual must bypass the runtime-toggle pause");
+
+  const disabledNews = new NewsReader({
+    config: { news: { enabled: false, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    isRuntimeEnabled: () => false,
+  });
+  disabledNews.fetchAll = async () => disabledNews.refineItems([{ guid: "should-not-run", title: "should-not-run", sourceName: "source", publishedAt: "2026-07-02T10:00:00Z" }]);
+  await disabledNews.run({ generation: 1, manual: true });
+  assert.equal(disabledNews.status().counts.read, 0, "config.news.enabled: false must still block even a manual run");
+
+  const topics = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    isRuntimeEnabled: () => false,
+  });
+  topics.fetchAll = async () => topics.refineItems([{ guid: "manual-topic", title: "manual-topic", sourceName: "todoist" }]);
+  await topics.run({ generation: 1, manual: true });
+  assert.equal(topics.status().counts.read, 1, "context.manual must bypass the runtime-toggle pause");
+
+  const disabledTopics = new TopicReader({
+    config: { topics: { enabled: false, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    isRuntimeEnabled: () => false,
+  });
+  disabledTopics.fetchAll = async () => disabledTopics.refineItems([{ guid: "should-not-run", title: "should-not-run", sourceName: "todoist" }]);
+  await disabledTopics.run({ generation: 1, manual: true });
+  assert.equal(disabledTopics.status().counts.read, 0, "config.topics.enabled: false must still block even a manual run");
+});
+
 test("TopicReader applies the same retry lifecycle and stops permanent-error loops", async () => {
   const now = { value: 1_000 };
   let calls = 0;

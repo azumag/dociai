@@ -12,6 +12,7 @@ const KNOWN_NEWS_SOURCE_TYPES = registryIds("newsSourceTypes");
 const KNOWN_TOPIC_SOURCE_TYPES = registryIds("topicSourceTypes");
 const KNOWN_NEWS_MODES = registryIds("newsModes");
 const KNOWN_NEWS_ARTICLE_FETCH_MODES = registryIds("newsArticleFetchModes");
+const KNOWN_AUTOMATION_SHARED_TRIGGER_MODES = registryIds("automationSharedTriggerModes");
 const VOICE_ENGINES = registryIds("voiceEngines");
 const DEFAULT_TOPIC_INTRO = "上のお題について、あなたのキャラクターとして自由にコメントしてください。";
 const DEFAULT_TOPIC_STYLE = "雑談のお題として、自然な自分の言葉で自由にコメントする";
@@ -313,6 +314,21 @@ export function validateConfig(cfg) {
     }
     if (cfg.topics.randomPersona && !(cfg.topics.personas ?? []).length) {
       warnings.push("topics.randomPersona が true ですが topics.personas が空です。topics.persona / router.defaultPersona にフォールバックします");
+    }
+  }
+
+  // automation (news/topicsが同じtriggerを共有しているときの挙動)
+  if (cfg.automation !== undefined) {
+    if (!cfg.automation || typeof cfg.automation !== "object" || Array.isArray(cfg.automation)) {
+      errors.push("automation はオブジェクトで指定してください");
+    } else {
+      if (cfg.automation.sharedTriggerMode !== undefined && !KNOWN_AUTOMATION_SHARED_TRIGGER_MODES.includes(cfg.automation.sharedTriggerMode)) {
+        errors.push(`automation.sharedTriggerMode "${cfg.automation.sharedTriggerMode}" は未対応です (対応: ${KNOWN_AUTOMATION_SHARED_TRIGGER_MODES.join(", ")})`);
+      }
+      const sharesTrigger = cfg.news?.trigger && cfg.news.trigger === cfg.topics?.trigger;
+      if (cfg.automation.sharedTriggerMode === "random-one" && !sharesTrigger) {
+        warnings.push("automation.sharedTriggerMode が random-one ですが news.trigger と topics.trigger が同じトリガーを指していないため効果がありません");
+      }
     }
   }
 

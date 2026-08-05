@@ -26,6 +26,7 @@ import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdate
 import { createElectronTranslationAdapter } from "../comment-translation-adapter.js";
 import { splitConnectorSecrets } from "../config/config-secrets-split.js";
 import { personaTriggerIdsForDisplay } from "../ui/persona-trigger-display.js";
+import { loadReaderToggles, saveReaderToggles } from "../ui/reader-toggle-preferences.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -38,8 +39,16 @@ const newsHistoryStore = new MemoryNewsHistoryStore();
 const manualSource = new ManualCommentSource();
 const runtimeController = new BrowserRuntimeController();
 
-const appStore = new AppStore(createAppState({ commentStore, manualSource }));
+// newsRuntimeEnabled/topicsRuntimeEnabled (自動読み上げトグル) は前回起動時に選んだON/OFFを
+// 引き継ぐ。config.local.jsonではなくlocalStorage側に保存する理由はsrc/ui/reader-toggle-
+// preferences.js冒頭のコメント参照。保存が無ければcreateAppStateの既定値(true)のまま。
+const appStore = new AppStore(createAppState({ commentStore, manualSource, ...loadReaderToggles() }));
 const state = appStore.createLegacyAdapter();
+appStore.subscribe((snapshot, action) => {
+  if (action.type === "set" && (action.key === "newsRuntimeEnabled" || action.key === "topicsRuntimeEnabled")) {
+    saveReaderToggles({ newsRuntimeEnabled: snapshot.newsRuntimeEnabled, topicsRuntimeEnabled: snapshot.topicsRuntimeEnabled });
+  }
+});
 const consoleView = new ConsoleView(document);
 
 let appRuntime;
@@ -352,8 +361,15 @@ function renderTriggers() {
     const newsUses = state.config.news?.enabled && state.config.news.trigger === id;
     const topicUses = state.config.topics?.enabled && state.config.topics.trigger === id;
     const uses = [...users];
-    if (newsUses) uses.push("ニュース読み上げ");
-    if (topicUses) uses.push("話題読み上げ");
+    // 両方が同じtriggerを共有していて"random-one"のときは実際には毎回どちらか片方しか起動しない
+    // — 「ニュース読み上げ」「話題読み上げ」を別々に2件出すと両方毎回起動するように見えてしまう
+    // ため、1件にまとめて表示する。
+    if (newsUses && topicUses && state.config.automation?.sharedTriggerMode === "random-one") {
+      uses.push("ニュース/話題 (ランダムに片方)");
+    } else {
+      if (newsUses) uses.push("ニュース読み上げ");
+      if (topicUses) uses.push("話題読み上げ");
+    }
     return { id, type: t.type, detail: `${triggerDetail(t)} → ${uses.join(", ") || "(使用ペルソナなし)"}`, unused: uses.length === 0 };
   });
   consoleView.renderTriggers(triggers, { fireTrigger: (id) => triggerEngine?.fire(id, { reason: "manual" }) });
@@ -569,8 +585,12 @@ function renderNewsPanel() {
   toggle.checked = state.newsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
   const newsStatus = mergeReaderStatus(newsBufferedReader?.status(), newsReader?.status());
-  $("#btn-news-read").disabled = !newsBufferedReader?.enabled || newsStatus?.busy;
-  $("#btn-news-generate").disabled = !newsBufferedReader?.enabled || newsStatus?.busy || newsStatus?.bufferedCount >= 1;
+  // newsBufferedReader.enabled は自動読み上げトグル(操作卓のisRuntimeEnabled)も含むため、手動
+  // ボタンの判定には使わない — トグルOFFでも手動の生成/再生は使える (automationCoordinator.run
+  // の manual:true が isRuntimeEnabled ガードをバイパスする、src/news-reader.js参照)。設定側の
+  // news.enabled=falseのときだけ手動ボタンも無効にする。
+  $("#btn-news-read").disabled = !newsBufferedReader || !configEnabled || newsStatus?.busy;
+  $("#btn-news-generate").disabled = !newsBufferedReader || !configEnabled || newsStatus?.busy || newsStatus?.bufferedCount >= 1;
   renderNewsAttribution($("#news-last-attribution"));
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
@@ -598,7 +618,12 @@ function renderNewsPanel() {
   // (MemoryItemProcessingStore requires an exact generation match) on a failure the automatic
   // path produced. Separately, BufferedReader.run() also plays whatever the buffer already holds
   // first, which could speak an unrelated item instead of actually retrying the failed one.
-  renderReaderFailures(failures, newsReader, s, () => { renderNewsPanel(); appRuntime.getComponent("automationCoordinator")?.run("news", appRuntime.getComponent("newsReader")); }, renderNewsPanel);
+  // manual: true — 「再試行」もユーザーが押したボタンである以上、生成/再生ボタンと同じく
+  // 自動読み上げトグルの一時停止対象にしない。newsReader.status().enabled はnews.pipeline側で
+  // config.news.enabledのみを見ておりトグルを含まないため (NewsPipelineCoordinator.status())、
+  // トグルOFFでもこの失敗一覧自体は表示されうる — manual:trueが無いとボタンを押しても
+  // isRuntimeEnabled()ガードで黙ってスキップされてしまう。
+  renderReaderFailures(failures, newsReader, s, () => { renderNewsPanel(); appRuntime.getComponent("automationCoordinator")?.run("news", appRuntime.getComponent("newsReader"), { manual: true }); }, renderNewsPanel);
 }
 
 function renderTopicPanel() {
@@ -611,8 +636,10 @@ function renderTopicPanel() {
   toggle.checked = state.topicsRuntimeEnabled !== false;
   toggle.disabled = !configEnabled;
   const topicStatus = mergeReaderStatus(topicBufferedReader?.status(), topicReader?.status());
-  $("#btn-topic-read").disabled = !topicBufferedReader?.enabled || topicStatus?.busy;
-  $("#btn-topic-generate").disabled = !topicBufferedReader?.enabled || topicStatus?.busy || topicStatus?.bufferedCount >= 1;
+  // renderNewsPanel と同じ理由 (上のコメント参照) — 手動ボタンは自動読み上げトグルではなく
+  // 設定側の topics.enabled だけで判定する。
+  $("#btn-topic-read").disabled = !topicBufferedReader || !configEnabled || topicStatus?.busy;
+  $("#btn-topic-generate").disabled = !topicBufferedReader || !configEnabled || topicStatus?.busy || topicStatus?.bufferedCount >= 1;
   $("#topic-busy").hidden = !topicStatus?.busy;
   if (!state.config) {
     el.textContent = "設定を読み込むと使えます";
@@ -633,8 +660,12 @@ function renderTopicPanel() {
   const trigger = state.config.topics.trigger ? `トリガー: ${state.config.topics.trigger}` : "トリガー未設定";
   el.textContent = readerLifecycleText(trigger, s);
   // Same reasoning as renderNewsPanel above: retryNow/skip and retry-and-rerun must run against
-  // the unwrapped topicReader, not topicBufferedReader.
-  renderReaderFailures(failures, topicReader, s, () => { renderTopicPanel(); appRuntime.getComponent("automationCoordinator")?.run("topics", appRuntime.getComponent("topicReader")); }, renderTopicPanel);
+  // the unwrapped topicReader, not topicBufferedReader. manual: true for the same reason as the
+  // news panel's retry-and-rerun — today topics.status().enabled DOES include the runtime toggle
+  // (unlike news, see TopicReader.status()), so this branch happens to be unreachable while the
+  // toggle is off, but manual:true keeps both panels' retry buttons consistent and stays correct
+  // if that status asymmetry is ever fixed.
+  renderReaderFailures(failures, topicReader, s, () => { renderTopicPanel(); appRuntime.getComponent("automationCoordinator")?.run("topics", appRuntime.getComponent("topicReader"), { manual: true }); }, renderTopicPanel);
 }
 
 // news/topic panels read from TWO separate reader/pipeline instances: newsBufferedReader/

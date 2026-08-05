@@ -2,6 +2,10 @@ const descriptor = (id, label, extra = {}) => Object.freeze({ id, label, ...extr
 export const CONFIG_REGISTRY = Object.freeze({
   providers: Object.freeze([descriptor("openai", "OpenAI", { secretFields: ["apiKey"] }), descriptor("openrouter", "OpenRouter", { secretFields: ["apiKey"] }), descriptor("openai-compatible", "OpenAI互換"), descriptor("ollama", "Ollama"), descriptor("minimax", "MiniMax", { secretFields: ["apiKey"] }), descriptor("mock", "Mock")]),
   triggerTypes: Object.freeze([descriptor("keyword", "キーワード"), descriptor("hotkey", "ホットキー"), descriptor("interval", "間隔"), descriptor("random", "ランダム"), descriptor("manual", "手動")]),
+  // news/topicsが同じtriggerを共有しているときの挙動 (config.automation.sharedTriggerMode)。
+  // triggerTypesの"random" (コメントごとの確率発火) とは無関係の別概念なので、名前を
+  // automationSharedTriggerModesとして明確に分離する。
+  automationSharedTriggerModes: Object.freeze([descriptor("both", "両方読み上げる"), descriptor("random-one", "ランダムに片方だけ読み上げる")]),
   voiceEngines: Object.freeze([descriptor("webspeech", "Web Speech"), descriptor("voicevox", "VOICEVOX"), descriptor("bouyomi", "棒読みちゃん")]),
   newsModes: Object.freeze([descriptor("topic", "話題"), descriptor("current", "時事"), descriptor("simple", "簡潔")]),
   newsSourceTypes: Object.freeze([descriptor("rss", "RSS"), descriptor("google-news", "Google News"), descriptor("mock", "Mock")]),
