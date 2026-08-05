@@ -238,12 +238,25 @@ test("legacy flat comment reader settings remain valid through the real config p
   }
 });
 
-test("validateConfig accepts 'both'/omitted automation.sharedTriggerMode and rejects unknown values or a non-object automation", () => {
+test("validateConfig accepts 'both'/omitted automation.sharedTriggerMode and rejects unknown values", () => {
   const base = { connectors: { mock: { provider: "mock" } }, personas: [{ id: "p", name: "P", connector: "mock" }], triggers: {} };
   assert.deepEqual(validateConfig(base).errors, [], "automation omitted entirely must be valid");
   assert.deepEqual(validateConfig({ ...base, automation: { sharedTriggerMode: "both" } }).errors, []);
   assert.ok(validateConfig({ ...base, automation: { sharedTriggerMode: "sometimes" } }).errors.some((e) => e.includes('automation.sharedTriggerMode "sometimes"')));
-  assert.ok(validateConfig({ ...base, automation: "not-an-object" }).errors.some((e) => e.includes("automation はオブジェクトで指定してください")));
+});
+
+// news/topics/research等、他の全セクションと同じ寛容さ: automationが非オブジェクト(文字列/配列/数値)
+// でもvalidateConfigはthrowせず、その値を単に無視する。config-defaults.jsのapplyConfigDefaults()が
+// 実際の読み込み経路 (processConfig) では必ず先に走ってautomationを無条件にオブジェクト化するため、
+// ここで独自に「オブジェクトで指定してください」と拒否しても実際には到達しない
+// (拒否ロジックがあった旧実装のPRレビュー指摘: config-defaults.jsとconfig-loader.jsの間で
+// 検証の期待値がすれ違い、malformedな値が無警告でデフォルト値へ丸められていた)。
+test("validateConfig tolerates a non-object automation section without throwing (matches news/topics/research)", () => {
+  const base = { connectors: { mock: { provider: "mock" } }, personas: [{ id: "p", name: "P", connector: "mock" }], triggers: {} };
+  for (const automation of ["not-an-object", ["a", "b"], 42, null]) {
+    assert.doesNotThrow(() => validateConfig({ ...base, automation }));
+    assert.deepEqual(validateConfig({ ...base, automation }).errors, [], JSON.stringify(automation));
+  }
 });
 
 test("validateConfig warns when automation.sharedTriggerMode is 'random-one' but news.trigger/topics.trigger don't actually share a trigger, and stays silent once they do", () => {

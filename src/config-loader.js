@@ -317,19 +317,19 @@ export function validateConfig(cfg) {
     }
   }
 
-  // automation (news/topicsが同じtriggerを共有しているときの挙動)
-  if (cfg.automation !== undefined) {
-    if (!cfg.automation || typeof cfg.automation !== "object" || Array.isArray(cfg.automation)) {
-      errors.push("automation はオブジェクトで指定してください");
-    } else {
-      if (cfg.automation.sharedTriggerMode !== undefined && !KNOWN_AUTOMATION_SHARED_TRIGGER_MODES.includes(cfg.automation.sharedTriggerMode)) {
-        errors.push(`automation.sharedTriggerMode "${cfg.automation.sharedTriggerMode}" は未対応です (対応: ${KNOWN_AUTOMATION_SHARED_TRIGGER_MODES.join(", ")})`);
-      }
-      const sharesTrigger = cfg.news?.trigger && cfg.news.trigger === cfg.topics?.trigger;
-      if (cfg.automation.sharedTriggerMode === "random-one" && !sharesTrigger) {
-        warnings.push("automation.sharedTriggerMode が random-one ですが news.trigger と topics.trigger が同じトリガーを指していないため効果がありません");
-      }
-    }
+  // automation (news/topicsが同じtriggerを共有しているときの挙動)。
+  // news/topics/research等の他セクションと同じく「オブジェクトである」ことは強制しない —
+  // config-defaults.js の applyConfigDefaults() は processConfig() 経由の実際の読み込み経路で
+  // 必ずvalidateConfigより先に走り、automationが非オブジェクトでも
+  // `{ sharedTriggerMode: "both", ...(copy.automation ?? {}) }` で無条件にオブジェクト化して
+  // しまうため、ここで「オブジェクトで指定してください」を出しても実際の読み込み経路では
+  // 到達し得ない (PRレビュー指摘)。cfg.automation?. で安全にアクセスするだけに留める。
+  if (cfg.automation?.sharedTriggerMode !== undefined && !KNOWN_AUTOMATION_SHARED_TRIGGER_MODES.includes(cfg.automation.sharedTriggerMode)) {
+    errors.push(`automation.sharedTriggerMode "${cfg.automation.sharedTriggerMode}" は未対応です (対応: ${KNOWN_AUTOMATION_SHARED_TRIGGER_MODES.join(", ")})`);
+  }
+  const sharesTrigger = cfg.news?.trigger && cfg.news.trigger === cfg.topics?.trigger;
+  if (cfg.automation?.sharedTriggerMode === "random-one" && !sharesTrigger) {
+    warnings.push("automation.sharedTriggerMode が random-one ですが news.trigger と topics.trigger が同じトリガーを指していないため効果がありません");
   }
 
   // comment sources
