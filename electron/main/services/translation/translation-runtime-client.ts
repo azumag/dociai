@@ -180,12 +180,15 @@ export class TranslationRuntimeClient {
 
   async translate(text: string, sourceLanguage: string, targetLanguage: string, signal?: AbortSignal): Promise<string> {
     this.#assertUsable();
+    // 既にabort済みのsignalで要求を送っても結果は確実に捨てられる上、worker側ではモデルロード
+    // (~22秒) を引き起こす無駄になるため、workerをspawn/送信する前に即AbortErrorで返す
+    // (PR #276 Claude Code review指摘)。
+    if (signal?.aborted) throw new DOMException("translation was cancelled before it started", "AbortError");
     const worker = await this.#ensureWorker();
     if (this.#state !== "ready") this.#state = "loading";
     const request = this.#send(worker, "translate", { text, sourceLanguage, targetLanguage });
     const onAbort = () => this.#abort(request);
-    if (signal?.aborted) onAbort();
-    else signal?.addEventListener("abort", onAbort, { once: true });
+    signal?.addEventListener("abort", onAbort, { once: true });
     try {
       return (await request.promise) as string;
     } finally {

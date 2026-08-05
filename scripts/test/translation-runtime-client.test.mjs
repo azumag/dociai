@@ -105,6 +105,18 @@ test("a translate error response rejects translate() with the worker's message",
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test("a pre-aborted signal rejects translate() without spawning a worker or posting a message", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    let spawnCount = 0;
+    const client = new modules.TranslationRuntimeClient({ cacheDir: "/cache", workerFactory: () => { spawnCount += 1; return fakeWorker(); } });
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(client.translate("hello", "en", "ja", controller.signal), (error) => error.name === "AbortError");
+    assert.equal(spawnCount, 0, "an already-aborted request must not spawn the worker or trigger a model load");
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("an aborted translate() signal rejects with AbortError and a late worker response is ignored", async () => {
   const { modules, directory } = await loadModules();
   try {
