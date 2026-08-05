@@ -54,6 +54,11 @@ export async function seedAiConnectorConfig(configRepository: ConfigRepository, 
   // というplaceholder入り) の同じindexにある値で、設定UIから設定し直した本物のTodoistトークンを
   // 毎起動で静かに上書きしていた。connectorsはユーザーが選んだid基準のkeyなのでこの上書きは
   // 実質衝突せず気づかれにくかった。
+  // splitConnectorSecrets()は現状connectors/topics/newsの3種類のキーしか作らないため、
+  // sectionNeedsSeed[section]がundefinedになることはない。将来ここにtopics.sourcesと同じ配列
+  // indexキー方式の新sectionが追加された場合、undefined (!== false) は「意図的にunconditional
+  // seed」ではなく単なるフォールスルーなので、この#254クラスの上書きバグが再発しないよう
+  // sectionNeedsSeedの追加を忘れないこと。
   const sectionNeedsSeed: Record<string, boolean> = { connectors: isFreshInstall, topics: isFreshInstall || missingTopics, news: isFreshInstall || missingNews };
   for (const entry of migrated.secretEntries) {
     if (sectionNeedsSeed[entry.key.split(".")[0]] === false) continue;
@@ -90,6 +95,18 @@ export async function seedAiConnectorConfig(configRepository: ConfigRepository, 
     try { await configRepository.save(config, current.revision); }
     catch (error) { console.error("[dociai:seed] failed to persist seeded config, continuing with in-memory defaults", error); }
   }
-  if (source === paths.configFile && migrated.secretEntries.length) await writePublicConfig(source, migrated.publicConfig);
+  // splitConnectorSecrets()はsectionNeedsSeedに関係なく全sectionのplaintextを一律で剥がして
+  // migrated.publicConfigを作るため、そのまま書き戻すと「今回secretStoreへ実際には保存しなかった
+  // section (sectionNeedsSeedがfalse)」のplaintextが、legacy config.local.json上からも
+  // secretStore上からも両方消えてしまう (どこにも値が残らない状態) — PR #274レビューで指摘された
+  // 不具合。gateされて今回seedしなかったsectionはrawの元の内容 (plaintextのまま) を書き戻す。
+  const seededEntries = migrated.secretEntries.filter((entry: { key: string }) => sectionNeedsSeed[entry.key.split(".")[0]] !== false);
+  if (source === paths.configFile && seededEntries.length) {
+    const rewritten: JsonRecord = { ...migrated.publicConfig };
+    for (const section of ["connectors", "topics", "news"]) {
+      if (sectionNeedsSeed[section] === false && raw[section] !== undefined) rewritten[section] = raw[section];
+    }
+    await writePublicConfig(source, rewritten);
+  }
   return source;
 }

@@ -226,3 +226,39 @@ test("seedAiConnectorConfig strips the migrated plaintext token out of a real le
     assert.equal(rewritten.topics.sources[0].tokenSecretRef, "topics.sources.0.token");
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
+
+// PR #274のreviewで指摘された不具合の回帰テスト: sectionNeedsSeedでsecretStoreへの書き込みは
+// gateしても、legacy config.local.json本体からplaintextを剥がして書き戻すwritePublicConfigの方を
+// gateし忘れると、「secretStoreへは一切保存していないのに、legacy config.local.json側の
+// plaintextだけは消えてしまい、値がどこにも残らなくなる」という新しい破壊パターンが生まれる。
+// topics (既にconfig.jsonにありseedされない) はfileの中でplaintextのまま残り、news (missingで
+// 実際にseedされる) だけがfileの中でも正しく剥がされることを確認する。
+test("seedAiConnectorConfig leaves an unseeded section's plaintext token intact in config.local.json, stripping only the section it actually seeded", async () => {
+  const { modules, directory } = await loadSeedAiConnectorConfig();
+  try {
+    const appPath = path.join(directory, "app");
+    await fs.mkdir(appPath, { recursive: true });
+    const configFile = path.join(directory, "config.local.json");
+    await fs.writeFile(configFile, JSON.stringify({
+      topics: { sources: [{ name: "Todoist", type: "todoist", enabled: true, token: "hand-edited-but-not-yet-migrated-topics-token" }] },
+      news: { sources: [{ name: "RSS", type: "rss-token-source", enabled: true, token: "real-legacy-news-token" }] },
+    }));
+    const paths = { configFile, configRepositoryFile: path.join(directory, "config.json") };
+    await fs.writeFile(paths.configRepositoryFile, "{}"); // not a fresh install
+    const configRepository = fakeConfigRepository({
+      topics: { sources: [{ name: "配信ネタ (Todoist)", type: "todoist", enabled: true, tokenConfigured: true, tokenSecretRef: "topics.sources.0.token" }] },
+      personas: [{ id: "doci", triggers: [] }],
+      // news is absent -> missingNews === true
+    });
+    const secretStore = fakeSecretStore();
+    await secretStore.set("topics.sources.0.token", "the-real-user-todoist-token");
+
+    await modules.seedAiConnectorConfig(configRepository, secretStore, paths, appPath);
+
+    assert.equal(await secretStore.getForService("topics.sources.0.token"), "the-real-user-todoist-token");
+    const rewritten = JSON.parse(await fs.readFile(configFile, "utf8"));
+    assert.equal(rewritten.topics.sources[0].token, "hand-edited-but-not-yet-migrated-topics-token", "an unseeded section's plaintext must survive on disk, not vanish with nowhere to go");
+    assert.equal(rewritten.news.sources[0].token, undefined, "a section that WAS actually seeded must still have its plaintext stripped");
+    assert.equal(rewritten.news.sources[0].tokenSecretRef, "news.sources.0.token");
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
