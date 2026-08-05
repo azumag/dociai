@@ -36,7 +36,7 @@ test("translation-worker.cjs round-trips warmup, translate, and ping across a re
     const fakeTransformers = path.join(directory, "fake-transformers.mjs");
     await fs.writeFile(fakeTransformers, [
       'export const env = { cacheDir: "", allowRemoteModels: true };',
-      'export async function pipeline(task, modelId) { return async (text) => [{ translation_text: "ok:" + text }]; }',
+      'export async function pipeline(task, modelId) { return async (text) => [{ translation_text: "ok:" + text + "|resources=" + (globalThis.__DOCIAI_RESOURCES_PATH__ ?? "none") }]; }',
       "",
     ].join("\n"));
     const workerPath = path.join(directory, "translation-worker.cjs");
@@ -53,7 +53,9 @@ test("translation-worker.cjs round-trips warmup, translate, and ping across a re
       write: true,
     });
 
-    const worker = new Worker(workerPath, { workerData: { cacheDir: "/cache/translation-models", importModulePath: fakeTransformers } });
+    // workerData.resourcesPathはworkerエントリでglobalThis.__DOCIAI_RESOURCES_PATH__へ注入され、
+    // shim (fake module内で観測) がpackaged resourcesを当てられることを検証する。
+    const worker = new Worker(workerPath, { workerData: { cacheDir: "/cache/translation-models", resourcesPath: "/packaged/resources", importModulePath: fakeTransformers } });
     try {
       const warmup = await rpc(worker, { type: "warmup", requestId: "w1" });
       assert.equal(warmup.type, "warmup:ok");
@@ -62,7 +64,7 @@ test("translation-worker.cjs round-trips warmup, translate, and ping across a re
 
       const translate = await rpc(worker, { type: "translate", requestId: "t1", text: "hello world", sourceLanguage: "en", targetLanguage: "ja" });
       assert.equal(translate.type, "translate:ok");
-      assert.equal(translate.text, "ok:hello world");
+      assert.equal(translate.text, "ok:hello world|resources=/packaged/resources");
       assert.equal(translate.state, "ready");
 
       const ping = await rpc(worker, { type: "ping", requestId: "p1" });

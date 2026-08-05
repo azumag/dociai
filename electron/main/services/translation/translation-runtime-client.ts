@@ -16,11 +16,13 @@ export const DEFAULT_MODEL_ID = "Xenova/m2m100_418M";
 export const DEFAULT_LOAD_TIMEOUT_MS = 120_000;
 
 // workerDataはstructured-clone可能なものだけ: cacheDir/modelId/loadTimeoutMs (およびテスト用の
-// importModulePath)。
+// importModulePath)。resourcesPathはonnxruntime-node-shim.cjsがworker_thread内で
+// process.resourcesPathを当てにできないpackaged build対策として、Mainプロセスから明示的に渡す。
 type WorkerLaunchData = {
   cacheDir: string;
   modelId?: string;
   loadTimeoutMs?: number;
+  resourcesPath?: string;
   importModulePath?: string;
 };
 
@@ -84,13 +86,18 @@ export async function probeTranslationWorker(options: {
   try {
     worker = options.workerFactory
       ? options.workerFactory()
-      : new Worker(options.workerPath ?? resolveTranslationWorkerPath(), { workerData: { cacheDir: options.cacheDir } });
+      : new Worker(options.workerPath ?? resolveTranslationWorkerPath(), {
+          workerData: { cacheDir: options.cacheDir, ...(process.resourcesPath ? { resourcesPath: process.resourcesPath } : {}) },
+        });
     const response = await withTimeout(
       new Promise<WorkerResponse>((resolve, reject) => {
         worker!.on("message", (message) => {
           const msg = message as WorkerResponse;
           if (msg.type === "pong") resolve(msg);
         });
+        // pongを返さずにworkerが先に終了した場合は、15秒のtimeoutを待たず即失敗させる
+        // (packaged CIの失敗を速く・診断しやすくする)。
+        worker!.on("exit", (code) => reject(new Error(`translation worker exited (code ${code}) before responding to the probe`)));
         worker!.on("error", reject);
         worker!.postMessage({ type: "ping", requestId: "probe" });
       }),
@@ -225,7 +232,7 @@ export class TranslationRuntimeClient {
       worker = this.#workerFactory
         ? this.#workerFactory()
         : new Worker(this.#workerPath ?? resolveTranslationWorkerPath(), {
-            workerData: { cacheDir: this.#cacheDir, modelId: this.#modelId, loadTimeoutMs: this.#loadTimeoutMs } satisfies WorkerLaunchData,
+            workerData: { cacheDir: this.#cacheDir, modelId: this.#modelId, loadTimeoutMs: this.#loadTimeoutMs, ...(process.resourcesPath ? { resourcesPath: process.resourcesPath } : {}) } satisfies WorkerLaunchData,
           });
     } catch (error) {
       // #workerは未設定 (null) のままなので、emittingWorker=nullでteardownは素直に通る。

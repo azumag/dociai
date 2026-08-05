@@ -17,6 +17,11 @@ type WorkerData = {
   cacheDir: string;
   modelId?: string;
   loadTimeoutMs?: number;
+  // Mainプロセスから注入するresourcesPath (packaged build)。onnxruntime-node-shim.cjsは
+  // worker_threadでprocess.resourcesPathが未定義になり得るため、この値で
+  // globalThis.__DOCIAI_RESOURCES_PATH__を上書きしてからshim (transformers.jsのモジュール初期化
+  // 時に評価される) に読ませる — PR #276 Claude Code review指摘への対処。
+  resourcesPath?: string;
   // テスト専用のseam: 実モデルロードを避けたい場合に差し替え先moduleの絶対pathまたは
   // file:// URLを渡す。productionでは未指定のまま、TranslationRuntimeの既定 (実
   // @huggingface/transformersの動的import) を使う。
@@ -32,6 +37,12 @@ type WorkerRequest = {
 };
 
 const data = workerData as WorkerData;
+
+// shim評価はworkerが起動して初めてのwarmup/translate時に走るため、ここ (エントリ先頭) での
+// 代入で確実に間に合う。
+if (typeof data.resourcesPath === "string" && data.resourcesPath) {
+  (globalThis as Record<string, unknown>).__DOCIAI_RESOURCES_PATH__ = data.resourcesPath;
+}
 
 // 動的importのspecifierはstringとして扱う (TSがouter変数をnarrowしないため、引数経由で
 // 確実にstringへ絞り込む)。
