@@ -47,8 +47,9 @@ export class TopicReader {
     return new Set(this.store.list({ states: "read" }).map((record) => record.guid ?? record.key));
   }
 
-  // config.topics.enabled (設定保存が必要) と、操作卓のトグル (即時・セッション限りの一時停止)
-  // の両方が立っているときだけ有効。
+  // config.topics.enabled (設定保存が必要) と、操作卓のトグル (config.local.jsonではなく
+  // localStorageへ即時反映・再起動後も前回値を保持する自動発火の一時停止スイッチ、
+  // src/ui/reader-toggle-preferences.js参照) の両方が立っているときだけ有効。
   get enabled() {
     return !!this.config.topics?.enabled && this.isRuntimeEnabled();
   }
@@ -59,7 +60,9 @@ export class TopicReader {
       this.log("話題機能は無効です (topics.enabled: false)");
       return;
     }
-    if (!this.isRuntimeEnabled()) {
+    // context.manual (操作卓の「生成して貯める」「再生」ボタン由来) のときだけ自動読み上げ
+    // トグルをバイパスする。上のtopics.enabledガードは手動でも無条件のまま。
+    if (!context.manual && !this.isRuntimeEnabled()) {
       this.log("話題機能は操作卓のトグルで一時停止中です");
       return;
     }

@@ -142,6 +142,18 @@ test("AutomationCoordinator notifies onStart after the reader run begins, once p
   assert.deepEqual(events, ["start:topics:busy", "complete:topics"]);
 });
 
+test("AutomationCoordinator.run() passes context.manual through to reader.run() — false unless the caller opts in", async () => {
+  const receivedContexts = [];
+  const reader = { run: (context) => { receivedContexts.push(context); return Promise.resolve(); } };
+  const automation = new AutomationCoordinator({ runtime, getGeneration: () => 1 });
+
+  await automation.run("news", reader);
+  assert.equal(receivedContexts[0].manual, false, "manual defaults to false when the 3rd argument is omitted");
+
+  await automation.run("news", reader, { manual: true });
+  assert.equal(receivedContexts[1].manual, true, "the panel's manual generate/play buttons opt in explicitly");
+});
+
 test("ObsBridge replies to client snapshot requests and heartbeats", () => {
   const messages = [];
   const bridge = new ObsBridge({ transport: { postMessage: (message) => messages.push(message) }, getGeneration: () => 2 });

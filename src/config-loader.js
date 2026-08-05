@@ -12,6 +12,7 @@ const KNOWN_NEWS_SOURCE_TYPES = registryIds("newsSourceTypes");
 const KNOWN_TOPIC_SOURCE_TYPES = registryIds("topicSourceTypes");
 const KNOWN_NEWS_MODES = registryIds("newsModes");
 const KNOWN_NEWS_ARTICLE_FETCH_MODES = registryIds("newsArticleFetchModes");
+const KNOWN_AUTOMATION_SHARED_TRIGGER_MODES = registryIds("automationSharedTriggerModes");
 const VOICE_ENGINES = registryIds("voiceEngines");
 const DEFAULT_TOPIC_INTRO = "上のお題について、あなたのキャラクターとして自由にコメントしてください。";
 const DEFAULT_TOPIC_STYLE = "雑談のお題として、自然な自分の言葉で自由にコメントする";
@@ -314,6 +315,21 @@ export function validateConfig(cfg) {
     if (cfg.topics.randomPersona && !(cfg.topics.personas ?? []).length) {
       warnings.push("topics.randomPersona が true ですが topics.personas が空です。topics.persona / router.defaultPersona にフォールバックします");
     }
+  }
+
+  // automation (news/topicsが同じtriggerを共有しているときの挙動)。
+  // news/topics/research等の他セクションと同じく「オブジェクトである」ことは強制しない —
+  // config-defaults.js の applyConfigDefaults() は processConfig() 経由の実際の読み込み経路で
+  // 必ずvalidateConfigより先に走り、automationが非オブジェクトでも
+  // `{ sharedTriggerMode: "both", ...(copy.automation ?? {}) }` で無条件にオブジェクト化して
+  // しまうため、ここで「オブジェクトで指定してください」を出しても実際の読み込み経路では
+  // 到達し得ない (PRレビュー指摘)。cfg.automation?. で安全にアクセスするだけに留める。
+  if (cfg.automation?.sharedTriggerMode !== undefined && !KNOWN_AUTOMATION_SHARED_TRIGGER_MODES.includes(cfg.automation.sharedTriggerMode)) {
+    errors.push(`automation.sharedTriggerMode "${cfg.automation.sharedTriggerMode}" は未対応です (対応: ${KNOWN_AUTOMATION_SHARED_TRIGGER_MODES.join(", ")})`);
+  }
+  const sharesTrigger = cfg.news?.trigger && cfg.news.trigger === cfg.topics?.trigger;
+  if (cfg.automation?.sharedTriggerMode === "random-one" && !sharesTrigger) {
+    warnings.push("automation.sharedTriggerMode が random-one ですが news.trigger と topics.trigger が同じトリガーを指していないため効果がありません");
   }
 
   // comment sources

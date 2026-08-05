@@ -4,11 +4,17 @@
 // (issue #187)。
 export class AutomationCoordinator {
   constructor({ runtime, getGeneration, onError = () => {}, onStart = () => {}, onComplete = () => {} }) { this.runtime = runtime; this.getGeneration = getGeneration; this.onError = onError; this.onStart = onStart; this.onComplete = onComplete; this.active = new Map(); this.timers = new Set(); this.disposed = false; }
-  run(kind, reader) {
+  // manual: true は操作卓の「生成して貯める」「再生」ボタン (src/app/app-actions.js) 由来である
+  // ことを示す。context.manualとしてreaderまで届き、news-reader.js/topic-reader.jsのrun()は
+  // これが立っているときだけ操作卓の自動読み上げトグル (isRuntimeEnabled) のガードを
+  // バイパスする — トリガー発火/スケジュール実行 (このオプション省略、既定false) は従来通り
+  // トグルで一時停止できる。config.news.enabled/config.topics.enabled側のガードはmanualでも
+  // バイパスしない。
+  run(kind, reader, { manual = false } = {}) {
     if (this.disposed || !reader || this.active.has(kind)) return this.active.get(kind) ?? null;
     const generation = this.getGeneration();
     const request = this.runtime.createRequest({ generation, ownerId: `${kind}:${generation}`, kind: `${kind}-fetch` });
-    const promise = Promise.resolve(reader.run({ ...request.context, isCurrent: () => this.runtime.isCurrent(generation) }))
+    const promise = Promise.resolve(reader.run({ ...request.context, manual, isCurrent: () => this.runtime.isCurrent(generation) }))
       .catch((error) => { if (error?.kind !== "cancelled" && error?.name !== "AbortError") this.onError(kind, error); })
       .finally(() => { request.complete(); this.active.delete(kind); if (this.runtime.isCurrent(generation)) this.onComplete(kind); });
     this.active.set(kind, promise);

@@ -1,5 +1,9 @@
 const patterns = [
-  ["connectors.*", "connectors"], ["personas.*", "personas"], ["triggers.*", "triggers"], ["news.*", "news"], ["topics.*", "topics"], ["commentSources.*", "sources"], ["context.*", "context"], ["speechQueue.*", "speech"],
+  ["connectors.*", "connectors"], ["personas.*", "personas"], ["triggers.*", "triggers"], ["news.*", "news"], ["topics.*", "topics"],
+  // automation.sharedTriggerMode はnews/topics両タブに同じconfigパスで置いているため、
+  // どちらのタブに寄せても等価 — newsタブへ寄せる。
+  ["automation.*", "news"],
+  ["commentSources.*", "sources"], ["context.*", "context"], ["speechQueue.*", "speech"],
   // issue #257 Phase 4 (#263): commentReader.translation.* validation issues (config-validation.js)
   // must navigate to the commentReader tab, not silently fall through to the nonexistent
   // "general" tab id (#activateTab("general") no-ops since no sidebar tab has that id).

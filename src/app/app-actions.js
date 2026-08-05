@@ -38,7 +38,7 @@ export function createAppActions({
   const generateReader = (kind, name, renderPanel) => {
     renderPanel?.();
     const reader = component(name);
-    if (reader) component("automationCoordinator")?.run(kind, { run: (context) => reader.generate(context) });
+    if (reader) component("automationCoordinator")?.run(kind, { run: (context) => reader.generate(context) }, { manual: true });
   };
 
   return {
@@ -94,8 +94,8 @@ export function createAppActions({
       finally { request.complete(); }
       if (appRuntime.isCurrent(generation)) render.screen?.();
     },
-    readNews: () => { render.news?.(); component("automationCoordinator")?.run("news", component("newsBufferedReader")); },
-    readTopics: () => { render.topics?.(); component("automationCoordinator")?.run("topics", component("topicBufferedReader")); },
+    readNews: () => { render.news?.(); component("automationCoordinator")?.run("news", component("newsBufferedReader"), { manual: true }); },
+    readTopics: () => { render.topics?.(); component("automationCoordinator")?.run("topics", component("topicBufferedReader"), { manual: true }); },
     generateNews: () => generateReader("news", "newsBufferedReader", render.news),
     generateTopics: () => generateReader("topics", "topicBufferedReader", render.topics),
     setNewsEnabled: (enabled) => { store.dispatch({ type: "set", key: "newsRuntimeEnabled", value: enabled }); render.news?.(); },

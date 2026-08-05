@@ -535,16 +535,24 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
   };
 
   const handleTrigger = expose("handleTrigger", (triggerId, options = {}) => {
-    let automationMatched = false;
-    if (newsReader.enabled && config.news.trigger === triggerId) {
-      automationCoordinator.run("news", newsReader);
-      automationMatched = true;
+    const newsMatches = newsReader.enabled && config.news.trigger === triggerId;
+    const topicsMatches = topicReader.enabled && config.topics.trigger === triggerId;
+    let runNews = newsMatches;
+    let runTopics = topicsMatches;
+    // news.trigger と topics.trigger が同じtriggerIdを共有する設定 ("ニュースと話題どちらかを
+    // ランダムに読む"ユースケース) では、既定 (automation.sharedTriggerMode未設定/"both") は
+    // 両方とも起動する従来通りの挙動を維持する。"random-one"のときだけ、実際に両方が起動できる
+    // 状態 (newsMatches && topicsMatches、つまりconfig有効かつ操作卓トグルもONの両方) にある
+    // 場合に限って抽選で片方に絞る — 片方しか起動できない状況で絞ると「無効な方に抽選が当たって
+    // 何も起きない」事故になるため、絞る対象は「両方起動可能」なときだけに限定する。
+    if (newsMatches && topicsMatches && config.automation?.sharedTriggerMode === "random-one") {
+      const random = deps.random ?? Math.random;
+      if (random() < 0.5) runTopics = false;
+      else runNews = false;
     }
-    if (topicReader.enabled && config.topics.trigger === triggerId) {
-      automationCoordinator.run("topics", topicReader);
-      automationMatched = true;
-    }
-    if (automationMatched) return [];
+    if (runNews) automationCoordinator.run("news", newsReader);
+    if (runTopics) automationCoordinator.run("topics", topicReader);
+    if (newsMatches || topicsMatches) return [];
     return responseCoordinator.handleTrigger(triggerId, options);
   });
 
