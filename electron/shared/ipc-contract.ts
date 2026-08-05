@@ -6,7 +6,7 @@ import type { ArticleFetchInput, ArticleFetchResponse } from "./services/news-so
 import type { NewsSearchInput, NewsSearchResponse, WikipediaSearchInput, WikipediaSearchResponse } from "./services/news-research-contract";
 import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./services/topic-contract";
 import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
-import type { TranslateInput, TranslateResult, TranslationStatus, NativeRuntimeProbeResult } from "./services/translation-contract";
+import type { TranslateInput, TranslateResult, TranslationStatus, NativeRuntimeProbeResult, TranslationWorkerProbeResult } from "./services/translation-contract";
 import type { InstalledTranslationModel, TranslationModelStatus } from "./services/translation-model-contract";
 import type { StreamEventListInput, StreamEventListResult } from "./services/stream-event-ipc-contract";
 import type { TwitchAuthOverview, TwitchConnectionOverview, TwitchCustomRewardsOverview, TwitchSubscriptionsOverview } from "./twitch/overview-contract";
@@ -141,6 +141,7 @@ export type DociaiApi = {
     cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>;
     status(): Promise<Result<TranslationStatus>>;
     probeRuntime(): Promise<Result<NativeRuntimeProbeResult>>;
+    probeWorker(): Promise<Result<TranslationWorkerProbeResult>>;
     warmUp(): Promise<Result<{ warmedUp: true }>>;
     model: {
       status(): Promise<Result<TranslationModelStatus>>;

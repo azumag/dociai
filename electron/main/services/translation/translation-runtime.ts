@@ -1,14 +1,15 @@
 // 翻訳runtime本体 (issue #257 Phase 2, #261)。transformers.js + ONNX (Xenova/m2m100_418M,
 // issue #259でベンチマーク済み: 量子化ONNX一式で約650MB、macOS arm64実測で翻訳あたり平均960ms)
-// をMain processで直接実行する。モデルは初回翻訳要求時に遅延ロードし、以降は常駐させて
-// 再利用する (ロードには約22秒かかるため、毎回ロードし直すと実用にならない)。
+// を実行する。モデルは初回翻訳要求時に遅延ロードし、以降は常駐させて再利用する (ロードには
+// 約22秒かかるため、毎回ロードし直すと実用にならない)。
 //
-// worker_threadは使わない: このリポジトリにworker_thread利用の前例が無く、既存の
-// LocalLlmService (node-llama-cpp) も同種のCPU重い推論をMain process上で直接実行している
-// (電子main process自体をブロックしない専用の仕組みは存在しない)。同じ前例に合わせ、
-// 新しい並行処理プリミティブを導入するリスクを避ける。onnxruntime-nodeのInferenceSession.run()
-// はネイティブ側で非同期実行されるため、Node側のイベントループを長時間占有はしない見込みだが、
-// 実測はしていない — 将来Main processの応答性が問題になった場合はworker_thread化を検討する。
+// このクラスはtranslation-worker.ts (worker_threadエントリ) の内部でのみ生成される。
+// onnxruntime-nodeのInferenceSession生成・run()は同期ネイティブ呼び出しであり (node_modules/
+// onnxruntime-node/lib/backend.ts)、Electron Main processのメインスレッドで直接実行すると
+// モデルロード (~22秒) や翻訳1件 (~960ms) の間アプリ全体が固まる。これをworker_threadで実行し、
+// Mainプロセス側のTranslationRuntimeClient (translation-runtime-client.ts) がメッセージ経由で
+// 呼ぶ。以前はworker_threadを使わない判断だったが、起動時のUI固まりが実測で確認されたため
+// worker化した (translation-runtime-client.tsのヘッダコメント参照)。
 //
 // signalによるキャンセルは「結果を待たない」ベストエフォートに限られる: onnxruntime-nodeの
 // 推論呼び出し自体には外部からの中断機構が無く、一度開始した推論はネイティブ側で最後まで走る。
@@ -26,7 +27,9 @@
 // 失敗/停止しても翻訳機能だけがunavailableになるだけで、アプリ全体の起動は妨げない。
 const LOAD_TIMEOUT_MS = 120_000; // モデルロード自体(~20-30秒)に加え、import自体が異常に
 // 遅い/停止するケースに備えた上限。TranslationService側のSERVICE_TIMEOUT_MSより長く取り、
-// 「読み込みタイムアウト」と「翻訳1件のtimeout」を混同しないようにする。
+// 「読み込みタイムアウト」と「翻訳1件のtimeout」を混同しないようにする。この値は
+// translation-runtime-client.tsのDEFAULT_LOAD_TIMEOUT_MSと一致させること — 実際にworkerへ
+// 渡るのはworkerData経由のクライアント側の値であり、こちらはworker側の保険の既定値。
 
 import type { TranslationRuntimeState } from "../../../shared/services/translation-contract";
 

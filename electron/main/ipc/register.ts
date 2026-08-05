@@ -285,6 +285,10 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
   // permanently dlopens the native binary and must not be called from renderer production code —
   // only scripts/release/smoke-packaged.mjs's packaged-app CI check calls this today).
   register(CHANNELS.TRANSLATION_RUNTIME_PROBE, (event, input) => { expectNoInput(input); return probeNativeRuntime(); }, options);
+  // worker_thread版probe: translation-runtime-client.tsのprobeTranslationWorker()が、モデルを
+  // ロードせずにworkerを起動してping/pongを往復する。rendererの本番コードからは呼ばれず、
+  // smoke-packaged.mjsのpackaged CI検証専用 (issue #267のnative probeと同じ位置づけ)。
+  register(CHANNELS.TRANSLATION_WORKER_PROBE, (event, input) => { expectNoInput(input); return options.translationService.probeWorker(); }, options);
   // 実際のコメントが届く前にモデルロード(~22秒)を終わらせておくためのfire-and-forget呼び出し
   // (boot.js側)。translationService.warmUp()自体が失敗を飲み込むため、ここも{warmedUp:true}を
   // 返すだけで失敗をrejectしない — 呼び出し元は結果を待たない設計。

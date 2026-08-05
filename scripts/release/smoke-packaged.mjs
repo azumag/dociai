@@ -145,6 +145,16 @@ try {
     assert.equal(runtimeProbe.value.ok, false, `expected the native onnxruntime-node load to fail on an unsupported target (${manifest.platform}/${manifest.arch}), but it reported success`);
     assert.equal(runtimeProbe.value.reason, manifest.reason, "the runtime's unsupported-target error must match collect-native.mjs's own recorded reason");
   }
+  // worker_thread版翻訳engineのprobe: モデルはロードせず、worker fileの解決 (extraResources) →
+  // bundleのロード → worker_threadの起動 (ping/pong) までがpackaged buildで通ることを自動検証
+  // する。Mainプロセスでonnxruntime-nodeをdlopenするnative-probe (上) はもはや本番の翻訳経路
+  // ではなくなったため、このworker probeが実経路のCIカバレッジになる。なおpingだけでは
+  // transformers.jsのモジュール初期化 (= onnxruntime-node-shimの評価) は走らない — shim評価
+  // 込みの実翻訳経路はdev向けのtest:electron:translationが担い、packagedのshim分岐は実際の
+  // packaged実行 (test:packaged) でのモデル導入後に確認する。
+  const workerProbe = await consolePage.evaluate(() => window.dociai.translation.probeWorker());
+  assert.equal(workerProbe.ok, true, `translation:worker:probe IPC call itself failed: ${JSON.stringify(workerProbe)}`);
+  assert.equal(workerProbe.value.ok, true, `expected the translation worker to boot in the packaged app: ${JSON.stringify(workerProbe.value)}`);
   const overlayAssets = await consolePage.evaluate(async (assetId) => {
     const list = await window.dociai.overlayAssets.list(); const playback = await window.dociai.overlayAssets.getPlaybackHandle({ assetId });
     if (!playback.ok) return { list, playback };
