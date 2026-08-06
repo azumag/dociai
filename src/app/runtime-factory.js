@@ -500,6 +500,9 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
     log: deps.log,
     onRead: onTopicRead,
     isRuntimeEnabled: deps.isTopicsRuntimeEnabled,
+    // issue #278: タイトル単位dedupe履歴。newsと同じくboot.jsの単一インスタンスを渡し、
+    // config reload をまたいで重複排除記憶を維持する。
+    ...(deps.topicHistoryStore ? { historyStore: deps.topicHistoryStore } : {}),
   }));
 
   const topicBufferedReader = define("topicBufferedReader", () => new BufferedReader({
@@ -514,6 +517,7 @@ export async function buildDociaiRuntime({ config, generation, deps, define, exp
       onRead: onTopicRead,
       isRuntimeEnabled: deps.isTopicsRuntimeEnabled,
       store: topicReader.store,
+      historyStore: topicReader.historyStore,
     }),
     buffer: topicBuffer,
     log: deps.log,
