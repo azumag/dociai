@@ -280,7 +280,7 @@ test("a later comment is not blocked behind an earlier one whose adapter promise
   assert.equal(speechQueue.items[0].text, "次のコメント", "the first comment's stuck translate() must not block the second comment forever");
 });
 
-test("maxPendingComments overflow drops the oldest still-queued comment and logs a warning", async () => {
+test("maxPendingComments overflow never drops a queued comment; it only logs a warning (issue #277)", async () => {
   const config = baseConfig({ onFailure: "skip", maxPendingComments: 1 }, { includeAuthor: false });
   const speechQueue = fakeSpeechQueue();
   const adapter = delayedAdapter({
@@ -296,10 +296,8 @@ test("maxPendingComments overflow drops the oldest still-queued comment and logs
   pipeline.submit({ id: "a", author: "A", text: "first comment goes here right now" });
   pipeline.submit({ id: "b", author: "B", text: "second comment follows soon after that" });
   pipeline.submit({ id: "c", author: "C", text: "third comment shows up a bit later" });
-  await waitFor(() => speechQueue.items.length >= 2);
-  // "a" is already active (shifted out for processing, not sitting in the pending array) so it
-  // still finishes; "b" was pushed onto the 1-slot pending queue and then evicted once "c"
-  // arrived while that single slot was already full.
-  assert.deepEqual(speechQueue.items.map((item) => item.text), ["一件目", "三件目"]);
+  await waitFor(() => speechQueue.items.length >= 3);
+  // 上限超過でもコメントは破棄されず、全件が順番に読み上げられる (issue #277)。
+  assert.deepEqual(speechQueue.items.map((item) => item.text), ["一件目", "二件目", "三件目"]);
   assert.ok(warnings.some((entry) => entry.level === "warn" && entry.message.includes("上限")));
 });

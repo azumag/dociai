@@ -117,10 +117,10 @@ export class SpeechQueue {
   // queue (never on drop). Callers such as a news/topic pipeline's onRead broadcast, or
   // GeneratedSpeechBuffer's own per-generation handler (src/readers/generated-speech-buffer.js),
   // rely on this firing at real-queue time.
-  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt, commentId, metadata, onDelivered }) {
+  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt, commentId, metadata, preserve, onDelivered }) {
     const engines = [...this.scheduler.pending, ...(this.current ? [this.current] : [])].map((item) => item.voice?.engine ?? this.#defaultEngine());
     this.backends.validateMix([...engines, voice?.engine ?? this.#defaultEngine()]);
-    const item = this.scheduler.enqueue({ personaId, personaName, text, voice, source, priority, deadlineAt, commentId, metadata });
+    const item = this.scheduler.enqueue({ personaId, personaName, text, voice, source, priority, deadlineAt, commentId, metadata, preserve });
     // The item is already genuinely enqueued at this point — a throwing onDelivered (e.g. a
     // console/OBS broadcast handler bug) must never stall notify/pump behind it, nor propagate
     // out of enqueue() into a caller (like the news pipeline) that would otherwise treat it as a
