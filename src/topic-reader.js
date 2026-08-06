@@ -152,13 +152,16 @@ export class TopicReader {
             this.store.resetUnread(item.processingKey, this.generation, this.clock());
             continue;
           }
-          this.store.markRead(item.processingKey, this.generation, this.clock());
-          // issue #278: commit(markRead)成功後にだけタイトル単位履歴へ記録する。
-          // キューでdropped→resetUnreadされた項目はここに到達しないため、再試行を妨げない。
-          const deliveredKeys = deriveIdentityKeys(item);
-          this.historyStore.recordDelivered({ candidateId: item.processingKey, titleKey: deliveredKeys.titleKey, topicKey: deliveredKeys.topicKey, urlHash: deliveredKeys.urlHash, sourceId: item.sourceName ?? "unknown" }, this.clock());
-          this.lastRunResult.succeeded++;
-          this.lastSuccessAt = new Date(this.clock());
+          // commit(markRead)成功時にだけ履歴へ記録する (issue #278)。markReadが失敗するのは
+          // 通常の流れでは起こらないが (stateがprocessing以外になった場合など)、記録だけ先に
+          // 進んで未読のまま30日間重複排除されるのを防ぐため、成功時だけを契約にする。
+          const committed = this.store.markRead(item.processingKey, this.generation, this.clock());
+          if (committed) {
+            const deliveredKeys = deriveIdentityKeys(item);
+            this.historyStore.recordDelivered({ candidateId: item.processingKey, titleKey: deliveredKeys.titleKey, topicKey: deliveredKeys.topicKey, urlHash: deliveredKeys.urlHash, sourceId: item.sourceName ?? "unknown" }, this.clock());
+            this.lastRunResult.succeeded++;
+            this.lastSuccessAt = new Date(this.clock());
+          }
         } catch (e) {
           if (isCancellation(e)) {
             this.store.resetUnread(item.processingKey, this.generation, this.clock());

@@ -473,6 +473,48 @@ test("TopicReader does not skip the kept item when a duplicate shares its proces
   assert.equal(reader.status().counts.read, 1);
 });
 
+test("TopicReader history-filtered items do not consume the maxItems slot (issue #278)", async () => {
+  const now = { value: 1_000 };
+  const reads = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    onRead: ({ item }) => reads.push(item.guid),
+  });
+  // run1: お題Aを読み、タイトル履歴に記録する。
+  reader.fetchAll = async () => reader.refineItems([{ guid: "todoist:1", title: "お題A", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  // run2: 履歴で弾かれる「お題A (別タスクID)」と未読の「お題B」が混在。
+  // maxItems: 1 でも履歴で弾かれた項目が枠を消費せず、Bが読まれる。
+  reader.fetchAll = async () => reader.refineItems([
+    { guid: "todoist:3", title: "お題A", sourceName: "todoist" },
+    { guid: "todoist:2", title: "お題B", sourceName: "todoist" },
+  ]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(reads, ["todoist:1", "todoist:2"], "履歴で弾かれた項目が枠を消費せず、後続の候補が読まれる");
+});
+
+test("TopicReader topics.dedupe: false disables both batch and history dedupe (issue #278)", async () => {
+  const now = { value: 1_000 };
+  const reads = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 2, dedupe: false } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    onRead: ({ item }) => reads.push(item.guid),
+  });
+  reader.fetchAll = async () => reader.refineItems([
+    { guid: "todoist:1", title: "お題A", sourceName: "todoist" },
+    { guid: "todoist:2", title: "お題A", sourceName: "todoist" },
+  ]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(reads, ["todoist:1", "todoist:2"], "dedupe: falseなら同一バッチ内の重複も両方読む");
+
+  // 履歴チェックも無効のため、同じお題が別タスクIDで再登場しても読む。
+  reader.fetchAll = async () => reader.refineItems([{ guid: "todoist:3", title: "お題A", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(reads, ["todoist:1", "todoist:2", "todoist:3"]);
+});
+
 test("TopicReader dropped-at-enqueue items stay retryable — history is only recorded on delivery (issue #278)", async () => {
   const now = { value: 1_000 };
   const reads = [];
