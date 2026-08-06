@@ -41,6 +41,7 @@ test("translation.enabled: false stays fully synchronous — byte-identical to t
   assert.equal(speechQueue.items.length, 1, "enqueue must happen synchronously inside submit(), with no microtask delay");
   assert.equal(speechQueue.items[0].text, "hello");
   assert.equal(speechQueue.items[0].personaId, COMMENT_READER_ID);
+  assert.equal(speechQueue.items[0].preserve, true, "コメント項目は自動破棄されないpreserve付きでenqueueされる (issue #277)");
 });
 
 test("a Japanese comment with translation enabled also stays on the synchronous fast path", () => {

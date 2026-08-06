@@ -73,7 +73,8 @@ export class CommentSpeechPipeline {
     const maxPending = Math.max(1, Number(cr.translation?.maxPendingComments) || 20);
     // issue #277: コメントは絶対に自動破棄しない。上限は警告の閾値としてのみ使う
     // (翻訳エンジンが遅くても FIFO で順番に処理され、読み上げは失われない)。
-    if (this.#queue.length >= maxPending) {
+    // 上限をまたいだ瞬間に1回だけ警告し、持続的な流入で毎回は鳴らさない。
+    if (this.#queue.length === maxPending) {
       this.#log(`翻訳待ちコメントが上限(${maxPending}件)を超えましたが、破棄せず順番を待たせます (合計${this.#queue.length + 1}件)`, "warn");
     }
     this.#queue.push({ comment, cr, result });

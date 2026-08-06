@@ -154,11 +154,8 @@ export class SpeechScheduler {
   }
 
   #makeRoom(incoming, candidates, reason) {
-    // preserve項目 (issue #277: コメント読み上げ) は破棄候補にしない。候補がすべて
-    // preserve (例: コメントだけがmaxPendingまで溜まっている) のときは何も破棄せず
-    // 受け入れる — 「新しい項目のために古いコメントを黙って失う」を起きなくする。
+    // preserve項目 (issue #277: コメント読み上げ) は破棄候補にしない。
     const removable = candidates.filter((entry) => !entry.preserve).sort((a, b) => a.priority - b.priority || a.sequence - b.sequence);
-    if (!removable.length) return true;
     if (this.policy.overflow === "drop-new") { this.#drop(incoming, reason); return false; }
     if (this.policy.overflow === "aggregate" && this.policy.aggregate) {
       const target = removable[0];
@@ -167,6 +164,9 @@ export class SpeechScheduler {
     const target = this.policy.overflow === "replace-latest"
       ? [...removable].sort((a, b) => b.sequence - a.sequence)[0]
       : removable[0];
+    // 追い出し候補がpreserveだけ (または皆無) のときは、コメントを守るために新規項目を
+    // 除外する。コメントが失われることはない (news/topicsはdrop→resetUnreadで再試行される)。
+    // drop-new (上) と同じく、キューが上限超過で増え続けるのも防ぐ。
     if (!target || target.priority > incoming.priority) { this.#drop(incoming, `${reason}-priority-protected`); return false; }
     this.pending.splice(this.pending.indexOf(target), 1);
     this.#drop(target, reason);
