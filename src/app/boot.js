@@ -36,6 +36,10 @@ const commentStore = new CommentStore({ limit: 80 });
 // survives config reload — buildDociaiRuntime() rebuilds the whole component graph per
 // generation, but this must not reset "already delivered" memory each time.
 const newsHistoryStore = new MemoryNewsHistoryStore();
+// issue #278: topics (Todoist等のお題) のタイトル単位重複排除履歴。newsとは別インスタンスに
+// し、ニュースのsource diversity集計やタイトル履歴と混ざらないようにする。newsHistoryStore
+// と同じくconfig reloadをまたいで生存させるためmodule scopeで1回だけ生成する。
+const topicHistoryStore = new MemoryNewsHistoryStore();
 const manualSource = new ManualCommentSource();
 const runtimeController = new BrowserRuntimeController();
 
@@ -874,6 +878,7 @@ appRuntime = new AppRuntime({
     runtimeController,
     commentStore,
     newsHistoryStore,
+    topicHistoryStore,
     manualSource,
     platform,
     // issue #257 Phase 2 (#261): Browser版・実IPC未接続の場合はundefinedのまま渡し、

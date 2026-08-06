@@ -9,12 +9,12 @@ import { isCancellation } from "../../src/runtime/request-registry.js";
 
 const persona = { id: "reader", name: "Reader", connector: "mock", enabled: true, voice: {} };
 
-function readerDependencies({ connector, now, store = new MemoryItemProcessingStore({ clock: () => now.value }) }) {
+function readerDependencies({ connector, now, store = new MemoryItemProcessingStore({ clock: () => now.value }), speechQueue = { enqueue: (item) => { item?.onDelivered?.(); return { state: "waiting" }; } } }) {
   return {
     getConnector: () => connector,
     personaRouter: { get: () => persona, defaultPersona: () => persona },
     contextBuilder: { build: () => ({ messages: [{ role: "user", content: "summarize" }], debugText: "safe debug" }) },
-    speechQueue: { enqueue: (item) => { item?.onDelivered?.(); return { state: "waiting" }; } },
+    speechQueue,
     store,
     clock: () => now.value,
   };
@@ -405,4 +405,94 @@ test("AI-backed readers warn about output limits before handing text to speech",
     assert.ok(warningIndex >= 0, `${key} reader must report the AI output limit`);
     assert.ok(warningIndex < speechIndex, `${key} reader must diagnose the limit before speech`);
   }
+});
+
+test("TopicReader never reads the same topic twice across runs with different task ids (issue #278)", async () => {
+  const now = { value: 1_000 };
+  const reads = [];
+  const warnings = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    onRead: ({ item }) => reads.push(item.guid),
+    log: (message, level) => warnings.push({ message, level }),
+  });
+  reader.fetchAll = async () => reader.refineItems([{ guid: "todoist:1", title: "お題A", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(reads, ["todoist:1"]);
+  assert.equal(reader.status().counts.read, 1);
+
+  // 同じお題が別タスクIDとして再登場 (Todoist完了失敗や手動再追加) しても、タイトル履歴で弾く。
+  reader.fetchAll = async () => reader.refineItems([{ guid: "todoist:2", title: "お題A", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(reads, ["todoist:1"], "同じタイトルの話題は二度読まない");
+  assert.equal(reader.status().counts.read, 1);
+  assert.equal(reader.status().counts.unread, 1, "履歴で弾かれた項目は未読のまま残る (newsと同じ挙動)");
+  assert.ok(warnings.some((w) => w.message.includes("重複")), "重複スキップはログで可視化される");
+});
+
+test("TopicReader marks within-batch duplicate titles skipped so they never become candidates again (issue #278)", async () => {
+  const now = { value: 1_000 };
+  const reads = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    onRead: ({ item }) => reads.push(item.guid),
+  });
+  reader.fetchAll = async () => reader.refineItems([
+    { guid: "todoist:1", title: "お題A", sourceName: "todoist" },
+    { guid: "todoist:2", title: "お題A", sourceName: "todoist" },
+  ]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(reads, ["todoist:1"]);
+  assert.equal(reader.status().counts.skipped, 1, "バッチ内重複はストア上でskippedになる");
+
+  // 翌runで重複側のタスクだけが残っても、skipped済みのため候補にならない。
+  reader.fetchAll = async () => reader.refineItems([{ guid: "todoist:2", title: "お題A", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(reads, ["todoist:1"], "skipped済みの重複タスクは二度読まれない");
+  assert.equal(reader.status().counts.read, 1);
+});
+
+test("TopicReader does not skip the kept item when a duplicate shares its processingKey (issue #278)", async () => {
+  const now = { value: 1_000 };
+  const reads = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "summary" }) } }),
+    onRead: ({ item }) => reads.push(item.guid),
+  });
+  // 同一タスク (同一guid・同一source) がfetch結果に重複して含まれるケース。
+  reader.fetchAll = async () => reader.refineItems([
+    { guid: "todoist:1", title: "お題A", sourceName: "todoist" },
+    { guid: "todoist:1", title: "お題A", sourceName: "todoist" },
+  ]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(reads, ["todoist:1"], "採用側のタスクは読み上げられる");
+  assert.equal(reader.status().counts.skipped, 0, "採用項目と同じキーの重複はskippedにしない");
+  assert.equal(reader.status().counts.read, 1);
+});
+
+test("TopicReader dropped-at-enqueue items stay retryable — history is only recorded on delivery (issue #278)", async () => {
+  const now = { value: 1_000 };
+  const reads = [];
+  let drop = true;
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({
+      now,
+      connector: { chat: async () => ({ text: "summary" }) },
+      speechQueue: { enqueue: (item) => { if (drop) return { state: "dropped" }; item?.onDelivered?.(); return { state: "waiting" }; } },
+    }),
+    onRead: ({ item }) => reads.push(item.guid),
+  });
+  reader.fetchAll = async () => reader.refineItems([{ guid: "todoist:1", title: "お題A", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  assert.deepEqual(reads, [], "dropped時はonReadもTodoist完了も発火しない");
+  assert.equal(reader.status().counts.unread, 1, "dropped→resetUnreadで再試行可能");
+
+  drop = false;
+  await reader.run({ generation: 1 });
+  assert.deepEqual(reads, ["todoist:1"], "履歴に記録されていないため再試行で読まれる");
+  assert.equal(reader.status().counts.read, 1);
 });

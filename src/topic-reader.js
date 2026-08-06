@@ -8,6 +8,9 @@ import { createReaderItemKey, readerStatus, retryOptions } from "./readers/reade
 import { retryDecision } from "./readers/retry-policy.js";
 import { buildOutputLimitWarning, isOutputLimitFinishReason } from "./ai-finish-reason.js";
 import { resolvePersona } from "./personas/persona-selection-policy.js";
+import { deriveIdentityKeys } from "./news/selection/dedupe-candidates.js";
+import { MemoryNewsHistoryStore } from "./news/selection/memory-news-history-store.js";
+import { NEWS_HISTORY_DEFAULTS } from "./news/selection/news-history-store.js";
 
 function normalizeTitle(title) {
   return (title ?? "")
@@ -23,7 +26,7 @@ function parseDate(value) {
 }
 
 export class TopicReader {
-  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, webResearcher = null, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), clock = () => Date.now(), random = Math.random, isRuntimeEnabled = () => true }) {
+  constructor({ config, getConnector, personaRouter, contextBuilder, speechQueue, webResearcher = null, log = () => {}, onRead = () => {}, store = new MemoryItemProcessingStore(), historyStore = null, clock = () => Date.now(), random = Math.random, isRuntimeEnabled = () => true }) {
     this.config = config;
     this.getConnector = getConnector;
     this.personaRouter = personaRouter;
@@ -34,6 +37,10 @@ export class TopicReader {
     this.onRead = onRead;
     this.store = store;
     this.clock = clock;
+    // issue #278: タイトル単位の重複排除履歴 (news と同じ契約)。既定はbounded memory実装で、
+    // runtime-factory経由ではboot.jsの単一インスタンス (deps.topicHistoryStore) が渡され、
+    // config reload をまたいで生存する。fake clockテストのために this.clock と同期する。
+    this.historyStore = historyStore ?? new MemoryNewsHistoryStore({ clock: this.clock });
     this.random = random;
     this.isRuntimeEnabled = isRuntimeEnabled;
     this.generation = 0;
@@ -79,7 +86,19 @@ export class TopicReader {
       const now = this.clock();
       for (const item of items) this.store.ensure({ ...item, key: item.processingKey }, this.generation, now);
       const candidateKeys = new Set(this.store.candidates(this.generation, now).map((record) => record.key));
-      const picks = items.filter((item) => candidateKeys.has(item.processingKey)).slice(0, context.maxItems ?? topics.maxItems ?? 3);
+      // issue #278: タイトル単位のdedupeを slice() より前で行う。maxItems: 1 (buffered path)
+      // のときに履歴で弾かれた項目が枠を消費して、後ろの有効な候補が読まれなくなる事故を避ける。
+      const maxItems = context.maxItems ?? topics.maxItems ?? 3;
+      const picks = [];
+      for (const item of items) {
+        if (!candidateKeys.has(item.processingKey)) continue;
+        if (this.#isHistoryDuplicate(item, now)) {
+          this.log(`話題の重複 (以前に読み上げ済み) のためスキップします [${item.title}]`, "warn");
+          continue;
+        }
+        picks.push(item);
+        if (picks.length >= maxItems) break;
+      }
       this.lastRunResult = { candidates: candidateKeys.size, processed: 0, succeeded: 0, retryScheduled: 0, failed: 0 };
       this.log(`話題候補 ${items.length}件 (再処理可能 ${candidateKeys.size}件、読み上げ ${picks.length}件)`);
       if (!picks.length) return;
@@ -134,6 +153,10 @@ export class TopicReader {
             continue;
           }
           this.store.markRead(item.processingKey, this.generation, this.clock());
+          // issue #278: commit(markRead)成功後にだけタイトル単位履歴へ記録する。
+          // キューでdropped→resetUnreadされた項目はここに到達しないため、再試行を妨げない。
+          const deliveredKeys = deriveIdentityKeys(item);
+          this.historyStore.recordDelivered({ candidateId: item.processingKey, titleKey: deliveredKeys.titleKey, topicKey: deliveredKeys.topicKey, urlHash: deliveredKeys.urlHash, sourceId: item.sourceName ?? "unknown" }, this.clock());
           this.lastRunResult.succeeded++;
           this.lastSuccessAt = new Date(this.clock());
         } catch (e) {
@@ -248,14 +271,29 @@ export class TopicReader {
   refineItems(items) {
     const topics = this.config.topics ?? {};
     const seen = new Set();
+    const keptKeys = new Map();
     const refined = [];
     for (const item of items) {
       const key = normalizeTitle(item.title);
       if (topics.dedupe !== false && key) {
-        if (seen.has(key)) continue;
+        if (seen.has(key)) {
+          // issue #278: 同一バッチ内の重複タイトルはバッチから外すだけでなく、ストア上でも
+          // skipped にしておく — 別タスクID (guid) で再登録された重複が、後のrunで再び
+          // 候補にならないようにする。ただし最初に採用した項目と同じキー (同一タスクが
+          // 別ソースから二度取得された場合) のときは、採用済み項目をskippedへ上書きして
+          // 読まれなくならないよう、ensure+skip しない。
+          const duplicateKey = createReaderItemKey(item, "topics");
+          if (duplicateKey !== keptKeys.get(key)) {
+            this.store.ensure({ ...item, key: duplicateKey }, this.generation, this.clock());
+            this.store.skip(duplicateKey, this.generation, this.clock());
+          }
+          continue;
+        }
         seen.add(key);
       }
-      refined.push({ ...item, normalizedTitle: key, processingKey: createReaderItemKey(item, "topics") });
+      const processingKey = createReaderItemKey(item, "topics");
+      keptKeys.set(key, processingKey);
+      refined.push({ ...item, normalizedTitle: key, processingKey });
     }
     refined.sort((a, b) => {
       const bt = Date.parse(b.publishedAt ?? "") || 0;
@@ -263,6 +301,19 @@ export class TopicReader {
       return bt - at;
     });
     return refined;
+  }
+
+  // issue #278: タイトル単位の重複排除。news の filterCandidates と同じ契約
+  // (hasDeliveredTitle: 永続 / hasRecentTopic: 24h cooldown) を使う。
+  // guid (タスクID) が変わっても同じ話題なら二度読まない。
+  #isHistoryDuplicate(item, now) {
+    const topics = this.config.topics ?? {};
+    if (topics.dedupe === false) return false;
+    const { titleKey, topicKey } = deriveIdentityKeys(item);
+    if (!titleKey) return false;
+    if (this.historyStore.hasDeliveredTitle(titleKey)) return true;
+    if (topicKey && this.historyStore.hasRecentTopic(topicKey, now, NEWS_HISTORY_DEFAULTS.topicCooldownHours * 60 * 60 * 1000)) return true;
+    return false;
   }
 
   status() {
