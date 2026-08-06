@@ -21,9 +21,13 @@ export class SpeechScheduler {
     this.expire(now);
     const item = createSpeechItem(input, now);
     if (item.deadlineAt != null && item.deadlineAt <= now) return this.#drop(item, "deadline-expired");
-    const sourceItems = () => this.pending.filter((entry) => entry.source === item.source);
-    if (sourceItems().length >= this.policy.maxPendingPerSource && !this.#makeRoom(item, sourceItems(), "source-overflow")) return item;
-    if (this.pending.length >= this.policy.maxPending && !this.#makeRoom(item, this.pending, "global-overflow")) return item;
+    // preserve項目 (issue #277: コメント読み上げ) は、待機時間・キュー上限による自動破棄の
+    // 対象外。期限切れで失われないよう、上限チェックもスキップして常に受け入れる。
+    if (!item.preserve) {
+      const sourceItems = () => this.pending.filter((entry) => entry.source === item.source);
+      if (sourceItems().length >= this.policy.maxPendingPerSource && !this.#makeRoom(item, sourceItems(), "source-overflow")) return item;
+      if (this.pending.length >= this.policy.maxPending && !this.#makeRoom(item, this.pending, "global-overflow")) return item;
+    }
     this.pending.push(item);
     this.pending.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
     this.metrics.enqueued++;
@@ -110,7 +114,8 @@ export class SpeechScheduler {
     for (const item of existing) {
       const candidate = item;
       const sourceCount = this.pending.filter((entry) => entry.source === candidate.source).length;
-      if (sourceCount >= this.policy.maxPendingPerSource || this.pending.length >= this.policy.maxPending) {
+      // preserve項目 (issue #277: コメント読み上げ) はランタイム復元時の上限超過でも破棄しない。
+      if (!candidate.preserve && (sourceCount >= this.policy.maxPendingPerSource || this.pending.length >= this.policy.maxPending)) {
         this.#drop(candidate, "runtime-restore-overflow");
       } else {
         this.pending.push(candidate);
@@ -126,6 +131,8 @@ export class SpeechScheduler {
     if (this.held && !this.policy.expireWhileHeld) return 0;
     let count = 0;
     for (const item of [...this.pending]) {
+      // preserve項目 (issue #277: コメント読み上げ) は待機時間経過で破棄しない。
+      if (item.preserve) continue;
       if ((item.deadlineAt != null && item.deadlineAt <= now) || now - item.createdAt > this.policy.maxAgeMs) {
         this.pending.splice(this.pending.indexOf(item), 1);
         this.#drop(item, item.deadlineAt != null && item.deadlineAt <= now ? "deadline-expired" : "max-age");
@@ -147,15 +154,19 @@ export class SpeechScheduler {
   }
 
   #makeRoom(incoming, candidates, reason) {
-    const removable = [...candidates].sort((a, b) => a.priority - b.priority || a.sequence - b.sequence);
+    // preserve項目 (issue #277: コメント読み上げ) は破棄候補にしない。
+    const removable = candidates.filter((entry) => !entry.preserve).sort((a, b) => a.priority - b.priority || a.sequence - b.sequence);
     if (this.policy.overflow === "drop-new") { this.#drop(incoming, reason); return false; }
     if (this.policy.overflow === "aggregate" && this.policy.aggregate) {
       const target = removable[0];
       if (target && this.policy.aggregate(target, incoming)) { this.#drop(incoming, "aggregated"); return false; }
     }
     const target = this.policy.overflow === "replace-latest"
-      ? [...candidates].sort((a, b) => b.sequence - a.sequence)[0]
+      ? [...removable].sort((a, b) => b.sequence - a.sequence)[0]
       : removable[0];
+    // 追い出し候補がpreserveだけ (または皆無) のときは、コメントを守るために新規項目を
+    // 除外する。コメントが失われることはない (news/topicsはdrop→resetUnreadで再試行される)。
+    // drop-new (上) と同じく、キューが上限超過で増え続けるのも防ぐ。
     if (!target || target.priority > incoming.priority) { this.#drop(incoming, `${reason}-priority-protected`); return false; }
     this.pending.splice(this.pending.indexOf(target), 1);
     this.#drop(target, reason);

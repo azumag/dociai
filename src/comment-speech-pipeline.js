@@ -71,9 +71,11 @@ export class CommentSpeechPipeline {
     }
 
     const maxPending = Math.max(1, Number(cr.translation?.maxPendingComments) || 20);
-    if (this.#queue.length >= maxPending) {
-      this.#queue.shift();
-      this.#log(`翻訳待ちコメントが上限(${maxPending}件)を超えたため、最も古い項目を読み上げずに破棄しました`, "warn");
+    // issue #277: コメントは絶対に自動破棄しない。上限は警告の閾値としてのみ使う
+    // (翻訳エンジンが遅くても FIFO で順番に処理され、読み上げは失われない)。
+    // 上限をまたいだ瞬間に1回だけ警告し、持続的な流入で毎回は鳴らさない。
+    if (this.#queue.length === maxPending) {
+      this.#log(`翻訳待ちコメントが上限(${maxPending}件)を超えましたが、破棄せず順番を待たせます (合計${this.#queue.length + 1}件)`, "warn");
     }
     this.#queue.push({ comment, cr, result });
     void this.#drain();
@@ -173,7 +175,8 @@ export class CommentSpeechPipeline {
       // (commentReaderIntervalMs) を挟むと「原文 → 無音N秒 → 同じコメントの翻訳」になって
       // しまう (PRレビュー指摘)。1件目 (index===0) は他コメントとの間隔を通常どおり尊重する。
       const metadata = index > 0 ? { skipCommentReaderInterval: true } : undefined;
-      this.#speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice, commentId: comment.id, metadata });
+      // preserve: コメントは待機時間・キュー上限で自動破棄されない (issue #277)。
+      this.#speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice, commentId: comment.id, metadata, preserve: true });
     });
   }
 

@@ -87,6 +87,68 @@ test("expiry policy handles deadlines, max age, and held queues", () => {
   assert.equal(scheduler.enqueue({ text: "late", deadlineAt: now }).dropReason, "deadline-expired");
 });
 
+test("preserve items survive max-age expiry, overflow, holds, and restore (issue #277)", () => {
+  // --- max-age expiry + held queue: 保留中でも通常項目だけが期限切れになる ---
+  let now = 1_000;
+  const scheduler = new SpeechScheduler({ maxAgeMs: 1_000, maxPending: 10, maxPendingPerSource: 10, expireWhileHeld: true }, { now: () => now });
+  const comment = scheduler.enqueue({ text: "comment", preserve: true });
+  const plain = scheduler.enqueue({ text: "plain" });
+  scheduler.held = true;
+  now = 5_000;
+  assert.equal(scheduler.expire(), 1);
+  assert.equal(plain.state, "dropped");
+  assert.equal(comment.state, "waiting");
+  assert.equal(scheduler.pending.length, 1);
+  assert.equal(scheduler.pending[0], comment);
+
+  // --- overflow: 上限超過でもpreserveは破棄されず、新規の通常項目が代わりに除外される ---
+  const over = new SpeechScheduler({ maxPending: 2, maxPendingPerSource: 2, overflow: "drop-oldest" });
+  over.enqueue({ text: "c1", preserve: true });
+  over.enqueue({ text: "c2", preserve: true });
+  const incoming = over.enqueue({ text: "news" });
+  assert.equal(incoming.state, "dropped", "全候補がpreserveのときは新規の通常項目が除外される");
+  assert.ok(incoming.dropReason.includes("priority-protected"));
+  assert.equal(over.pending.length, 2, "preserve項目は上限を超えても保持される");
+
+  // --- runtime-restore-overflowでもpreserveは破棄されない。 ---
+  const restored = new SpeechScheduler({ maxPending: 1, maxPendingPerSource: 1 });
+  const kept = restored.enqueue({ text: "kept", preserve: true });
+  const alsoKept = restored.enqueue({ text: "also-kept" });
+  assert.equal(kept.state, "waiting");
+  assert.equal(alsoKept.state, "dropped", "preserveが破棄候補になれないため新規の通常項目は除外される");
+  const transfer = [...restored.pending];
+  const revived = new SpeechScheduler({ maxPending: 1, maxPendingPerSource: 1 });
+  const existingPreserve = revived.enqueue({ text: "existing-preserve", preserve: true });
+  const existingPlain = revived.enqueue({ text: "existing-plain" });
+  revived.restorePending(transfer);
+  const revivedKept = revived.pending.find((item) => item.text === "kept");
+  assert.ok(revivedKept, "preserve項目は復元時の上限超過でも破棄されない");
+  assert.equal(revivedKept.preserve, true, "preserveフラグは復元 (createSpeechItem再構築) をまたいで維持される");
+  assert.ok(revived.pending.some((item) => item.text === "existing-preserve"), "既存のpreserve項目も復元時上限超過で破棄されない");
+  assert.equal(existingPlain.state, "dropped", "復元時上限超過で破棄されるのは非preserveだけ");
+});
+
+test("preserve items are never chosen as overflow victims (issue #277)", () => {
+  const scheduler = new SpeechScheduler({ maxPending: 3, maxPendingPerSource: 3, overflow: "drop-oldest" });
+  const commentA = scheduler.enqueue({ text: "comment-a", source: "chat", preserve: true });
+  const commentB = scheduler.enqueue({ text: "comment-b", source: "chat", preserve: true });
+  const chatC = scheduler.enqueue({ text: "chat-c", source: "chat" });
+  const incoming = scheduler.enqueue({ text: "chat-d", source: "chat" });
+  assert.equal(commentA.state, "waiting");
+  assert.equal(commentB.state, "waiting");
+  assert.equal(chatC.state, "dropped", "追い出し対象はpreserve以外から選ばれる");
+  assert.equal(incoming.state, "waiting");
+});
+
+test("preserve items are skipped by the aggregate overflow hook (issue #277)", () => {
+  const scheduler = new SpeechScheduler({ maxPending: 1, maxPendingPerSource: 1, overflow: "aggregate", aggregate: (target, incoming) => { target.text += `+${incoming.text}`; return true; } });
+  const comment = scheduler.enqueue({ text: "one", preserve: true });
+  const incoming = scheduler.enqueue({ text: "two" });
+  assert.equal(comment.text, "one", "preserve項目はaggregateの対象にならない");
+  assert.equal(incoming.state, "dropped", "追い出し候補が無ければ新規の通常項目が除外される");
+  assert.ok(incoming.dropReason.includes("priority-protected"));
+});
+
 test("history trim cannot remove current or pending and snapshots are immutable", () => {
   const scheduler = new SpeechScheduler({ maxHistory: 1, maxPending: 10 });
   const current = scheduler.enqueue({ text: "current" });
