@@ -123,6 +123,11 @@ export class CaptionPolicy {
     if (!Number.isFinite(input.ageMs) || input.ageMs < 0) return { ok: false, reason: "expired" };
     const normalized = applyCaptionReplacements(normalizeCaptionText(input.text), this.#options.replacements);
     if (!normalized.length) return { ok: false, reason: "empty" };
+    // 置換後にもう一度、制御文字と長さを検査する。上の検査は worker から届いた生の本文に対する
+    // ものなので、置換辞書 (運用者が設定するもの) が制御文字を注入したり、展開で上限を超えたりすると
+    // すり抜けてしまう。「制御文字はTwitchへ届かない」を実際に保証しているのはこちら。
+    if (hasControlCharacters(normalized)) return { ok: false, reason: "control-characters" };
+    if (normalized.length > MAX_CAPTION_TEXT_CHARS) return { ok: false, reason: "too-long" };
     if (containsSourceLanguage(normalized)) return { ok: false, reason: "source-language-leak" };
     if (input.ageMs > this.#options.maxAgeMs) return { ok: false, reason: "expired" };
     if (normalized === this.#lastSent) return { ok: false, reason: "duplicate" };

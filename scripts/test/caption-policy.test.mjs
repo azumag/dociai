@@ -194,6 +194,20 @@ test("固有名詞置換は長いキーを優先し、置換結果を再走査�
   });
 });
 
+test("置換辞書が制御文字を注入したり上限を超えさせたりしても、置換後に弾かれる", async () => {
+  await withModules(({ CaptionPolicy }) => {
+    // 生の本文への検査だけでは足りない — 置換は検査の「後」に走るのですり抜けてしまう。
+    const injecting = new CaptionPolicy({ ...OPTIONS, replacements: { evening: "even\u0000ing" } });
+    assert.deepEqual(injecting.evaluate(caption(), { connectionGeneration: 0 }), { ok: false, reason: "control-characters" });
+    // 展開でMAX_CAPTION_TEXT_CHARS(500)を超える場合も同様
+    const expanding = new CaptionPolicy({ ...OPTIONS, replacements: { evening: "e".repeat(500) } });
+    assert.deepEqual(expanding.evaluate(caption(), { connectionGeneration: 0 }), { ok: false, reason: "too-long" });
+    // 正常な置換は従来どおり通る
+    const normal = new CaptionPolicy({ ...OPTIONS, replacements: { evening: "night" } });
+    assert.deepEqual(normal.evaluate(caption(), { connectionGeneration: 0 }).segments, ["Good night."]);
+  });
+});
+
 test("healthは上流から順に決まり、送出条件が揃ってはじめてsendingになる", async () => {
   await withModules(({ resolveCaptionHealth }) => {
     const base = {
@@ -281,6 +295,11 @@ test("captions有効時のenum・範囲を検証する", () => {
   assert.deepEqual(errorPaths(baseConfig({ enabled: true, obs: { host: "  " } })), ["captions.obs.host"]);
   assert.deepEqual(errorPaths(baseConfig({ enabled: true, replacements: [1, 2] })), ["captions.replacements"]);
   assert.deepEqual(errorPaths(baseConfig({ enabled: true, replacements: { ok: 3 } })), ["captions.replacements"]);
+  // 置換は字幕本文の検査より後に適用されるため、設定側でも制御文字を拒否する
+  assert.deepEqual(errorPaths(baseConfig({ enabled: true, replacements: { ok: "a\u0000b" } })), ["captions.replacements"]);
+  assert.deepEqual(errorPaths(baseConfig({ enabled: true, replacements: { "a\u0007b": "ok" } })), ["captions.replacements"]);
+  // タブ・改行は正規化で空白へ潰れるため許可する
+  assert.deepEqual(errorPaths(baseConfig({ enabled: true, replacements: { ok: "a\tb" } })), []);
 });
 
 test("OBSパスワードは設定exportに含まれず、legacy importではsecret storeへ分離される", () => {

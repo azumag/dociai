@@ -9,6 +9,10 @@ import { CURRENT_CONFIG_SCHEMA } from "./config-schema.js";
 import { validateEventTriggersConfig } from "../triggers/trigger-validation.js";
 import { isMiniMaxSearchConnector } from "./minimax-search-config.js";
 
+// C0/C1制御文字 (タブ・改行・復帰を除く)。electron/main/services/captions/caption-policy.ts の
+// CONTROL_CHARACTERS と同じ範囲 — あちらは送出直前の最後の砦、こちらは保存時に運用者へ知らせる。
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/;
+
 export function validateConfigStructure(config) {
   const issues = [];
   if (!config || typeof config !== "object" || Array.isArray(config)) return failureResult("structural-validation", [issue([], "type.object", "config root must be an object")], config);
@@ -82,6 +86,10 @@ export function validateConfigStructure(config) {
       issues.push(issue(["captions", "replacements"], "type.object", "replacementsはobjectで指定してください"));
     } else if (replacements && Object.entries(replacements).some(([from, to]) => typeof from !== "string" || !from || typeof to !== "string")) {
       issues.push(issue(["captions", "replacements"], "type.object", "replacementsは文字列のキーと値で指定してください"));
+    } else if (replacements && Object.entries(replacements).some(([from, to]) => CONTROL_CHARACTERS.test(from) || CONTROL_CHARACTERS.test(to))) {
+      // 置換は字幕本文の検査より後に適用されるため、ここで弾かないと設定経由で制御文字を
+      // 字幕へ注入できてしまう (Main側の caption-policy.ts も置換後に再検査して二重に防ぐ)。
+      issues.push(issue(["captions", "replacements"], "type.string", "replacementsに制御文字は指定できません"));
     }
   }
   const eventTriggersResult = validateEventTriggersConfig(config.eventTriggers);
