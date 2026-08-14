@@ -103,37 +103,49 @@ test("キューは上限で溢れた分を捨て、待ち時間を含めて期�
   await withModules(({ CaptionPolicy }) => {
     const policy = new CaptionPolicy({ ...OPTIONS, maxPending: 2 });
     // 同一発話の3分割: 文の先頭を残し、収まらない末尾を落とす (自分の先頭は追い出さない)
-    const dropped = policy.enqueue(["one", "two", "three"], { sequence: 1, now: 1_000, ageMs: 0 });
+    const dropped = policy.enqueue(["one", "two", "three"], { sequence: 1, now: 1_000, ageMs: 0, source: "one two three" });
     assert.equal(dropped.dropped, 1);
     assert.deepEqual(dropped.droppedSequences, [1]);
+    assert.deepEqual(dropped.droppedSources, ["one two three"]);
     assert.equal(policy.pending, 2);
     assert.equal(policy.take(1_000).caption.text, "one");
     assert.equal(policy.take(1_000).caption.text, "two");
     assert.equal(policy.take(1_000).caption, null);
     // 認識からの経過(ageMs) + キュー待ち時間 が maxAgeMs を超えたものは送らない
-    policy.enqueue(["late"], { sequence: 2, now: 1_000, ageMs: 4_000 });
+    policy.enqueue(["late"], { sequence: 2, now: 1_000, ageMs: 4_000, source: "late" });
     const taken = policy.take(2_500);
     assert.equal(taken.caption, null);
     assert.equal(taken.expired, 1);
   });
 });
 
-test("送出できなかった字幕は重複排除の記憶から外れ、言い直しが通る", async () => {
+test("送出できなかった字幕だけが重複排除の記憶から外れ、言い直しが通る", async () => {
   await withModules(({ CaptionPolicy }) => {
     const policy = new CaptionPolicy(OPTIONS);
     assert.equal(policy.evaluate(caption(), { connectionGeneration: 0 }).ok, true);
     assert.deepEqual(policy.evaluate(caption({ sequence: 2 }), { connectionGeneration: 0 }), { ok: false, reason: "duplicate" });
-    // OBS送出失敗・期限切れ・queue溢れでTwitchへ届かなかった場合に呼ばれる
-    policy.forgetLastSent();
+    // OBS送出失敗・期限切れ・queue溢れでTwitchへ届かなかった場合に、その字幕の全文を渡して呼ぶ
+    policy.forgetLastSent("Good evening.");
     assert.equal(policy.evaluate(caption({ sequence: 3 }), { connectionGeneration: 0 }).ok, true);
+  });
+});
+
+test("これから送出される字幕の記憶は、別の字幕を捨てても消えない", async () => {
+  await withModules(({ CaptionPolicy }) => {
+    const policy = new CaptionPolicy(OPTIONS);
+    assert.equal(policy.evaluate(caption(), { connectionGeneration: 0 }).ok, true);
+    // 溢れて捨てられたのは以前の字幕。記憶の主 ("Good evening.") はキューに残って送出される。
+    policy.forgetLastSent("An older caption.");
+    // 無条件に消していると、直後の同一文が通ってTwitchへ二重に出てしまう
+    assert.deepEqual(policy.evaluate(caption({ sequence: 4 }), { connectionGeneration: 0 }), { ok: false, reason: "duplicate" });
   });
 });
 
 test("clearQueueは世代を進めずキューだけを捨て、捨てたsequenceを返す", async () => {
   await withModules(({ CaptionPolicy }) => {
     const policy = new CaptionPolicy(OPTIONS);
-    policy.enqueue(["one"], { sequence: 1, now: 0, ageMs: 0 });
-    assert.deepEqual(policy.clearQueue(), { dropped: 1, droppedSequences: [1] });
+    policy.enqueue(["one"], { sequence: 1, now: 0, ageMs: 0, source: "one" });
+    assert.deepEqual(policy.clearQueue(), { dropped: 1, droppedSequences: [1], droppedSources: ["one"] });
     assert.equal(policy.pending, 0);
     assert.equal(policy.generation, 0);
   });
@@ -143,8 +155,8 @@ test("分割した字幕は自分自身の先頭segmentを追い出さず、収�
   await withModules(({ CaptionPolicy }) => {
     const policy = new CaptionPolicy({ ...OPTIONS, maxPending: 2 });
     // maxPending=2 のキューへ3分割の字幕を積む: 文の先頭 s1/s2 が残り、末尾 s3 が落ちる
-    const result = policy.enqueue(["s1", "s2", "s3"], { sequence: 7, now: 0, ageMs: 0 });
-    assert.deepEqual(result, { dropped: 1, droppedSequences: [7] });
+    const result = policy.enqueue(["s1", "s2", "s3"], { sequence: 7, now: 0, ageMs: 0, source: "s1 s2 s3" });
+    assert.deepEqual(result, { dropped: 1, droppedSequences: [7], droppedSources: ["s1 s2 s3"] });
     assert.equal(policy.take(0).caption.text, "s1");
     assert.equal(policy.take(0).caption.text, "s2");
     assert.equal(policy.take(0).caption, null);
@@ -154,10 +166,10 @@ test("分割した字幕は自分自身の先頭segmentを追い出さず、収�
 test("新しい発話は以前の発話を追い出して優先される", async () => {
   await withModules(({ CaptionPolicy }) => {
     const policy = new CaptionPolicy({ ...OPTIONS, maxPending: 2 });
-    policy.enqueue(["old1"], { sequence: 1, now: 0, ageMs: 0 });
-    policy.enqueue(["old2"], { sequence: 2, now: 0, ageMs: 0 });
-    const result = policy.enqueue(["new1"], { sequence: 3, now: 0, ageMs: 0 });
-    assert.deepEqual(result, { dropped: 1, droppedSequences: [1] });
+    policy.enqueue(["old1"], { sequence: 1, now: 0, ageMs: 0, source: "old1" });
+    policy.enqueue(["old2"], { sequence: 2, now: 0, ageMs: 0, source: "old2" });
+    const result = policy.enqueue(["new1"], { sequence: 3, now: 0, ageMs: 0, source: "new1" });
+    assert.deepEqual(result, { dropped: 1, droppedSequences: [1], droppedSources: ["old1"] });
     assert.equal(policy.take(0).caption.text, "old2");
     assert.equal(policy.take(0).caption.text, "new1");
   });

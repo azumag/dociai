@@ -37,10 +37,12 @@
     </dl>
 
     <section class="preview">
+      <!-- プレビューは認識のたび (発話中は毎秒複数回) 書き換わるため aria-live を付けない。
+           スクリーンリーダーへの通知は下の #message (role="status") が担う。 -->
       <h2>日本語認識 <span class="hint">(確定前はこのタブ内のみの表示)</span></h2>
-      <p id="preview-recognized" class="preview-text" aria-live="polite"></p>
+      <p id="preview-recognized" class="preview-text"></p>
       <h2>英語字幕</h2>
-      <p id="preview-caption" class="preview-text" aria-live="polite"></p>
+      <p id="preview-caption" class="preview-text"></p>
     </section>
 
     <p id="message" class="message" role="status" aria-live="polite"></p>

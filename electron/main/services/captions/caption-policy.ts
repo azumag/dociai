@@ -24,7 +24,9 @@ export type CaptionEvaluation =
   | { ok: true; segments: string[]; recognized: string; text: string }
   | { ok: false; reason: CaptionRejectReason };
 
-export type QueuedCaption = { sequence: number; text: string; enqueuedAt: number; initialAgeMs: number };
+// `source` は分割前の字幕全文。#lastSent (重複排除の記憶) と突き合わせるために持つ —
+// segmentだけだと、分割された字幕を捨てたときに「その字幕が記憶の主かどうか」が判定できない。
+export type QueuedCaption = { sequence: number; text: string; source: string; enqueuedAt: number; initialAgeMs: number };
 
 // C0/C1制御文字。タブ・改行・復帰だけは「認識器/翻訳器が挟んでくる正常な空白」として
 // normalizeCaptionText()が空白へ潰すので、ここでは違反扱いにしない。
@@ -136,49 +138,67 @@ export class CaptionPolicy {
   // 素直に head から追い出すと、maxCaptionCharsで3つ以上に分割された字幕が空のキューでも
   // 自分の s1 を追い出し、Twitchには文の途中から始まる断片だけが出てしまう。上限に収まらない
   // 分は末尾を落とし、先頭 (文の始まり) と読み順を残す。
-  enqueue(segments: string[], context: { sequence: number; now: number; ageMs: number }): { dropped: number; droppedSequences: number[] } {
+  enqueue(segments: string[], context: { sequence: number; now: number; ageMs: number; source: string }): { dropped: number; droppedSequences: number[]; droppedSources: string[] } {
     let dropped = 0;
     const droppedSequences: number[] = [];
+    const droppedSources: string[] = [];
     const drop = (entry: QueuedCaption | undefined): void => {
       dropped += 1;
-      if (entry && !droppedSequences.includes(entry.sequence)) droppedSequences.push(entry.sequence);
+      if (!entry) return;
+      if (!droppedSequences.includes(entry.sequence)) droppedSequences.push(entry.sequence);
+      if (!droppedSources.includes(entry.source)) droppedSources.push(entry.source);
     };
+    const entry = (text: string): QueuedCaption => ({ sequence: context.sequence, text, source: context.source, enqueuedAt: context.now, initialAgeMs: context.ageMs });
     for (const text of segments) {
       // まず以前の発話を追い出して席を空ける。
       while (this.#queue.length >= this.#options.maxPending && this.#queue[0].sequence !== context.sequence) drop(this.#queue.shift());
       // それでも空かない = この発話自身のsegmentだけでキューが埋まっている。末尾を落とす。
-      if (this.#queue.length >= this.#options.maxPending) { drop({ sequence: context.sequence, text, enqueuedAt: context.now, initialAgeMs: context.ageMs }); continue; }
-      this.#queue.push({ sequence: context.sequence, text, enqueuedAt: context.now, initialAgeMs: context.ageMs });
+      if (this.#queue.length >= this.#options.maxPending) { drop(entry(text)); continue; }
+      this.#queue.push(entry(text));
     }
-    return { dropped, droppedSequences };
+    return { dropped, droppedSequences, droppedSources };
   }
 
   // 送出直前に呼ぶ。キュー待ち時間を足したうえで期限切れを捨て、先頭1件だけを返す。
   // ageMsはworker側の相対時刻 (認識final -> 送信) なので、wall clockのずれに影響されない。
-  take(now: number): { caption: QueuedCaption | null; expired: number } {
+  take(now: number): { caption: QueuedCaption | null; expired: number; expiredSources: string[] } {
     let expired = 0;
+    const expiredSources: string[] = [];
     while (this.#queue.length) {
       const head = this.#queue[0];
-      if ((now - head.enqueuedAt) + head.initialAgeMs > this.#options.maxAgeMs) { this.#queue.shift(); expired += 1; continue; }
+      if ((now - head.enqueuedAt) + head.initialAgeMs > this.#options.maxAgeMs) {
+        this.#queue.shift();
+        expired += 1;
+        if (!expiredSources.includes(head.source)) expiredSources.push(head.source);
+        continue;
+      }
       this.#queue.shift();
-      return { caption: head, expired };
+      return { caption: head, expired, expiredSources };
     }
-    return { caption: null, expired };
+    return { caption: null, expired, expiredSources };
   }
 
   // 受理はしたが結局Twitchへ届かなかった (queue溢れ・期限切れ・OBS送出失敗) 場合に、
   // 重複排除の記憶を外す。外さないと「一度も出ていない字幕」と同じ文を言い直したときに
   // duplicateとして落ち続ける。
-  forgetLastSent(): void { this.#lastSent = ""; }
+  //
+  // 捨てた字幕の全文を渡すこと。無条件に消すと、記憶に入っているのは常に「最後に受理した字幕」=
+  // まだキューに残っていてこれから送出される字幕なので、古い字幕が溢れただけでこれから出る
+  // 字幕の記憶まで消え、直後に同じ文が届くとTwitchへ二重に出てしまう。
+  forgetLastSent(source: string): void { if (source === this.#lastSent) this.#lastSent = ""; }
 
   // 再接続直後・停止時に「古い字幕を後から流さない」ためのキュー破棄 (世代は据え置き)。
   // 捨てたsequence一覧も返す — 溢れ時と同じようにworkerへ破棄を伝えられるようにするため
   // (返さないと、ワーカータブ側の破棄件数だけが実際より少なく見える)。
-  clearQueue(): { dropped: number; droppedSequences: number[] } {
+  clearQueue(): { dropped: number; droppedSequences: number[]; droppedSources: string[] } {
     const droppedSequences: number[] = [];
-    for (const entry of this.#queue) if (!droppedSequences.includes(entry.sequence)) droppedSequences.push(entry.sequence);
+    const droppedSources: string[] = [];
+    for (const entry of this.#queue) {
+      if (!droppedSequences.includes(entry.sequence)) droppedSequences.push(entry.sequence);
+      if (!droppedSources.includes(entry.source)) droppedSources.push(entry.source);
+    }
     const dropped = this.#queue.length;
     this.#queue = [];
-    return { dropped, droppedSequences };
+    return { dropped, droppedSequences, droppedSources };
   }
 }

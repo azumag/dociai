@@ -198,8 +198,10 @@ export class CaptionWorkerHost {
     }
   }
 
-  // Host/Origin ともに自分のloopback originだけを許可する。Originヘッダが無いのは
-  // 非ブラウザからのアクセス (curl等) なので拒否する — 想定利用は常にChromeタブ。
+  // Host/Origin ともに自分のloopback originだけを許可する。Originヘッダが付いている場合は
+  // 必ず自分のoriginと一致していなければならない。ページ取得のGET (ブラウザのナビゲーション) は
+  // Originを送らないので、その場合だけ欠落を許す — こちらは一回限りのページ取得tokenで守られる。
+  // WebSocketのupgradeは必ずOriginが付くため、欠落していれば拒否する。
   #isLoopbackRequest(request: http.IncomingMessage): boolean {
     const allowedHosts = new Set([`127.0.0.1:${this.#port}`, `localhost:${this.#port}`]);
     const allowedOrigins = new Set([`http://127.0.0.1:${this.#port}`, `http://localhost:${this.#port}`]);

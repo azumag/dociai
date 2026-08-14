@@ -238,7 +238,7 @@ export class CaptionSession {
     this.#lastCaption = evaluation.text;
     // テスト字幕でキューが溢れた場合も、押し出された実ワーカー字幕の後処理 (ack・カウント・
     // 重複排除の巻き戻し) は #onCaption と同じように行う。
-    this.#applyOverflow(this.#policy.enqueue(evaluation.segments, { sequence: -1, now: this.#now(), ageMs: 0 }));
+    this.#applyOverflow(this.#policy.enqueue(evaluation.segments, { sequence: -1, now: this.#now(), ageMs: 0, source: evaluation.text }));
     const result = await this.#drain();
     this.#emit();
     return result;
@@ -303,7 +303,7 @@ export class CaptionSession {
     this.#counters.accepted += 1;
     this.#lastRecognized = evaluation.recognized;
     this.#lastCaption = evaluation.text;
-    const dropped = this.#policy.enqueue(evaluation.segments, { sequence: input.sequence, now: this.#now(), ageMs: input.ageMs });
+    const dropped = this.#policy.enqueue(evaluation.segments, { sequence: input.sequence, now: this.#now(), ageMs: input.ageMs, source: evaluation.text });
     this.#host.send({ type: "ack", sequence: input.sequence, accepted: true });
     this.#applyOverflow(dropped);
     if (this.#config.logCaptions) this.#options.log?.("英語CCを受理しました", { sequence: input.sequence, chars: evaluation.text.length, segments: evaluation.segments.length });
@@ -312,11 +312,13 @@ export class CaptionSession {
 
   // キュー溢れで押し出された字幕の後処理。溢れて捨てた分は、受理ackを出したあとでも
   // 破棄されたことをworkerへ伝え、一度も送れていない以上は重複排除の記憶からも外す。
-  #applyOverflow(dropped: { dropped: number; droppedSequences: number[] }): void {
+  #applyOverflow(dropped: { dropped: number; droppedSequences: number[]; droppedSources: string[] }): void {
     if (!dropped.dropped) return;
     this.#counters.rejected += dropped.dropped;
     for (const sequence of dropped.droppedSequences) if (sequence >= 0) this.#reject(sequence, "queue-overflow");
-    this.#policy.forgetLastSent();
+    // 捨てた字幕の全文だけを記憶から外す。キューに残っている (これから送出される) 字幕の
+    // 記憶まで消すと、直後に同じ文が届いたときにTwitchへ二重に出る。
+    for (const source of dropped.droppedSources) this.#policy.forgetLastSent(source);
   }
 
   #reject(sequence: number, reason: CaptionRejectReason): void {
@@ -337,13 +339,13 @@ export class CaptionSession {
         const taken = this.#policy.take(this.#now());
         this.#counters.rejected += taken.expired;
         // 期限切れで一度も送れなかった字幕は、重複排除の記憶からも外す。
-        if (taken.expired) this.#policy.forgetLastSent();
+        for (const source of taken.expiredSources) this.#policy.forgetLastSent(source);
         if (!taken.caption) break;
         const result = await this.#obs.sendCaption(taken.caption.text);
         if (result.sent) { this.#counters.sent += 1; this.#lastSentAt = this.#now(); sent = true; continue; }
         this.#counters.failed += 1;
         reason = result.reason;
-        this.#policy.forgetLastSent();
+        this.#policy.forgetLastSent(taken.caption.source);
 
         // 送れない理由が解消していない間キューを抱え続けても古くなるだけなので捨てる。
         // 溢れ時と同じく、捨てた字幕はworkerへも破棄として伝える。
