@@ -229,6 +229,26 @@ test("停止後に届いた古い接続の字幕は破棄され、OBSへ流れ�
   });
 });
 
+test("直前にエラーがあっても、停止操作自体は成功として返る (古いエラー文言を持ち越さない)", async () => {
+  await withSession(async ({ session, obs, launched }) => {
+    const url = await startWorkerAndGetUrl(session, launched);
+    const bootstrap = readBootstrap((await httpGet(url)).body);
+    const worker = connectWorker(bootstrap.origin, bootstrap.socketToken, bootstrap.protocolVersion);
+    await worker.waitForWelcome();
+    await waitFor(() => session.status().obs.connected, "obs connected");
+    // ワーカー側のエラー状態を発生させ、session.#lastErrorを埋める
+    worker.send({ type: "state", state: "error", detail: "recognition failed" });
+    await waitFor(() => session.status().lastError?.code === "worker_error", "worker error recorded");
+    const stopped = await session.stop();
+    // 停止操作自体は成功しているので、直前のworker_errorを持ち越して失敗扱いにしない
+    // (これをCaptionSession#run()がrunning:false + lastErrorありで失敗と誤認すると、
+    // 操作卓は「英語CCを停止しました」ではなく古いエラー文言を表示し続けてしまう)。
+    assert.equal(stopped.running, false);
+    assert.equal(stopped.lastError, undefined);
+    await worker.close();
+  });
+});
+
 test("進行中の送出に積まれたテスト字幕は失敗ではなくqueuedとして返る", async () => {
   await withSession(async ({ session, obs, launched }) => {
     const url = await startWorkerAndGetUrl(session, launched);

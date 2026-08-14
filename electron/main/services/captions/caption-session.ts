@@ -204,6 +204,10 @@ export class CaptionSession {
     this.#running = false;
     this.#workerConnected = false;
     this.#workerState = "idle";
+    // start()と同じく、停止操作自体は成功したのだから直前のエラーは持ち越さない。ここで消さないと、
+    // 何らかのエラー (worker_error等) の後に停止しただけで「停止しました」ではなく古いエラー文言が
+    // running:false + lastError付きのまま返り、CaptionPanel#run()が失敗扱いにしてしまう。
+    this.#lastError = null;
     this.#policy.reset();
     this.#obs.stop();
     await this.#host.stop();
