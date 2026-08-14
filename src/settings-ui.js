@@ -1814,13 +1814,22 @@ export class SettingsUI {
     button.textContent = "パスワードを保存";
     const status = document.createElement("span");
     status.className = "muted";
+    // 保存結果 (成功/失敗) を読み上げる。このファイルの他の動的status表示・
+    // このPR自身の#caption-status/#message同様、role="status"で通知する。
+    status.setAttribute("role", "status");
     button.addEventListener("click", () => {
       const value = input.value;
       if (!value) { status.textContent = "パスワードを入力してください"; return; }
       void Promise.resolve(this.onSetSecret("captions.obs.password", value)).then((result) => {
-        input.value = "";
-        if (result?.ok) { this._captionSecretStatus = { configured: true }; status.textContent = "保存しました"; }
-        else status.textContent = `保存に失敗しました: ${result?.error?.message ?? "unknown error"}`;
+        if (result?.ok) {
+          // 失敗時は入力内容を残す — クリアしてしまうと、失敗に気付かないまま何を入力したか
+          // わからなくなる (role="status"を付けても、視覚的に空欄が正常保存に見えてしまう)。
+          input.value = "";
+          this._captionSecretStatus = { configured: true };
+          status.textContent = "保存しました";
+        } else {
+          status.textContent = `保存に失敗しました: ${result?.error?.message ?? "unknown error"}`;
+        }
       });
     });
     const row = document.createElement("div");
