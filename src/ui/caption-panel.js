@@ -42,16 +42,21 @@ const REJECT_LABELS = Object.freeze({
   chrome_not_found: "Google Chromeが見つかりません",
   chrome_launch_failed: "Chromeを起動できませんでした",
   worker_host_failed: "字幕ワーカーを起動できませんでした",
-  busy: "送出処理が実行中です",
+  // 失敗ではなく「進行中の送出の後に送られる」状態。
+  queued: "進行中の送出の後に送られます",
 });
 
 const describeReason = (reason) => REJECT_LABELS[reason] ?? String(reason ?? "");
 
 export class CaptionPanel {
-  constructor(root, services, { log = () => {} } = {}) {
+  // onStatus は「描画したstatus」を毎回呼び出し元へ渡す。subscribe側だけで拾うと、
+  // 起動直後に一度だけpullするstatus (refresh) が連携ヘルスへ反映されず、最初の状態変化が
+  // 起きるまでヘルス行が"unknown"のままになる。
+  constructor(root, services, { log = () => {}, onStatus = () => {} } = {}) {
     this.root = root;
     this.services = services;
     this.log = log;
+    this.onStatus = onStatus;
     this.status = null;
     this.elements = {
       health: root.querySelector("#caption-health"),
@@ -85,6 +90,7 @@ export class CaptionPanel {
   render(status) {
     if (!status) return;
     this.status = status;
+    this.onStatus(status);
     this.elements.health.textContent = HEALTH_LABELS[status.health] ?? status.health;
     this.elements.health.dataset.health = status.health;
     const rows = [
@@ -127,6 +133,7 @@ export class CaptionPanel {
     const result = await this.services.testCaption("dociai caption test.");
     if (!result?.ok) { this.#message(result?.error?.message ?? "テスト字幕に失敗しました", true); return; }
     if (result.value.sent) this.#message("テスト字幕を送出しました");
+    else if (result.value.reason === "queued") this.#message(`テスト字幕を送出待ちに追加しました (${describeReason(result.value.reason)})`);
     else this.#message(`テスト字幕を送出できません: ${describeReason(result.value.reason)}`, true);
     void this.refresh();
   }

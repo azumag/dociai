@@ -223,6 +223,26 @@ test("停止後に届いた古い接続の字幕は破棄され、OBSへ流れ�
   });
 });
 
+test("進行中の送出に積まれたテスト字幕は失敗ではなくqueuedとして返る", async () => {
+  await withSession(async ({ session, obs, launched }) => {
+    const url = await startWorkerAndGetUrl(session, launched);
+    const bootstrap = readBootstrap((await httpGet(url)).body);
+    const worker = connectWorker(bootstrap.origin, bootstrap.socketToken, bootstrap.protocolVersion);
+    await worker.waitForWelcome();
+    await waitFor(() => session.status().obs.connected, "obs connected");
+    // drainを走らせたまま testCaption を呼ぶと、以前は "busy" が返り操作卓が
+    // 「送出できません」と誤表示していた (実際には進行中のdrainが送出する)。
+    const inflight = session.testCaption("First caption.");
+    const queued = await session.testCaption("Second caption.");
+    await inflight;
+    assert.equal(queued.sent, false);
+    assert.equal(queued.reason, "queued");
+    await waitFor(() => obs.state.captions.length === 2, "both captions sent");
+    assert.deepEqual(obs.state.captions, ["First caption.", "Second caption."]);
+    await worker.close();
+  });
+});
+
 test("session tokenが違う・Originがloopback外・protocolVersion不一致の接続を拒否する", async () => {
   await withSession(async ({ session, modules, launched }) => {
     const url = await startWorkerAndGetUrl(session, launched);

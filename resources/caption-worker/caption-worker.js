@@ -41,6 +41,13 @@ const state = {
   socketBackoffMs: 1000,
   // hostから明示stopを受けた後はtokenが失効しているので、再接続を試みても4003で切られるだけ。
   linkClosed: false,
+  // welcomeを受け取れないまま閉じた連続回数。dociaiが再起動するとsocket tokenが作り直されるため、
+  // このページのtokenでは二度と繋がらない — 黙って再試行し続けると「未接続」表示のまま
+  // 復帰を待たせてしまうので、一定回数で打ち切って発行し直しを案内する。
+  failedReconnects: 0,
+  // finalの送出をFIFOに保つための直列化チェーン。翻訳の所要時間は文ごとに違うため、
+  // 直列化しないと後の発話が先にTwitchへ出る (sequenceは送信時採番なのでMain側では検出できない)。
+  sendChain: Promise.resolve(),
   recognitionBackoffMs: 500,
 };
 
@@ -53,6 +60,9 @@ function report(workerState, detail = "") {
   if (!state.connected || !state.socket) return;
   try { state.socket.send(JSON.stringify({ type: "state", state: workerState, detail })); } catch { /* 切断直後 */ }
 }
+
+// これ以上「一度もwelcomeを受け取れないまま閉じた」が続いたら、tokenが失効していると判断する。
+const MAX_FAILED_RECONNECTS = 5;
 
 // ---- dociai との接続 ----
 
@@ -69,6 +79,7 @@ function connect() {
     if (message.type === "welcome") {
       state.connected = true;
       state.socketBackoffMs = 1000;
+      state.failedReconnects = 0;
       view.link.textContent = "接続済み";
       report(state.running ? "recognizing" : "idle");
       return;
@@ -77,9 +88,16 @@ function connect() {
     if (message.type === "ack" && message.accepted === false) setMessage(`dociai側で字幕を破棄しました (${message.reason})`);
   });
   socket.addEventListener("close", () => {
+    const wasConnected = state.connected;
     state.socket = null;
     state.connected = false;
     if (state.linkClosed) { view.link.textContent = "dociaiから停止されました"; return; }
+    state.failedReconnects = wasConnected ? 0 : state.failedReconnects + 1;
+    if (state.failedReconnects >= MAX_FAILED_RECONNECTS) {
+      view.link.textContent = "接続できません";
+      setMessage("dociaiとの接続が復帰しません。dociaiの「英語CC」パネルで「Chromeを開く」を押し、新しいURLを発行し直してください。", true);
+      return;
+    }
     view.link.textContent = "未接続 — 再接続します";
     // dociai側が落ちている間は字幕を送らず、再接続だけを試みる。
     const delay = state.socketBackoffMs;
@@ -170,7 +188,9 @@ async function handleResult(event) {
     const result = event.results[index];
     const transcript = result[0]?.transcript ?? "";
     if (!result.isFinal) { interim += transcript; continue; }
-    await sendFinal(transcript);
+    // onresultごとに独立した非同期ハンドラが走るので、直列化しないと翻訳の遅い発話を
+    // 後の発話が追い越してTwitchへ出てしまう。
+    state.sendChain = state.sendChain.then(() => sendFinal(transcript)).catch(() => {});
   }
   // interimはこのタブ内のプレビューだけに使い、dociaiへは一切送らない (issue #282)。
   if (interim) view.recognized.textContent = interim;

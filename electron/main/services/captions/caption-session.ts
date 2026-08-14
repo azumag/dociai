@@ -327,7 +327,9 @@ export class CaptionSession {
   // キューを順に送出する。SendStreamCaptionの応答を待ってから次を送るので、分割チャンクが
   // OBSへ同時に殺到しない (チャンク間の適切な間隔はissue #282 Phase 0の実機検証項目)。
   async #drain(): Promise<{ sent: boolean; reason?: string }> {
-    if (this.#draining) return { sent: false, reason: "busy" };
+    // 進行中のdrainループが拾って送るので、これは失敗ではない。"busy"のまま返すと
+    // 操作卓が「送出できません」と表示してしまう (実際には送出される)。
+    if (this.#draining) return { sent: false, reason: "queued" };
     this.#draining = true;
     let sent = false;
     let reason: string | undefined;

@@ -894,8 +894,12 @@ function setupCaptionPanel() {
     start: startCaptionsThroughElectron,
     stop: stopCaptionsThroughElectron,
     testCaption: testCaptionThroughElectron,
-    subscribe: (listener) => subscribeCaptionStatusThroughElectron((status) => { state.captionStatus = status; listener(status); renderIntegrationHealth(); }),
-  }, { log: (message) => logEvent(message) });
+    subscribe: (listener) => subscribeCaptionStatusThroughElectron(listener),
+  }, {
+    log: (message) => logEvent(message),
+    // pushされたstatusも起動直後にpullしたstatusも、同じ経路で連携ヘルスへ渡す。
+    onStatus: (status) => { state.captionStatus = status; renderIntegrationHealth(); },
+  });
   return captionPanel.connect();
 }
 

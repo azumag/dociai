@@ -20,6 +20,9 @@ let browser;
 let child;
 let consolePage;
 const logs = [];
+// spawn自体の失敗 (ENOENT/EACCES: Electronバイナリがキャッシュから壊れて復元された等) と
+// 即時終了を記録する。登録していないと "error" は未処理例外になり、原因が別の例外に化ける。
+let childExit = null;
 
 function chromiumWavFixture() {
   const samples = 800;
@@ -28,10 +31,14 @@ function chromiumWavFixture() {
   return bytes;
 }
 
-async function waitForJson(url, timeoutMs = 15_000) {
+// 子プロセスが起動に失敗した/即死した場合、待ち続けても意味が無いので即座に理由ごと失敗させる。
+// タイムアウトメッセージだけでは「Electronが何も出力せずに落ちた」のか「起動が遅いだけ」なのかが
+// 区別できず、CIログから原因に辿り着けないため (issue #282 のPRで実際に判別できなかった)。
+async function waitForJson(url, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
   while (Date.now() < deadline) {
+    if (childExit) throw new Error(`Electron exited before opening ${url}: ${childExit}\n--- child logs ---\n${logs.join("")}`);
     try {
       const response = await fetch(url);
       if (response.ok) return await response.json();
@@ -40,7 +47,7 @@ async function waitForJson(url, timeoutMs = 15_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`Timed out waiting for ${url}: ${lastError?.message ?? "no response"}\n--- child logs ---\n${logs.join("")}`);
+  throw new Error(`Timed out waiting for ${url}: ${lastError?.message ?? "no response"}\n--- child status ---\n${childExit ?? "still running"}\n--- child logs ---\n${logs.join("")}`);
 }
 
 async function waitForConsolePage(browser, timeoutMs = 10_000) {
@@ -70,6 +77,8 @@ try {
   });
   child.stdout.on("data", (chunk) => logs.push(String(chunk)));
   child.stderr.on("data", (chunk) => logs.push(String(chunk)));
+  child.on("error", (error) => { childExit = `spawn failed: ${error.message}`; });
+  child.on("exit", (code, signal) => { childExit = `exited code=${code} signal=${signal}`; });
 
   await waitForJson(`http://127.0.0.1:${port}/json/version`);
   browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}` });
