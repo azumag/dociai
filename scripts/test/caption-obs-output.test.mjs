@@ -192,6 +192,26 @@ test("対象マイク入力名が誤っていると送出を止め (fail-closed)
   });
 });
 
+test("入力名を空へ戻すとfail-closed時のエラー表示も消える", async () => {
+  await withService({}, async ({ service, obs }) => {
+    service.start({ host: "127.0.0.1", port: obs.port, password: null, microphoneInputName: "Typo/Mic" });
+    await waitFor(() => service.state.lastError?.code === "obs_input_missing", "input error");
+    service.reconfigure({ host: "127.0.0.1", port: obs.port, password: null, microphoneInputName: "" });
+    await waitFor(() => service.state.lastError === null, "error cleared");
+    assert.equal(service.state.micMuted, false);
+    assert.deepEqual(await service.sendCaption("Hello."), { sent: true });
+  });
+});
+
+test("GetVersionが返らない場合はSendStreamCaption非対応とは表示しない", async () => {
+  await withService({ silent: true }, async ({ service, obs }) => {
+    service.start({ host: "127.0.0.1", port: obs.port, password: null, microphoneInputName: "" });
+    await waitFor(() => service.state.lastError !== null, "version error");
+    // 実際にはOBSの能力の問題ではないので caption_unsupported とは診断しない
+    assert.equal(service.state.lastError.code, "obs_version_unavailable");
+  }, { requestTimeoutMs: 60 });
+});
+
 test("応答が連続でtimeoutしたら自分から切断して再接続へ落とす (half-open対策)", async () => {
   await withService({ silent: true }, async ({ service, obs }) => {
     service.start({ host: "127.0.0.1", port: obs.port, password: null, microphoneInputName: "" });

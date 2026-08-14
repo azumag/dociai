@@ -236,7 +236,9 @@ export class CaptionSession {
     if (!evaluation.ok) { this.#counters.rejected += 1; this.#emit(); return { sent: false, reason: evaluation.reason }; }
     this.#counters.accepted += 1;
     this.#lastCaption = evaluation.text;
-    this.#policy.enqueue(evaluation.segments, { sequence: -1, now: this.#now(), ageMs: 0 });
+    // テスト字幕でキューが溢れた場合も、押し出された実ワーカー字幕の後処理 (ack・カウント・
+    // 重複排除の巻き戻し) は #onCaption と同じように行う。
+    this.#applyOverflow(this.#policy.enqueue(evaluation.segments, { sequence: -1, now: this.#now(), ageMs: 0 }));
     const result = await this.#drain();
     this.#emit();
     return result;
@@ -274,7 +276,10 @@ export class CaptionSession {
     if (!connected) {
       this.#workerState = "idle";
       // 切断時に溜まっていた字幕は捨てる — 再接続後に古い発話が流れると配信内容とずれる。
-      this.#counters.rejected += this.#policy.clearQueue();
+      // 一度も届いていない以上、期限切れ・送出失敗と同じく重複排除の記憶からも外す。
+      const dropped = this.#policy.clearQueue();
+      this.#counters.rejected += dropped;
+      if (dropped) this.#policy.forgetLastSent();
     }
     this.#emit();
   }
@@ -300,13 +305,19 @@ export class CaptionSession {
     this.#lastRecognized = evaluation.recognized;
     this.#lastCaption = evaluation.text;
     const dropped = this.#policy.enqueue(evaluation.segments, { sequence: input.sequence, now: this.#now(), ageMs: input.ageMs });
-    this.#counters.rejected += dropped.dropped;
     this.#host.send({ type: "ack", sequence: input.sequence, accepted: true });
-    // 溢れて捨てた分は、受理ackを出したあとでも破棄されたことをworkerへ伝える。
-    for (const sequence of dropped.droppedSequences) this.#reject(sequence, "queue-overflow");
-    if (dropped.dropped) this.#policy.forgetLastSent();
+    this.#applyOverflow(dropped);
     if (this.#config.logCaptions) this.#options.log?.("英語CCを受理しました", { sequence: input.sequence, chars: evaluation.text.length, segments: evaluation.segments.length });
     void this.#drain().then(() => this.#emit());
+  }
+
+  // キュー溢れで押し出された字幕の後処理。溢れて捨てた分は、受理ackを出したあとでも
+  // 破棄されたことをworkerへ伝え、一度も送れていない以上は重複排除の記憶からも外す。
+  #applyOverflow(dropped: { dropped: number; droppedSequences: number[] }): void {
+    if (!dropped.dropped) return;
+    this.#counters.rejected += dropped.dropped;
+    for (const sequence of dropped.droppedSequences) if (sequence >= 0) this.#reject(sequence, "queue-overflow");
+    this.#policy.forgetLastSent();
   }
 
   #reject(sequence: number, reason: CaptionRejectReason): void {

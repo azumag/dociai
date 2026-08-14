@@ -156,10 +156,14 @@ export class ObsCaptionOutputService {
     // 字幕だけをdegradedにして接続自体は維持する — 運用者が設定UIで理由を確認できるようにする。
     const availableRequests = version.ok && Array.isArray(version.data.availableRequests) ? version.data.availableRequests as unknown[] : [];
     const captionSupported = availableRequests.some((entry) => entry === "SendStreamCaption");
+    // GetVersion自体が返らなかった (timeout・切断直後) 場合まで「SendStreamCaption非対応」と
+    // 表示すると、実際にはOBSの能力の問題ではないのに運用者を誤った方向へ誘導してしまう。
     this.#patch({
       connected: true,
       captionSupported,
-      lastError: captionSupported ? null : { code: "caption_unsupported", message: "接続中のOBSはSendStreamCaptionに対応していません" },
+      lastError: captionSupported ? null
+        : version.ok ? { code: "caption_unsupported", message: "接続中のOBSはSendStreamCaptionに対応していません" }
+        : { code: "obs_version_unavailable", message: `OBSのバージョン情報を取得できません (${version.comment})` },
     });
     await this.#refreshStreamState();
     await this.#refreshMuteState();
@@ -184,7 +188,9 @@ export class ObsCaptionOutputService {
   // 「入力名を指定していないのに字幕が出ない」という詰み方を避けるため、degradedにもしない。
   async #refreshMuteState(): Promise<void> {
     const inputName = this.#target?.microphoneInputName ?? "";
-    if (!inputName) { this.#patch({ micMuted: false }); return; }
+    // 入力名を空へ戻した場合、fail-closed時に付けた obs_input_missing もここで消す
+    // (消さないと「ミュート判定なし」に戻したのにエラー表示だけが残り続ける)。
+    if (!inputName) { this.#patch({ micMuted: false, ...(this.#state.lastError?.code === "obs_input_missing" ? { lastError: null } : {}) }); return; }
     const client = this.#client;
     const result = client ? await this.#request("GetInputMute", { inputName }) : null;
     if (!result || this.#client !== client) return;
@@ -201,7 +207,8 @@ export class ObsCaptionOutputService {
     if (eventType === "InputMuteStateChanged") {
       const inputName = this.#target?.microphoneInputName ?? "";
       if (!inputName || eventData.inputName !== inputName) return;
-      this.#patch({ micMuted: eventData.inputMuted === true });
+      // 名前が一致するイベントが届いた = その入力は実在するので、fail-closed時のエラーは解消。
+      this.#patch({ micMuted: eventData.inputMuted === true, ...(this.#state.lastError?.code === "obs_input_missing" ? { lastError: null } : {}) });
     }
   }
 
