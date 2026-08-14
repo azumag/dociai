@@ -28,6 +28,9 @@ import type { DownloadStartInput, ModelLicense } from "../../shared/local-llm/mo
 import type { TranslationService } from "../services/translation/translation-service";
 import type { TranslationModelRepository } from "../services/translation/translation-model-repository";
 import { requestMetadata, parseTranslateInput } from "./translation-input";
+import { parseCaptionTestInput } from "./caption-input";
+import type { CaptionSession } from "../services/captions/caption-session";
+import { readCaptionsConfig } from "../services/captions/captions-config";
 import { probeNativeRuntime } from "../services/translation/native-runtime-probe";
 import type { StreamEventBus } from "../services/stream-events/stream-event-bus";
 import type { TwitchComposition } from "../services/twitch/twitch-composition";
@@ -36,7 +39,7 @@ import type { OverlayAssetService } from "../services/overlay-assets/overlay-ass
 import type { OverlayAssetUrlResolver } from "../services/overlay-assets/overlay-asset-url-resolver";
 
 type WindowController = ReturnType<typeof import("../windows").createWindowController>;
-type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; newsSourceService: NewsSourceService; newsSearchService: NewsSearchService; wikipediaService: WikipediaService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; translationService: TranslationService; translationModelRepository: TranslationModelRepository; overlayAssetService: OverlayAssetService | null; overlayAssetUrlResolver: OverlayAssetUrlResolver | null; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
+type RegisterOptions = { controller: WindowController; paths: AppPaths; configRepository: ConfigRepository; secretStore: SecretStore; aiService: AiService; feedService: FeedService; newsSourceService: NewsSourceService; newsSearchService: NewsSearchService; wikipediaService: WikipediaService; topicService: TopicService; speechService: SpeechBackendService; twitchService: TwitchChatService; twitchComposition: TwitchComposition; shortcutService: ShortcutService; captureService: CaptureService; modelRepository: ModelRepository; translationService: TranslationService; translationModelRepository: TranslationModelRepository; captionSession: CaptionSession; overlayAssetService: OverlayAssetService | null; overlayAssetUrlResolver: OverlayAssetUrlResolver | null; streamEventBus: StreamEventBus; updateService: UpdateService; buildInfo: BuildInfo; devServerUrl?: string };
 type Handler<T> = (event: IpcMainInvokeEvent, input: unknown) => Promise<T> | T;
 
 function parseAiMessages(value: unknown): AiMessage[] {
@@ -122,6 +125,11 @@ function register<T>(channel: string, handler: Handler<T>, options: RegisterOpti
 export function registerIpcHandlers(options: RegisterOptions): () => void {
   const overlayAssets = (): OverlayAssetService => { if (!options.overlayAssetService) throw new PublicIpcError("UNAVAILABLE", "overlay asset機能を初期化できませんでした"); return options.overlayAssetService; };
   const overlayAssetUrls = (): OverlayAssetUrlResolver => { if (!options.overlayAssetUrlResolver) throw new PublicIpcError("UNAVAILABLE", "overlay asset再生機能を初期化できませんでした"); return options.overlayAssetUrlResolver; };
+  const applyCaptionsSecretChange = async (key: string): Promise<void> => {
+    if (key !== "captions.obs.password") return;
+    const loaded = await options.configRepository.getPublic();
+    await options.captionSession.applyConfig(readCaptionsConfig(loaded.config));
+  };
   register(CHANNELS.PLATFORM_GET_INFO, (event, input) => {
     expectNoInput(input);
     return { runtime: "electron", platform: process.platform, arch: process.arch, appVersion: require("electron").app.getVersion(), isPackaged: require("electron").app.isPackaged, buildInfo: options.buildInfo };
@@ -136,6 +144,9 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     const context = config.context && typeof config.context === "object" && !Array.isArray(config.context) ? config.context as Record<string, unknown> : {};
     const screenCapture = context.screenCapture && typeof context.screenCapture === "object" && !Array.isArray(context.screenCapture) ? context.screenCapture as Record<string, unknown> : {};
     options.captureService.setPreferredSourceName(screenCapture.sourceName);
+    // 英語CC (issue #282) も shortcutService.sync / captureService.setPreferredSourceName と同じく
+    // 保存即時反映する。enabledをOFFにしたらこの場で停止し、OBS接続先やpolicyの変更もここで効く。
+    await options.captionSession.applyConfig(readCaptionsConfig(config));
     return saved;
   }, options);
   register(CHANNELS.CONFIG_IMPORT_LEGACY, async (event, input) => {
@@ -149,6 +160,7 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     const context = preview.config.context && typeof preview.config.context === "object" && !Array.isArray(preview.config.context) ? preview.config.context as Record<string, unknown> : {};
     const screenCapture = context.screenCapture && typeof context.screenCapture === "object" && !Array.isArray(context.screenCapture) ? context.screenCapture as Record<string, unknown> : {};
     options.captureService.setPreferredSourceName(screenCapture.sourceName);
+    await options.captionSession.applyConfig(readCaptionsConfig(preview.config));
     return { imported: true, secretKeys: preview.secretEntries.map((entry) => entry.key), revision: saved.revision };
   }, options);
   register(CHANNELS.SECRET_STATUS, (event, input) => {
@@ -161,11 +173,16 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
     const key = parseSecretKey(payload.key);
     const value = expectString(payload.value, "secret value", 16_384);
     await options.secretStore.set(key, value);
+    // issue #282: OBS WebSocketパスワードは (他のsecretと違って) 設定JSONを経由しないため、
+    // CONFIG_SAVEのタイミングでは反映されない。ここで再適用しないと、パスワードだけ直しても
+    // 認証失敗のまま再接続を繰り返し続ける。
+    await applyCaptionsSecretChange(key);
     return { saved: true, persistent: options.secretStore.isPersistentAvailable() };
   }, options);
   register(CHANNELS.SECRET_REMOVE, async (event, input) => {
     const key = parseSecretKey(input);
     await options.secretStore.remove(key);
+    await applyCaptionsSecretChange(key);
     return { removed: true };
   }, options);
   register(CHANNELS.AI_CHAT, async (event, input) => {
@@ -297,6 +314,14 @@ export function registerIpcHandlers(options: RegisterOptions): () => void {
   register(CHANNELS.TRANSLATION_MODEL_INSTALL, (event, input) => { expectNoInput(input); return options.translationModelRepository.install(); }, options);
   register(CHANNELS.TRANSLATION_MODEL_INSTALL_CANCEL, (event, input) => { expectNoInput(input); return { cancelled: options.translationModelRepository.cancelInstall() }; }, options);
   register(CHANNELS.TRANSLATION_MODEL_DELETE, (event, input) => { expectNoInput(input); return options.translationModelRepository.delete(); }, options);
+  // 英語CC (issue #282)。Rendererへ公開するのはこの5操作だけで、OBSパスワード・session token・
+  // 任意のWebSocket URL・任意の実行ファイル引数はどれも渡せない (CaptionStatus自体もそれらを含まない)。
+  // 操作卓 (console) 専用 — OBS overlay windowから配信内容そのものを止められないようにする。
+  register(CHANNELS.CAPTIONS_STATUS, (event, input) => { expectNoInput(input); return options.captionSession.status(); }, options, ["console"]);
+  register(CHANNELS.CAPTIONS_OPEN_WORKER, (event, input) => { expectNoInput(input); return options.captionSession.openWorker(); }, options, ["console"]);
+  register(CHANNELS.CAPTIONS_START, (event, input) => { expectNoInput(input); return options.captionSession.start(); }, options, ["console"]);
+  register(CHANNELS.CAPTIONS_STOP, (event, input) => { expectNoInput(input); return options.captionSession.stop(); }, options, ["console"]);
+  register(CHANNELS.CAPTIONS_TEST, (event, input) => options.captionSession.testCaption(parseCaptionTestInput(input).text), options, ["console"]);
   register(CHANNELS.STREAM_EVENTS_LIST, (event, input) => {
     const payload = input === undefined || input === null ? {} : expectRecord(input, "stream events list");
     let limit: number | undefined;

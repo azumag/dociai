@@ -126,6 +126,7 @@ export async function saveConfigThroughElectron(config, expectedRevision) {
   return globalThis.dociai.config.save({ config, ...(expectedRevision !== undefined ? { expectedRevision } : {}) });
 }
 export async function setSecretThroughElectron(key, value) { return globalThis.dociai.secrets.set({ key, value }); }
+export async function secretStatusThroughElectron(keys) { return globalThis.dociai.secrets.status(keys); }
 
 // issue #257 Phase 2 (#261): コメント読み上げのローカル翻訳。他のhasElectronXService()/
 // xThroughElectron()と同じ「capability確認 + Result<T>をそのまま返す」流儀。Result<T>を
@@ -149,6 +150,21 @@ export async function deleteTranslationModelThroughElectron() { return globalThi
 // hasElectronStreamEventsService's own comment above for why this repo duplicates the string per
 // call site instead of sharing a constant across the Renderer/Main boundary.
 export function subscribeTranslationModelProgressThroughElectron(listener) { return globalThis.dociai.events.subscribe("translation:model:progress", listener); }
+
+// issue #282: 英語クローズドキャプション。他のhasElectronXService()/xThroughElectron()と同じく
+// 「capability確認 + Result<T>をそのまま返す」流儀で、unwrapは呼び出し側 (src/ui/caption-panel.js)。
+// Browser版にはこのIPC面自体が存在しないため、パネルはcapability判定で非表示になる。
+export function hasElectronCaptionService() { return typeof globalThis.dociai?.captions?.status === "function"; }
+export async function captionStatusThroughElectron() { return globalThis.dociai.captions.status(); }
+export async function openCaptionWorkerThroughElectron() { return globalThis.dociai.captions.openChromeWorker(); }
+export async function startCaptionsThroughElectron() { return globalThis.dociai.captions.start(); }
+export async function stopCaptionsThroughElectron() { return globalThis.dociai.captions.stop(); }
+export async function testCaptionThroughElectron(text) { return globalThis.dociai.captions.testCaption(text); }
+// "captions:status-changed" is the same literal electron/shared/services/caption-contract.ts's
+// CAPTION_STATUS_EVENT_TYPE duplicates — see hasElectronStreamEventsService's own comment above for
+// why this repo duplicates the string per call site instead of sharing a constant across the
+// Renderer/Main boundary.
+export function subscribeCaptionStatusThroughElectron(listener) { return globalThis.dociai.events.subscribe("captions:status-changed", listener); }
 
 export class ElectronTwitchSource {
   id = "twitch"; label = "Twitch";

@@ -16,6 +16,11 @@ export const CONFIG_REGISTRY = Object.freeze({
   translationSourceLanguages: Object.freeze([descriptor("en", "English"), descriptor("fr", "Français")]),
   translationOutputModes: Object.freeze([descriptor("translated", "日本語訳のみ"), descriptor("originalThenTranslated", "原文の後に日本語訳")]),
   translationFailurePolicies: Object.freeze([descriptor("readOriginal", "原文を読み上げる"), descriptor("skip", "読み上げない")]),
+  // issue #282 (英語CC)。MVPはChrome内蔵のWeb Speech API + Translator APIだけを対象とし、
+  // Whisper/LocalVocal/外部翻訳APIは候補に含めない。1要素しか無いのは将来差し替えのための
+  // 拡張点ではなく、「configで別エンジンを指定しても動かない」ことを検証で明示するため。
+  captionRecognitionEngines: Object.freeze([descriptor("chrome-web-speech", "Chrome音声認識")]),
+  captionTranslationEngines: Object.freeze([descriptor("chrome-translator", "Chrome内蔵翻訳")]),
 });
 export const registryIds = (key) => CONFIG_REGISTRY[key].map((entry) => entry.id);
 export const registryOptions = (key) => CONFIG_REGISTRY[key].map(({ id, label }) => Object.freeze({ value: id, label }));

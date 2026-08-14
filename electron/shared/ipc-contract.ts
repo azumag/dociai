@@ -8,6 +8,7 @@ import type { TopicCompleteInput, TopicFetchInput, TopicFetchResponse } from "./
 import type { CatalogListResult, DownloadJobRecord, DownloadStartInput, ImportBeginResult, ImportCommitResult, InstalledListResult, InstalledModelEntry } from "./local-llm/model-contract";
 import type { TranslateInput, TranslateResult, TranslationStatus, NativeRuntimeProbeResult, TranslationWorkerProbeResult } from "./services/translation-contract";
 import type { InstalledTranslationModel, TranslationModelStatus } from "./services/translation-model-contract";
+import type { CaptionStatus } from "./services/caption-contract";
 import type { StreamEventListInput, StreamEventListResult } from "./services/stream-event-ipc-contract";
 import type { TwitchAuthOverview, TwitchConnectionOverview, TwitchCustomRewardsOverview, TwitchSubscriptionsOverview } from "./twitch/overview-contract";
 import type { UpdateState } from "./services/update-ipc-contract";
@@ -160,6 +161,16 @@ export type DociaiApi = {
     // get explicit user confirmation first (see update-service.ts's header comment on why this
     // app can't assume "restart" is ever a safe default while a broadcast may be live).
     quitAndInstall(): Promise<Result<{ installing: boolean }>>;
+  };
+  // 英語クローズドキャプション (issue #282)。CaptionStatusにはOBSパスワード・session token・
+  // ワーカーURLを一切含めない — Rendererは「今どの状態か」と5つの操作だけを扱う。
+  captions: {
+    status(): Promise<Result<CaptionStatus>>;
+    // 外部Chromeを字幕ワーカーとして開く。URL・token生成はMain側で完結する。
+    openChromeWorker(): Promise<Result<{ opened: boolean; reason?: string }>>;
+    start(): Promise<Result<CaptionStatus>>;
+    stop(): Promise<Result<CaptionStatus>>;
+    testCaption(text: string): Promise<Result<{ sent: boolean; reason?: string }>>;
   };
   streamEvents: {
     list(input?: StreamEventListInput): Promise<Result<StreamEventListResult>>;

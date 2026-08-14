@@ -81,6 +81,29 @@ export function applyConfigDefaults(config) {
   // セクションを追加しても既存configの動作は一切変わらない (src/app/runtime-factory.jsの
   // handleTrigger参照)。
   copy.automation = { sharedTriggerMode: "both", ...(copy.automation ?? {}) };
+  // issue #282: 配信者の日本語音声をChromeで文字起こし・英訳し、OBS WebSocketの
+  // SendStreamCaption経由でTwitch公式クローズドキャプションへ送る。既定OFFのopt-in機能なので、
+  // schemaVersionを上げずここへ追加するだけで既存configの挙動は変わらない。
+  // workerPort 0 = ephemeral port (OSに空きを選ばせる)、maxCaptionChars 0 = 分割しない。
+  // どちらの「実用的な既定値」もissue #282 Phase 0の実機検証で確定する項目なので、
+  // コード側で数値を断定せず「無指定」に相当する値を既定にしてある。
+  // OBS WebSocketパスワードはここに置かない — secret store (captions.obs.password) 専用。
+  copy.captions = {
+    enabled: false,
+    sourceLanguage: "ja-JP",
+    targetLanguage: "en",
+    recognitionEngine: "chrome-web-speech",
+    translationEngine: "chrome-translator",
+    chromeExecutable: "",
+    workerPort: 0,
+    maxPending: 2,
+    maxAgeMs: 5000,
+    maxCaptionChars: 0,
+    replacements: {},
+    logCaptions: false,
+    ...(copy.captions ?? {}),
+    obs: { host: "127.0.0.1", port: 4455, microphoneInputName: "", ...(copy.captions?.obs ?? {}) },
+  };
   copy.commentSources = { ...(copy.commentSources ?? {}), twitch: { enabled: false, ...(copy.commentSources?.twitch ?? {}) } };
   // Issue #94: broadcaster identity + enabled EventSub features for the Twitch auth/EventSub
   // overview screen. Deliberately does NOT include a client id field — that is a build/deploy-time
