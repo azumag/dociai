@@ -131,6 +131,7 @@ flowchart TD
 | `TopicReader` | `src/topic-reader.js` | Todoistから話題を取得し、AIコメントとして読み上げキューへ入れる |
 | `CommentSource` | `src/comment-sources.js` | 手動入力/将来のYouTube・Twitchを同じ形で流し込む ([docs/comment-sources.md](docs/comment-sources.md)) |
 | `CommentSpeechPipeline` | `src/comment-speech-pipeline.js` | 英語・フランス語コメントを端末内でローカル翻訳し読み上げる (Electron版のみ、外部API不使用、issue #257)。設定は [docs/configuration.md](docs/configuration.md#翻訳読み上げ-commentreadertranslation-electron版のみ-issue-257) 参照 |
+| `CaptionSession` | `electron/main/services/captions/` | 配信者の日本語音声をChromeで文字起こし・英訳し、OBS WebSocket経由でTwitch公式クローズドキャプションへ送る (Electron版のみ、issue #282)。手順は [docs/captions.md](docs/captions.md) 参照 |
 
 ## GitHub Issues
 

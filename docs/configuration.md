@@ -546,6 +546,40 @@ Rendererが指定したpathを読むAPIはありません。
 promptで明示し、最大10件に制限します。検索失敗時は検索なしの通常回答へフォールバックし、応答全体は
 停止しません。ElectronではconnectorのAPI keyをMain process内だけで参照し、Rendererへ返しません。
 
+## captions (英語クローズドキャプション, Electron版のみ, issue #282)
+
+配信者の日本語音声をChromeで文字起こし・英訳し、OBS WebSocketの `SendStreamCaption` 経由で
+Twitch公式クローズドキャプションへ送出します。既定OFFのopt-in機能で、有効にしない限り
+既存の挙動は一切変わりません。
+
+```json
+{
+  "captions": {
+    "enabled": true,
+    "sourceLanguage": "ja-JP",
+    "targetLanguage": "en",
+    "recognitionEngine": "chrome-web-speech",
+    "translationEngine": "chrome-translator",
+    "chromeExecutable": "",
+    "workerPort": 0,
+    "obs": { "host": "127.0.0.1", "port": 4455, "microphoneInputName": "Mic/Aux" },
+    "maxPending": 2,
+    "maxAgeMs": 5000,
+    "maxCaptionChars": 0,
+    "replacements": {},
+    "logCaptions": false
+  }
+}
+```
+
+各項目の意味、セットアップ手順、送出条件、セキュリティ・プライバシー上の注意、
+および実機でしか確認できない未検証項目は [docs/captions.md](captions.md) にまとめています。
+
+OBS WebSocketのパスワードはこの設定には書けません (書くと検証エラーになります)。設定画面の
+「英語CC」タブのパスワード欄から保存し、OSの安全な保管領域 (safeStorage) に置きます。
+設定のエクスポートにも含まれません。既存のコメント翻訳 (`commentReader.translation`) とは
+別系統で、この機能は量子化ONNX翻訳モデルを一切ロードしません。
+
 ## ニュース読み上げの参考: `azumag/soviet_now` 構造メモ (issue #10)
 
 `soviet_now` はshellベースの配信ラジオ実装で、`broadcast/radio_news.sh` (585行) に

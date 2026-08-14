@@ -186,6 +186,23 @@
         <div id="topic-status" class="muted"></div>
         <div id="topic-failures" class="reader-failures" aria-live="polite"></div>
       </section>
+      <!-- issue #282: 英語CC。Electron版でのみ表示する (Browser版にIPC面が無い) ため、
+           既定でhiddenにしておき src/ui/caption-panel.js が capability を見て解除する。 -->
+      <section class="panel panel-captions" id="caption-panel" hidden>
+        <h2>英語CC <span class="mod-en" aria-hidden="true">Closed Caption</span> <span id="caption-health" class="chip"></span></h2>
+        <dl id="caption-states" class="caption-states"></dl>
+        <div class="btn-row">
+          <button id="btn-caption-open" type="button">Chromeを開く</button>
+          <button id="btn-caption-start" type="button">開始</button>
+          <button id="btn-caption-stop" type="button">停止</button>
+          <button id="btn-caption-test" type="button">テスト字幕</button>
+        </div>
+        <h3>日本語認識</h3>
+        <div id="caption-recognized" class="caption-preview" aria-live="polite"></div>
+        <h3>英語字幕</h3>
+        <div id="caption-caption" class="caption-preview" aria-live="polite"></div>
+        <div id="caption-status" class="muted" aria-live="polite"></div>
+      </section>
       <section class="panel">
         <details class="panel-collapsible">
           <summary>

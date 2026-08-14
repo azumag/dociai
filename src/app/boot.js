@@ -22,7 +22,9 @@ import { deriveSimulationStatus } from "../twitch-ui/history/history-store.js";
 import { AppRuntime } from "./app-runtime.js";
 import { createDociaiRuntimeFactory, selectPlatformAdapter, personaColorFor } from "./runtime-factory.js";
 import { createAppActions } from "./app-actions.js";
-import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron, hasElectronTranslationService, translationModelStatusThroughElectron, subscribeTranslationModelProgressThroughElectron, warmUpTranslationThroughElectron } from "../platform/electron-services.js";
+import { hasElectronUpdateService, checkForUpdateThroughElectron, downloadUpdateThroughElectron, quitAndInstallUpdateThroughElectron, subscribeUpdateStatusThroughElectron, hasElectronConfigService, getConfigThroughElectron, saveConfigThroughElectron, setSecretThroughElectron, secretStatusThroughElectron, hasElectronTranslationService, translationModelStatusThroughElectron, subscribeTranslationModelProgressThroughElectron, warmUpTranslationThroughElectron } from "../platform/electron-services.js";
+import { hasElectronCaptionService, captionStatusThroughElectron, openCaptionWorkerThroughElectron, startCaptionsThroughElectron, stopCaptionsThroughElectron, testCaptionThroughElectron, subscribeCaptionStatusThroughElectron } from "../platform/electron-services.js";
+import { CaptionPanel } from "../ui/caption-panel.js";
 import { createElectronTranslationAdapter } from "../comment-translation-adapter.js";
 import { splitConnectorSecrets } from "../config/config-secrets-split.js";
 import { personaTriggerIdsForDisplay } from "../ui/persona-trigger-display.js";
@@ -272,7 +274,27 @@ function integrationHealthServices() {
       action: translationModel?.state === "installed" ? "open_diagnostics" : "open_settings",
     });
   }
+  // issue #282: 英語CC。字幕機能の障害はコメント受信・AI応答・読み上げ・OBS表示を止めないので
+  // critical:false。設定でenabledにしていない間は他の未使用機能と同じくdisabled行になる。
+  add("captions", "英語CC", "output", Boolean(config.captions?.enabled), normalizeCaptionHealth(state.captionStatus), {
+    critical: false,
+    metrics: state.captionStatus ? { sent: state.captionStatus.counters.sent, rejected: state.captionStatus.counters.rejected } : {},
+    action: state.captionStatus?.health === "sending" || state.captionStatus?.health === "recognizing" ? "open_diagnostics" : "open_settings",
+  });
   return services;
+}
+
+// CaptionHealthState (electron/shared/services/caption-contract.ts) を、連携ヘルス共通の
+// HEALTH_STATUSES へ写す。「Chrome未検出」「マイク未許可」は運用者が設定/操作で直せるものなので
+// configuration_required、送り先が未接続・未配信の状態はdegraded (=配信は続いている) とする。
+function normalizeCaptionHealth(status) {
+  if (!status) return "unknown";
+  if (status.health === "error") return "error";
+  if (status.health === "disabled") return "disabled";
+  if (["chrome_not_found", "microphone_permission_required"].includes(status.health)) return "configuration_required";
+  if (["worker_disconnected", "obs_disconnected", "obs_not_streaming", "mic_muted"].includes(status.health)) return "degraded";
+  if (["recognition_starting", "translator_downloading"].includes(status.health)) return "checking";
+  return "ready";
 }
 
 function renderIntegrationHealth() {
@@ -861,10 +883,30 @@ function setupTranslationModelHealth() {
   });
 }
 
+// issue #282: 英語CC。Electron版でだけ操作卓へパネルを出す (Browser版にIPC面が無い)。
+// 状態はMain側のCaptionSessionが単一の真実で、ここではpush購読とrenderだけを行う。
+let captionPanel = null;
+function setupCaptionPanel() {
+  if (!hasElectronCaptionService()) return () => {};
+  captionPanel = new CaptionPanel(document.querySelector("#caption-panel"), {
+    status: captionStatusThroughElectron,
+    openWorker: openCaptionWorkerThroughElectron,
+    start: startCaptionsThroughElectron,
+    stop: stopCaptionsThroughElectron,
+    testCaption: testCaptionThroughElectron,
+    subscribe: (listener) => subscribeCaptionStatusThroughElectron((status) => { state.captionStatus = status; listener(status); renderIntegrationHealth(); }),
+  }, { log: (message) => logEvent(message) });
+  return captionPanel.connect();
+}
+
 const settingsUI = new SettingsUI({
   getCurrent: () => state.config,
   onApply: (cfg) => applyEditedConfig(cfg),
   log: (m, level) => logEvent(m, level),
+  // issue #282: OBS WebSocketパスワードだけはdraft configを経由せずsecret storeへ直接書く
+  // (src/settings-ui.js のコンストラクタのコメント参照)。Browser版ではIPC面が無いので未接続のまま。
+  onSetSecret: hasElectronConfigService() ? (key, value) => setSecretThroughElectron(key, value) : null,
+  onSecretStatus: hasElectronConfigService() ? (keys) => secretStatusThroughElectron(keys) : null,
 });
 
 // ---- Runtime ----
@@ -1020,12 +1062,14 @@ function boot() {
   renderAll();
   setupUpdateStatus();
   setupTranslationModelHealth();
+  const disconnectCaptionPanel = setupCaptionPanel();
   logEvent("dociai 操作卓を起動しました。設定を読み込んでください");
   loadCurrentConfig()
     .then(applyLoadedConfig)
     .catch((e) => logEvent(`自動読込は見送り: ${scrub(e.message)}`, "warn"));
   addEventListener("pagehide", () => {
     unbindUI();
+    disconnectCaptionPanel();
     integrationPanel?.dispose();
     twitchOverviewApp?.dispose();
     obsBridge.dispose();

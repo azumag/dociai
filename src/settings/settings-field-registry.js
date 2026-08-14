@@ -8,6 +8,8 @@ const patterns = [
   // must navigate to the commentReader tab, not silently fall through to the nonexistent
   // "general" tab id (#activateTab("general") no-ops since no sidebar tab has that id).
   ["commentReader.*", "commentReader"],
+  // issue #282: captions.* の検証issue (config-validation.js) を英語CCタブへ誘導する。
+  ["captions.*", "captions"],
 ];
 export function fieldMetadataForIssue(issue) {
   const path = issue.path.join(".");

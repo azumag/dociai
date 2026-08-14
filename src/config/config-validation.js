@@ -49,6 +49,41 @@ export function validateConfigStructure(config) {
     const maxPendingComments = Number(t.maxPendingComments);
     if (!Number.isInteger(maxPendingComments) || maxPendingComments < 1 || maxPendingComments > 200) issues.push(issue(["commentReader", "translation", "maxPendingComments"], "range", "maxPendingComments must be an integer from 1 to 200"));
   }
+  // issue #282 (英語CC)。OBS WebSocketパスワードだけはenabledに関係なく常に拒否する —
+  // 設定JSONへ直接書かれた場合、そのままconfig exportやディスクへ平文で残ってしまうため
+  // (secret storeへ入れる正規の経路は設定UIのパスワード欄)。
+  if (config.captions?.obs && typeof config.captions.obs === "object" && "password" in config.captions.obs) {
+    issues.push(issue(["captions", "obs", "password"], "unknown.security-sensitive", "OBSパスワードは設定ファイルではなく設定画面のパスワード欄へ保存してください", { severity: "error" }));
+  }
+  if (config.captions?.enabled === true) {
+    const captions = config.captions;
+    if (captions.sourceLanguage !== "ja-JP") issues.push(issue(["captions", "sourceLanguage"], "enum", "音声認識言語はja-JPのみ対応しています"));
+    if (captions.targetLanguage !== "en") issues.push(issue(["captions", "targetLanguage"], "enum", "字幕言語はenのみ対応しています"));
+    if (!registryIds("captionRecognitionEngines").includes(captions.recognitionEngine)) issues.push(issue(["captions", "recognitionEngine"], "enum", "Unsupported recognitionEngine", { meta: { options: registryIds("captionRecognitionEngines") } }));
+    if (!registryIds("captionTranslationEngines").includes(captions.translationEngine)) issues.push(issue(["captions", "translationEngine"], "enum", "Unsupported translationEngine", { meta: { options: registryIds("captionTranslationEngines") } }));
+    const range = (value, path, min, max, message) => {
+      const numeric = Number(value);
+      if (!Number.isInteger(numeric) || numeric < min || numeric > max) issues.push(issue(["captions", ...path], "range", message));
+    };
+    // 0 = ephemeral portなので下限は0。1〜1023はOS側で特権が必要になるため除外する。
+    const workerPort = Number(captions.workerPort);
+    if (!Number.isInteger(workerPort) || workerPort < 0 || workerPort > 65535 || (workerPort > 0 && workerPort < 1024)) {
+      issues.push(issue(["captions", "workerPort"], "range", "workerPortは0 (自動) もしくは1024〜65535で指定してください"));
+    }
+    range(config.captions.obs?.port, ["obs", "port"], 1, 65535, "OBS WebSocketのポートは1〜65535で指定してください");
+    range(captions.maxPending, ["maxPending"], 1, 20, "maxPendingは1〜20で指定してください");
+    range(captions.maxAgeMs, ["maxAgeMs"], 500, 60000, "maxAgeMsは500〜60000で指定してください");
+    // 0 = 分割しない。実表示可能な上限はissue #282 Phase 0の実機検証で確定する。
+    range(captions.maxCaptionChars, ["maxCaptionChars"], 0, 500, "maxCaptionCharsは0 (分割しない) 〜500で指定してください");
+    const host = typeof config.captions.obs?.host === "string" ? config.captions.obs.host.trim() : "";
+    if (!host) issues.push(issue(["captions", "obs", "host"], "required", "OBS WebSocketのホストを指定してください"));
+    const replacements = config.captions.replacements;
+    if (replacements !== undefined && (!replacements || typeof replacements !== "object" || Array.isArray(replacements))) {
+      issues.push(issue(["captions", "replacements"], "type.object", "replacementsはobjectで指定してください"));
+    } else if (replacements && Object.entries(replacements).some(([from, to]) => typeof from !== "string" || !from || typeof to !== "string")) {
+      issues.push(issue(["captions", "replacements"], "type.object", "replacementsは文字列のキーと値で指定してください"));
+    }
+  }
   const eventTriggersResult = validateEventTriggersConfig(config.eventTriggers);
   for (const entry of eventTriggersResult.issues) issues.push(issue(entry.path, entry.code, entry.message, { severity: entry.severity, meta: entry.meta }));
   const errors = issues.filter((entry) => entry.severity === "error");

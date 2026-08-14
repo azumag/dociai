@@ -28,6 +28,11 @@ import { TranslationService } from "./services/translation/translation-service";
 import { resolveTranslationWorkerPath } from "./services/translation/translation-runtime-client";
 import { TranslationModelRepository } from "./services/translation/translation-model-repository";
 import { resolveRuntimeLayout, readBuildInfo } from "./runtime-layout";
+import { CaptionSession } from "./services/captions/caption-session";
+import { readCaptionsConfig } from "./services/captions/captions-config";
+import type { ObsSocketLike } from "./services/captions/obs-websocket-client";
+import { CAPTION_STATUS_EVENT_TYPE } from "../shared/services/caption-contract";
+import type { SecretKey } from "../shared/secret-contract";
 import { StreamEventBus } from "./services/stream-events/stream-event-bus";
 import { STREAM_EVENT_APP_EVENT_TYPE } from "../shared/services/stream-event-ipc-contract";
 import { UpdateService, type AutoUpdaterLike } from "./services/update/update-service";
@@ -190,6 +195,25 @@ if (!hasLock) {
     });
     const translationService = new TranslationService({ cacheDir: translationModelsDir, modelRepository: translationModelRepository, workerPath: resolveTranslationWorkerPath() });
     const currentConfig = await configRepository.getPublic();
+    // issue #282: 日本語音声 -> 英語CC -> Twitch。既存のTranslationService (en/fr -> ja、ONNX)
+    // とは別系統で、量子化モデルを一切ロードしない。ここでの構築は「設定を読んで待機させる」だけ
+    // で、loopback serverもOBS接続も操作卓の「開始」/「Chromeを開く」まで起動しない — 起動しただけ
+    // でマイクやポートを掴まないようにするため (issue #282「Chromeを開いただけで自動的に録音開始しない」)。
+    const wsModule = require("ws") as {
+      WebSocketServer: new (options: { noServer: true; maxPayload: number }) => any;
+      WebSocket: new (url: string) => ObsSocketLike;
+    };
+    const captionSession = new CaptionSession({
+      assetDir: path.join(appPath, "resources/caption-worker"),
+      webSocketServerFactory: (serverOptions) => new wsModule.WebSocketServer(serverOptions),
+      obsSocketFactory: (url) => new wsModule.WebSocket(url),
+      // OBS WebSocketパスワードはsafeStorage側にだけ置き、config/config export/Chromeページ/
+      // Rendererのどこにも現れない (issue #282 セキュリティ要件)。
+      readObsPassword: () => secretStore.getForService("captions.obs.password" as SecretKey),
+      onStatus: (status) => controller?.emitToConsole(CAPTION_STATUS_EVENT_TYPE, status),
+      log: (message, fields) => console.error(`[dociai:captions] ${message}`, fields ?? {}),
+    });
+    await captionSession.applyConfig(readCaptionsConfig(currentConfig.config));
     const findAssetReferences = async (assetId: string): Promise<string[]> => {
       const loaded = await configRepository.getPublic(); const found: string[] = [];
       const visit = (value: unknown, parts: string[]): void => {
@@ -276,7 +300,7 @@ if (!hasLock) {
       log: (message, fields) => console.error(`[dociai:twitch-composition] ${message}`, fields ?? {}),
     });
     await twitchComposition.initialize();
-    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, newsSourceService, newsSearchService, wikipediaService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, translationService, translationModelRepository, overlayAssetService, overlayAssetUrlResolver, streamEventBus, updateService, buildInfo, devServerUrl });
+    const unregisterIpcHandlers = registerIpcHandlers({ controller, paths, configRepository, secretStore, aiService, feedService, newsSourceService, newsSearchService, wikipediaService, topicService, speechService, twitchService, twitchComposition, shortcutService, captureService, modelRepository, translationService, translationModelRepository, captionSession, overlayAssetService, overlayAssetUrlResolver, streamEventBus, updateService, buildInfo, devServerUrl });
     app.once("before-quit", unregisterIpcHandlers);
     app.once("before-quit", () => aiService.dispose());
     app.once("before-quit", () => feedService.dispose());
@@ -292,6 +316,9 @@ if (!hasLock) {
     app.once("before-quit", () => modelRepository.dispose());
     app.once("before-quit", () => translationService.dispose());
     app.once("before-quit", () => translationModelRepository.dispose());
+    // loopback listen socketと常駐OBS WebSocket接続・再接続タイマーを持つので、終了時の破棄は必須
+    // (残るとポートを掴んだままプロセスが終わらない)。
+    app.once("before-quit", () => { void captionSession.dispose(); });
     app.once("before-quit", () => overlayAssetUrlResolver?.clear());
     app.once("before-quit", () => streamEventBus.dispose());
     app.once("before-quit", () => { if (updateCheckInterval) clearInterval(updateCheckInterval); updateService.dispose(); });

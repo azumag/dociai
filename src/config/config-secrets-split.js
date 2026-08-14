@@ -47,5 +47,19 @@ export function splitConnectorSecrets(config) {
   publicConfig.connectors = connectors;
   splitSourceTokens(publicConfig, "topics", secretEntries);
   splitSourceTokens(publicConfig, "news", secretEntries);
+  // issue #282: OBS WebSocketパスワード。config-canonicalize.jsのsecretPatternが`password$`を
+  // 既にexport/hashから除外しているので漏洩は防げているが、それだけだと「configファイルに
+  // 平文で残り続ける」状態は解消しない — legacy configの取り込み時にここでsecret storeへ移す。
+  const captions = object(publicConfig.captions);
+  const captionsObs = object(captions.obs);
+  if (typeof captionsObs.password === "string" && captionsObs.password.trim()) {
+    const key = "captions.obs.password";
+    secretEntries.push({ key, value: captionsObs.password.trim() });
+    delete captionsObs.password;
+    captionsObs.passwordConfigured = true;
+    captionsObs.passwordSecretRef = key;
+    captions.obs = captionsObs;
+    publicConfig.captions = captions;
+  }
   return { publicConfig, secretEntries, invalidIds };
 }

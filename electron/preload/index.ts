@@ -151,6 +151,15 @@ const api: DociaiApi = {
       delete: () => invoke(CHANNELS.TRANSLATION_MODEL_DELETE),
     },
   },
+  // issue #282: 英語CC。testCaptionはtextだけを渡す — 任意command・実行ファイル引数・OBS接続先を
+  // Rendererから指定できる口はここに存在しない。
+  captions: {
+    status: () => invoke(CHANNELS.CAPTIONS_STATUS),
+    openChromeWorker: () => invoke(CHANNELS.CAPTIONS_OPEN_WORKER),
+    start: () => invoke(CHANNELS.CAPTIONS_START),
+    stop: () => invoke(CHANNELS.CAPTIONS_STOP),
+    testCaption: (text) => invoke(CHANNELS.CAPTIONS_TEST, { text }),
+  },
   streamEvents: {
     list: (input) => invoke(CHANNELS.STREAM_EVENTS_LIST, input),
     clear: () => invoke(CHANNELS.STREAM_EVENTS_CLEAR),

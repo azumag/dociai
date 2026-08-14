@@ -67,10 +67,18 @@ const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 export class SettingsUI {
   get dirty() { return Boolean(this.controller?.state.dirty); }
 
-  constructor({ getCurrent = () => null, onApply = () => {}, log = () => {} } = {}) {
+  // issue #282: onSetSecret/onSecretStatus は「draft configを一切経由せずにsecret storeへ直接
+  // 書く」ための口。OBS WebSocketパスワードだけはconnectors.*.apiKey方式 (draftへ書いて保存時に
+  // splitConnectorSecretsで分離) を使えない — config-validation.js が captions.obs.password の
+  // 存在自体をerrorとして拒否する (平文でconfigに残る経路を1つも作らないため) ので、draftへ
+  // 置いた瞬間に保存がブロックされてしまう。Browser版では未指定のままなので入力欄も出ない。
+  constructor({ getCurrent = () => null, onApply = () => {}, log = () => {}, onSetSecret = null, onSecretStatus = null } = {}) {
     this.getCurrent = getCurrent;
     this.onApply = onApply;
     this.log = log;
+    this.onSetSecret = onSetSecret;
+    this.onSecretStatus = onSecretStatus;
+    this._captionSecretStatus = null;
     this.draft = null;
     this.activeTab = "connectors";
     this.root = null;
@@ -305,6 +313,7 @@ export class SettingsUI {
       ["news", "ニュース", "RSS / 要約"],
       ["topics", "話題", "Todoist / 配信ネタ"],
       ["sources", "コメントソース", "Twitch 等"],
+      ["captions", "英語CC", "Twitch 英語字幕"],
     ];
     for (const [id, label, desc] of tabs) {
       const b = document.createElement("button");
@@ -430,6 +439,7 @@ export class SettingsUI {
     else if (tab === "news") this.#renderNews();
     else if (tab === "topics") this.#renderTopics();
     else if (tab === "sources") this.#renderSources();
+    else if (tab === "captions") this.#renderCaptions();
     this._body.scrollTop = 0;
     this.#applyIssueA11y();
     if (this._pendingFocusSelector) {
@@ -1749,6 +1759,84 @@ export class SettingsUI {
     note.className = "muted settings-note";
     note.textContent = "手動入力は常に有効です。Twitch は読み取り専用なら OAuth 不要です。";
     this._body.append(note);
+  }
+
+  // ---- 英語クローズドキャプション (issue #282) ----
+  #renderCaptions() {
+    const c = this.draft.captions ?? {};
+    if (!this.draft.captions) this.draft.captions = c;
+    if (!c.obs) c.obs = { host: "127.0.0.1", port: 4455, microphoneInputName: "" };
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = "英語クローズドキャプション";
+    const { card, body: cardBody } = this.#card([title]);
+    const enabledField = this.#pathCheckbox("配信者の日本語音声を英語字幕としてTwitchへ送る", "captions.enabled", { value: !!c.enabled, onChange: () => this.#render() });
+    cardBody.append(enabledField);
+    if (c.enabled) {
+      const grid = document.createElement("div");
+      grid.className = "card-grid";
+      grid.append(this.#pathSelect("音声認識", registryOptions("captionRecognitionEngines"), "captions.recognitionEngine", { value: c.recognitionEngine ?? "chrome-web-speech" }));
+      grid.append(this.#pathSelect("翻訳", registryOptions("captionTranslationEngines"), "captions.translationEngine", { value: c.translationEngine ?? "chrome-translator" }));
+      grid.append(this.#pathField("Chrome実行ファイル (省略時は自動検出)", "captions.chromeExecutable", { value: c.chromeExecutable ?? "", attrs: { spellcheck: "false" } }));
+      grid.append(this.#pathField("字幕ワーカーのポート (0で自動)", "captions.workerPort", { type: "number", value: c.workerPort ?? 0 }));
+      grid.append(this.#pathField("OBS WebSocketホスト", "captions.obs.host", { value: c.obs.host ?? "127.0.0.1", attrs: { spellcheck: "false" } }));
+      grid.append(this.#pathField("OBS WebSocketポート", "captions.obs.port", { type: "number", value: c.obs.port ?? 4455 }));
+      grid.append(this.#pathField("対象OBSマイク入力名 (省略時はミュート判定なし)", "captions.obs.microphoneInputName", { value: c.obs.microphoneInputName ?? "", attrs: { spellcheck: "false" } }));
+      grid.append(this.#pathField("送出待ちの上限", "captions.maxPending", { type: "number", value: c.maxPending ?? 2 }));
+      grid.append(this.#pathField("字幕の有効時間 (ms)", "captions.maxAgeMs", { type: "number", value: c.maxAgeMs ?? 5000 }));
+      grid.append(this.#pathField("字幕の最大文字数 (0で分割しない)", "captions.maxCaptionChars", { type: "number", value: c.maxCaptionChars ?? 0 }));
+      cardBody.append(grid);
+      cardBody.append(this.#pathCheckbox("字幕の受理をログに残す (本文は残しません)", "captions.logCaptions", { value: !!c.logCaptions }));
+      if (this.onSetSecret) cardBody.append(this.#captionPasswordField());
+    }
+    this._body.append(card);
+    const note = document.createElement("p");
+    note.className = "muted settings-note";
+    note.textContent = "配信者のマイク音声をデスクトップ版Google ChromeのWeb Speech APIで日本語文字起こしし、Chrome内蔵の翻訳で英訳して、OBS WebSocketの SendStreamCaption からTwitch公式クローズドキャプションへ送ります。翻訳に失敗した字幕は日本語のまま送らずに破棄します。操作卓の「英語CC」パネルから開始・停止できます。Chromeの音声認識はGoogleの音声認識サービスへ音声を送信します。OBSパスワードは設定ファイルではなくOS側の安全な保管領域へ保存され、設定のエクスポートには含まれません。";
+    this._body.append(note);
+  }
+
+  // OBS WebSocketパスワード。draft configには一切書かず、secret storeへ直接保存する
+  // (このクラスのコンストラクタのコメント参照)。
+  #captionPasswordField() {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const label = document.createElement("label");
+    label.textContent = "OBS WebSocketパスワード";
+    label.htmlFor = "captions-obs-password";
+    const input = document.createElement("input");
+    input.type = "password";
+    input.id = "captions-obs-password";
+    input.autocomplete = "off";
+    input.placeholder = this._captionSecretStatus?.configured ? "保存済み (変更する場合のみ入力)" : "未設定";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "パスワードを保存";
+    const status = document.createElement("span");
+    status.className = "muted";
+    button.addEventListener("click", () => {
+      const value = input.value;
+      if (!value) { status.textContent = "パスワードを入力してください"; return; }
+      void Promise.resolve(this.onSetSecret("captions.obs.password", value)).then((result) => {
+        input.value = "";
+        if (result?.ok) { this._captionSecretStatus = { configured: true }; status.textContent = "保存しました"; }
+        else status.textContent = `保存に失敗しました: ${result?.error?.message ?? "unknown error"}`;
+      });
+    });
+    const row = document.createElement("div");
+    row.className = "compact-row";
+    row.append(input, button, status);
+    wrap.append(label, row);
+    if (this.onSecretStatus && this._captionSecretStatus === null) {
+      this._captionSecretStatus = { configured: false };
+      void Promise.resolve(this.onSecretStatus(["captions.obs.password"])).then((result) => {
+        if (!result?.ok) return;
+        const entry = result.value.find((item) => item.key === "captions.obs.password");
+        this._captionSecretStatus = { configured: Boolean(entry?.configured) };
+        if (this.root?.open && this.activeTab === "captions") this.#render();
+      });
+    }
+    return wrap;
   }
 
   // ---- 適用 / エクスポート ----

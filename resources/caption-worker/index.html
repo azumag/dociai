@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dociai 英語CCワーカー</title>
+  <link rel="stylesheet" href="./caption-worker.css">
+  <!--CAPTION_BOOTSTRAP-->
+</head>
+<body>
+  <main class="worker">
+    <h1>dociai 英語クローズドキャプション</h1>
+    <p class="lead">
+      このタブは配信者のマイク音声を日本語で文字起こしし、Chrome内蔵の翻訳機能で英訳して dociai へ送ります。
+      タブを閉じると字幕は止まります。
+    </p>
+
+    <section class="notice" aria-label="プライバシーの注意">
+      <h2>音声の扱い</h2>
+      <p>
+        Chromeの音声認識はGoogleの音声認識サービスへ音声を送信します (端末内認識が有効な環境を除く)。
+        翻訳はChrome内蔵のTranslator APIで端末内処理され、外部の翻訳APIへは送信しません。
+        認識・翻訳した本文は dociai 側でディスクに保存されません。
+      </p>
+    </section>
+
+    <div class="controls">
+      <button id="btn-start" type="button">マイクと翻訳を開始</button>
+      <button id="btn-stop" type="button" disabled>停止</button>
+    </div>
+
+    <dl class="status">
+      <dt>dociai接続</dt><dd id="state-link">未接続</dd>
+      <dt>音声認識</dt><dd id="state-recognition">停止</dd>
+      <dt>翻訳</dt><dd id="state-translator">未確認</dd>
+      <dt>送出</dt><dd id="state-sent">0件</dd>
+    </dl>
+
+    <section class="preview">
+      <h2>日本語認識 <span class="hint">(確定前はこのタブ内のみの表示)</span></h2>
+      <p id="preview-recognized" class="preview-text" aria-live="polite"></p>
+      <h2>英語字幕</h2>
+      <p id="preview-caption" class="preview-text" aria-live="polite"></p>
+    </section>
+
+    <p id="message" class="message" role="status" aria-live="polite"></p>
+  </main>
+  <script type="module" src="./caption-worker.js"></script>
+</body>
+</html>

@@ -30,6 +30,9 @@ export function createAppState(overrides = {}) {
     lastTeardown: null,
     twitchStatus: null,
     translationModelStatus: null,
+    // issue #282: Main process の CaptionSession が push する CaptionStatus。操作卓の英語CC
+    // パネルと連携ヘルス行がこの1値を共有する (Browser版では常にnullのまま)。
+    captionStatus: null,
     systemLogs: [],
     ...overrides,
   };
