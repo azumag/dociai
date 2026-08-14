@@ -143,7 +143,12 @@ export class CaptionWorkerHost {
     this.#wss?.close();
     this.#wss = null;
     if (!server) return;
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+    // server.close()はKeep-Alive中の接続 (Chromeタブがページ/静的ファイルを取得した後、
+    // 開いたままになっているHTTP接続) が終わるのを待つため、Nodeの既定Keep-Aliveタイムアウト
+    // (~5秒) まで残ることがある。WebSocket側は#closeWorker()のterminate()で既に上限を
+    // 設けているので、こちらも即座に閉じて揃える (停止ボタン・ポート変更を素早く終わらせる)。
+    await closed;
     this.#port = 0;
   }
 

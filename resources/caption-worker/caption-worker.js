@@ -200,16 +200,34 @@ async function handleResult(event) {
   if (interim) view.recognized.textContent = interim;
 }
 
+// 翻訳が固まった場合 (モデルダウンロードが途中で止まる等) に、送出を直列化しているチェーン
+// (state.sendChain) 全体が永久にブロックされるのを避けるための上限。実測での妥当値は
+// issue #282 Phase 0の実機検証項目 — ここでは通常の翻訳所要時間 (ミリ秒〜数百ミリ秒) に
+// 十分な余裕を持たせた暫定値にしてある。
+const TRANSLATE_TIMEOUT_MS = 10_000;
+
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_resolve, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+}
+
 async function sendFinal(recognized, finalAt) {
   const source = recognized.trim();
   if (!source) return;
   view.recognized.textContent = source;
   let translated = "";
   try {
-    const translator = await ensureTranslator();
-    translated = (await translator.translate(source)).trim();
+    translated = await withTimeout(
+      ensureTranslator().then((translator) => translator.translate(source)),
+      TRANSLATE_TIMEOUT_MS,
+      `翻訳が${TRANSLATE_TIMEOUT_MS}ms以内に完了しませんでした`,
+    );
+    translated = translated.trim();
   } catch (error) {
-    // 翻訳に失敗したら日本語原文へフォールバックせず、その字幕を捨てる (issue #282)。
+    // 翻訳に失敗した (あるいは固まって上の上限に達した) 場合、日本語原文へフォールバックせず
+    // その字幕を捨てる (issue #282)。タイムアウトでも直列化チェーンはここで先へ進む。
     setMessage(`翻訳に失敗したため字幕を破棄しました: ${error.message}`, true);
     return;
   }

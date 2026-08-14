@@ -79,8 +79,8 @@ const waitFor = async (predicate, label, timeoutMs = 15_000) => {
   throw new Error(`timed out waiting for ${label}`);
 };
 
-const httpGet = (url, headers = {}) => new Promise((resolve, reject) => {
-  const request = http.get(url, { headers }, (response) => {
+const httpGet = (url, headers = {}, agent = undefined) => new Promise((resolve, reject) => {
+  const request = http.get(url, { headers, ...(agent ? { agent } : {}) }, (response) => {
     const chunks = [];
     response.on("data", (chunk) => chunks.push(chunk));
     response.on("end", () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks).toString("utf8") }));
