@@ -251,6 +251,25 @@ test("進行中の送出に積まれたテスト字幕は失敗ではなくqueue
   });
 });
 
+test("MAX_CAPTION_TEXT_CHARSちょうどのテスト字幕でも、連番の付与分だけ切り詰めてtoo-longにしない", async () => {
+  await withSession(async ({ session, obs, launched }) => {
+    const url = await startWorkerAndGetUrl(session, launched);
+    const bootstrap = readBootstrap((await httpGet(url)).body);
+    const worker = connectWorker(bootstrap.origin, bootstrap.socketToken, bootstrap.protocolVersion);
+    await worker.waitForWelcome();
+    await waitFor(() => session.status().obs.connected, "obs connected");
+    // IPC入力検証 (caption-input.ts) を通過するちょうど上限の文字列。素朴に " (1)" を
+    // 連結するとMAX_CAPTION_TEXT_CHARSを超えてtoo-longとして拒否されてしまっていた。
+    const maxLengthText = "a".repeat(500);
+    const result = await session.testCaption(maxLengthText);
+    assert.equal(result.sent, true, JSON.stringify(result));
+    await waitFor(() => obs.state.captions.length === 1, "sent");
+    assert.ok(obs.state.captions[0].length <= 500, `expected <= 500 chars, got ${obs.state.captions[0].length}`);
+    assert.ok(obs.state.captions[0].endsWith("(1)"), obs.state.captions[0].slice(-10));
+    await worker.close();
+  });
+});
+
 test("フリーズしたワーカーソケットでもstop()がterminate()の上限で戻る", async () => {
   const { modules, directory } = await loadModules();
   try {

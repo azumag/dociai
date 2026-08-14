@@ -133,6 +133,10 @@ export class CaptionPanel {
     // openChromeWorkerだけは ok:true でも opened:false (Chrome未検出等) がありうる。
     if (result.value?.opened === false) { this.#message(describeReason(result.value.reason), true); return; }
     if (result.value?.health !== undefined) this.render(result.value);
+    // start()はCaptionStatusを返す関数であってもthrowしない — 失敗時 (ポート競合等) も
+    // ok:trueのまま running:false + lastError付きで返る。この場合に成功文言で上書きすると、
+    // 実際には停止しているのに「開始しました」と表示してしまう (原因もlastErrorに隠れて見えない)。
+    if (result.value?.running === false && result.value?.lastError) { this.#message(result.value.lastError.message, true); return; }
     this.#message(successMessage);
     this.log(successMessage);
     if (result.value?.health === undefined) void this.refresh();

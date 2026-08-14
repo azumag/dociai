@@ -73,3 +73,24 @@ test("設定が無効な間は「有効にしてください」を表示する",
   panel.render(baseStatus({ enabled: false, running: false, health: "disabled" }));
   assert.equal(root.querySelector("#caption-status").textContent, "設定で英語CCを有効にしてください");
 });
+
+test("start()がok:trueのまま起動失敗 (running:false + lastError) を返しても成功文言で上書きしない", async () => {
+  const root = createFakeRoot();
+  const failed = { sent: undefined, ...baseStatus({ running: false, health: "error", lastError: { code: "worker_host_failed", message: "字幕ワーカー用ポート 12345 は既に使用されています" } }) };
+  const panel = new CaptionPanel(root, {
+    status: async () => ({ ok: true, value: baseStatus({ running: false, enabled: true, health: "disabled" }) }),
+    start: async () => ({ ok: true, value: failed }),
+    openWorker: async () => ({ ok: true, value: { opened: true } }),
+    stop: async () => ({ ok: true, value: baseStatus({ running: false, enabled: true, health: "disabled" }) }),
+    testCaption: async () => ({ ok: true, value: { sent: false } }),
+    subscribe: () => () => {},
+  });
+  panel.connect();
+  root.querySelector("#btn-caption-start").click();
+  await Promise.resolve(); // #run()内のawaitを1周させる
+  await Promise.resolve();
+  // CaptionSession.start()はthrowしない設計 (issue #282「障害は常に非critical」) なので、
+  // 「開始しました」という成功文言で本当のエラー (ポート競合) を隠してしまわないこと。
+  assert.equal(root.querySelector("#caption-status").textContent, "字幕ワーカー用ポート 12345 は既に使用されています");
+  assert.equal(root.querySelector("#caption-status").classes.error, true);
+});

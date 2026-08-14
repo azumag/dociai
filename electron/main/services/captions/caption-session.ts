@@ -15,6 +15,7 @@ import { resolveCaptionHealth } from "./caption-health";
 import { CaptionWorkerHost, type WorkerSocketServerFactory } from "./caption-worker-host";
 import { ObsCaptionOutputService } from "./obs-caption-output-service";
 import type { ObsSocketFactory } from "./obs-websocket-client";
+import { MAX_CAPTION_TEXT_CHARS } from "../../../shared/services/caption-contract";
 import type { CaptionRejectReason, CaptionStatus, CaptionWorkerState } from "../../../shared/services/caption-contract";
 
 export type CaptionsConfig = {
@@ -256,7 +257,12 @@ export class CaptionSession {
   async testCaption(text: string): Promise<{ sent: boolean; reason?: string }> {
     if (!this.#running) return { sent: false, reason: "disabled" };
     this.#testCounter += 1;
-    const evaluation = this.#policy.evaluate({ sequence: -1, isFinal: true, recognized: "", text: `${text} (${this.#testCounter})`, ageMs: 0 }, { connectionGeneration: this.#policy.generation });
+    const suffix = ` (${this.#testCounter})`;
+    // 連番を足した結果がMAX_CAPTION_TEXT_CHARSを超えると、caption-input.tsのIPC検証を
+    // 通過済みの (=ちょうど上限の) 文字列がここで一律too-longになってしまう。連番を付けるのは
+    // 診断ボタンとしての利便性のためであって検査対象ではないので、超える分だけ本文を切り詰める。
+    const withSuffix = text.length + suffix.length > MAX_CAPTION_TEXT_CHARS ? `${text.slice(0, MAX_CAPTION_TEXT_CHARS - suffix.length)}${suffix}` : `${text}${suffix}`;
+    const evaluation = this.#policy.evaluate({ sequence: -1, isFinal: true, recognized: "", text: withSuffix, ageMs: 0 }, { connectionGeneration: this.#policy.generation });
     if (!evaluation.ok) { this.#counters.rejected += 1; this.#emit(); return { sent: false, reason: evaluation.reason }; }
     this.#counters.accepted += 1;
     this.#lastCaption = evaluation.text;
