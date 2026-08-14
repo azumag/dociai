@@ -40,6 +40,8 @@ export type CaptionWorkerHostOptions = {
   onConnectionChange: (connected: boolean) => void;
   log?: (message: string, fields?: Record<string, unknown>) => void;
   authTimeoutMs?: number;
+  // #closeWorker() が正常closeを待つ上限。超えたらterminate()で強制的に切る。
+  closeTimeoutMs?: number;
 };
 
 // 配信を許可する静的ファイル。ここに無いpathは常に404 — 相対pathの正規化に頼らないので
@@ -165,6 +167,11 @@ export class CaptionWorkerHost {
     if (socket) {
       try { socket.send(JSON.stringify({ type: "stop", reason } satisfies CaptionHostMessage)); } catch { /* 送れなくても閉じる */ }
       try { socket.close(1001, reason); } catch { /* already closing */ }
+      // フリーズ/サスペンドしたタブは正常なclose handshakeに応答しないため、closeイベントが
+      // 来ないまま `ws` の既定close timeout (~30秒) まで残り続け、stop() (server.close()経由) や
+      // applyConfig()のポート変更経路をその間ブロックしてしまう。terminate()でTCPを即座に切って
+      // 上限を設ける — WorkerSocketLikeが持っている場合だけ (実装のwsは必ず持つ)。
+      setTimeout(() => { try { socket.terminate?.(); } catch { /* 既に閉じている */ } }, this.#options.closeTimeoutMs ?? 2_000).unref?.();
     }
     if (wasConnected) this.#options.onConnectionChange(false);
   }

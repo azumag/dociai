@@ -38,7 +38,7 @@ export { obsAuthenticationString, ObsWebSocketClient } from "./electron/main/ser
 async function createMockObs({ password = null, streaming = true, muted = false, silent = false, availableRequests = ["GetVersion", "GetStreamStatus", "GetInputMute", "SendStreamCaption"] } = {}) {
   const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await new Promise((resolve) => wss.once("listening", resolve));
-  const state = { captions: [], sockets: new Set(), streaming, muted, identifyFailures: 0, closedByClient: 0 };
+  const state = { captions: [], sockets: new Set(), streaming, muted, identifyFailures: 0, closedByClient: 0, streamStatusDelayMs: 0 };
   wss.on("connection", (socket) => {
     state.sockets.add(socket);
     socket.on("close", () => { state.sockets.delete(socket); state.closedByClient += 1; });
@@ -60,7 +60,11 @@ async function createMockObs({ password = null, streaming = true, muted = false,
       const { requestType, requestId, requestData } = message.d;
       const respond = (responseData, ok = true, code = 100) => socket.send(JSON.stringify({ op: 7, d: { requestType, requestId, requestStatus: { result: ok, code }, responseData } }));
       if (requestType === "GetVersion") return respond({ obsVersion: "31.0.0", availableRequests });
-      if (requestType === "GetStreamStatus") return respond({ outputActive: state.streaming });
+      if (requestType === "GetStreamStatus") {
+        // 応答の到達順序を意図的に乱すためのテストフック (streamStatusDelayMs)。
+        if (state.streamStatusDelayMs > 0) { const delay = state.streamStatusDelayMs; state.streamStatusDelayMs = 0; setTimeout(() => respond({ outputActive: state.streaming }), delay); return; }
+        return respond({ outputActive: state.streaming });
+      }
       if (requestType === "GetInputMute") return requestData.inputName === "Mic/Aux" ? respond({ inputMuted: state.muted }) : respond({}, false, 600);
       if (requestType === "SendStreamCaption") { state.captions.push(requestData.captionText); return respond({}); }
       return respond({}, false, 204);
@@ -72,10 +76,13 @@ async function createMockObs({ password = null, streaming = true, muted = false,
     broadcast: (eventType, eventData) => { for (const socket of state.sockets) socket.send(JSON.stringify({ op: 5, d: { eventType, eventData } })); },
     dropConnections: () => { for (const socket of state.sockets) socket.close(); },
     close: () => new Promise((resolve) => { for (const socket of state.sockets) socket.terminate(); wss.close(() => resolve()); }),
+    // 次に届くGetStreamStatusリクエストへの応答だけを遅らせる (レース再現用)。
+    delayNextStreamStatusResponse: (delayMs) => { state.streamStatusDelayMs = delayMs; },
   };
 }
 
-const waitFor = async (predicate, label, timeoutMs = 4_000) => {
+// 4秒だとCI/コンテナのCPU負荷変動で稀にタイムアウトする (実際に確認済み) ので余裕を持たせる。
+const waitFor = async (predicate, label, timeoutMs = 15_000) => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return;
@@ -220,6 +227,25 @@ test("応答が連続でtimeoutしたら自分から切断して再接続へ落�
     await waitFor(() => obs.state.closedByClient > 0, "self-disconnect", 8_000);
     // refreshIntervalMs でポーリングを続けさせ、timeoutが規定回数連続する状況を作る
   }, { requestTimeoutMs: 60, refreshIntervalMs: 40 });
+});
+
+test("GetStreamStatusの応答が遅延しても、先に届いたStreamStateChangedイベントを上書きしない", async () => {
+  // #onIdentified()内のGetStreamStatus応答が、テストが直後に送るStreamStateChangedイベントより
+  // 遅れてクライアントに届く場合を再現する。obs.broadcastを遅延させることで、
+  // 「サーバーは応答を先に送ったが、クライアントへの到達がイベントより後になる」状況を作る。
+  await withService({ streaming: false }, async ({ service, obs }) => {
+    // GetStreamStatusの応答をわざと遅らせて、StreamStateChangedイベントが先に届く状況を作る。
+    obs.delayNextStreamStatusResponse(50);
+    service.start({ host: "127.0.0.1", port: obs.port, password: null, microphoneInputName: "" });
+    await waitFor(() => service.state.connected, "identified");
+    obs.state.streaming = true;
+    obs.broadcast("StreamStateChanged", { outputActive: true, outputState: "OBS_WEBSOCKET_OUTPUT_STARTED" });
+    // 遅延させたGetStreamStatus応答 (streaming:false, 古い値) が後から届いても、
+    // 世代印がガードしてstreamingをfalseへ巻き戻さない。
+    await waitFor(() => service.state.streaming, "streaming");
+    await new Promise((resolve) => setTimeout(resolve, 100)); // 遅延応答が届く時間を確保する
+    assert.equal(service.state.streaming, true);
+  });
 });
 
 test("OBSのchallenge-responseはobs-websocket 5.xの仕様どおりに計算される", async () => {

@@ -69,7 +69,8 @@ async function createMockObs({ streaming = true } = {}) {
   };
 }
 
-const waitFor = async (predicate, label, timeoutMs = 4_000) => {
+// 4秒だとCI/コンテナのCPU負荷変動で稀にタイムアウトする (実際に確認済み) ので余裕を持たせる。
+const waitFor = async (predicate, label, timeoutMs = 15_000) => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return;
@@ -243,9 +244,51 @@ test("進行中の送出に積まれたテスト字幕は失敗ではなくqueue
     assert.equal(queued.sent, false);
     assert.equal(queued.reason, "queued");
     await waitFor(() => obs.state.captions.length === 2, "both captions sent");
-    assert.deepEqual(obs.state.captions, ["First caption.", "Second caption."]);
+    // testCaption()は毎回連番を付与する (成功後に#lastSentが埋まったままduplicateに
+    // ならないようにするため — 送出したテキストそのものは呼び出し順の連番になる)
+    assert.deepEqual(obs.state.captions, ["First caption. (1)", "Second caption. (2)"]);
     await worker.close();
   });
+});
+
+test("フリーズしたワーカーソケットでもstop()がterminate()の上限で戻る", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    // close()呼び出しには一切応答しない (フリーズ/サスペンドしたタブを模す) ようwssをラップする。
+    // terminate()だけは実ソケットへ委譲し、実際にTCPを切って"close"イベントを発火させる。
+    const webSocketServerFactory = (options) => {
+      const real = new WebSocketServer(options);
+      return {
+        handleUpgrade: (request, socket, head, callback) => real.handleUpgrade(request, socket, head, (ws) => {
+          const wrapped = { send: (data) => ws.send(data), close: () => {}, terminate: () => ws.terminate(), on: (event, handler) => ws.on(event, handler) };
+          callback(wrapped);
+        }),
+        close: (cb) => real.close(cb),
+      };
+    };
+    const host = new modules.CaptionWorkerHost({
+      assetDir,
+      webSocketServerFactory,
+      onCaption: () => {},
+      onWorkerState: () => {},
+      onConnectionChange: () => {},
+      closeTimeoutMs: 30,
+    });
+    await host.start(0, 1);
+    const url = host.issueWorkerUrl();
+    const page = await httpGet(url);
+    const bootstrap = readBootstrap(page.body);
+    const worker = connectWorker(bootstrap.origin, bootstrap.socketToken, bootstrap.protocolVersion);
+    await worker.waitForWelcome();
+    const start = Date.now();
+    await host.stop();
+    const elapsed = Date.now() - start;
+    // closeに応答しないソケットでも、terminate()の上限 (30ms) 程度で戻る —
+    // `ws`の既定close timeout (~30秒) をまるごと待たされない。
+    assert.ok(elapsed < 2_000, `stop() took too long: ${elapsed}ms`);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("不正なrequest-targetでもMainを落とさず400/切断で応答する", async () => {

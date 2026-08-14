@@ -46,6 +46,12 @@ export class ObsCaptionOutputService {
   #stopped = true;
   #everIdentified = false;
   #consecutiveTimeouts = 0;
+  // GetStreamStatus/GetInputMuteのpull型ポーリングと、StreamStateChanged/InputMuteStateChanged
+  // のpush型イベントが競合したときの「後着優先」を保証するための世代印。イベントを受信するたびに
+  // 進め、リクエスト発行時点の世代を憶えておく — 応答が返ってきたときに世代が動いていたら、
+  // その間に届いた (より新しい) イベントを、遅れて届いた古いポーリング応答で上書きしない。
+  #streamEventGeneration = 0;
+  #muteEventGeneration = 0;
 
   constructor(options: ObsCaptionOutputOptions) {
     this.#options = options;
@@ -180,8 +186,11 @@ export class ObsCaptionOutputService {
   // 応答が返るまでに切断・再接続していたら、その結果はもう現在の接続の状態ではないので捨てる。
   async #refreshStreamState(): Promise<void> {
     const client = this.#client;
+    const generation = this.#streamEventGeneration;
     const result = client ? await this.#request("GetStreamStatus") : null;
-    if (result?.ok && this.#client === client) this.#patch({ streaming: result.data.outputActive === true });
+    // 応答を待っている間にStreamStateChangedイベントが届いていたら、そちらの方が新しい実況値
+    // なので、遅れて届いたこの応答では上書きしない (実際にloopbackでも起き得ることを確認済み)。
+    if (result?.ok && this.#client === client && this.#streamEventGeneration === generation) this.#patch({ streaming: result.data.outputActive === true });
   }
 
   // 対象マイク入力名が未設定なら、ミュート判定そのものを行わない (常に非ミュート扱い)。
@@ -192,8 +201,11 @@ export class ObsCaptionOutputService {
     // (消さないと「ミュート判定なし」に戻したのにエラー表示だけが残り続ける)。
     if (!inputName) { this.#patch({ micMuted: false, ...(this.#state.lastError?.code === "obs_input_missing" ? { lastError: null } : {}) }); return; }
     const client = this.#client;
+    const generation = this.#muteEventGeneration;
     const result = client ? await this.#request("GetInputMute", { inputName }) : null;
     if (!result || this.#client !== client) return;
+    // #refreshStreamStateと同じ理由 — 応答を待つ間に届いたInputMuteStateChangedの方が新しい。
+    if (this.#muteEventGeneration !== generation) return;
     if (result.ok) { this.#patch({ micMuted: result.data.inputMuted === true, ...(this.#state.lastError?.code === "obs_input_missing" ? { lastError: null } : {}) }); return; }
     // 入力名のtypo等でミュート状態を取得できない場合はfail-closed (ミュート扱い) にする。
     // fail-openにすると「実際にはミュート中なのに字幕が出続ける」= issue #282の送出条件を
@@ -203,10 +215,11 @@ export class ObsCaptionOutputService {
   }
 
   #onEvent(eventType: string, eventData: Record<string, unknown>): void {
-    if (eventType === "StreamStateChanged") { this.#patch({ streaming: eventData.outputActive === true }); return; }
+    if (eventType === "StreamStateChanged") { this.#streamEventGeneration += 1; this.#patch({ streaming: eventData.outputActive === true }); return; }
     if (eventType === "InputMuteStateChanged") {
       const inputName = this.#target?.microphoneInputName ?? "";
       if (!inputName || eventData.inputName !== inputName) return;
+      this.#muteEventGeneration += 1;
       // 名前が一致するイベントが届いた = その入力は実在するので、fail-closed時のエラーは解消。
       this.#patch({ micMuted: eventData.inputMuted === true, ...(this.#state.lastError?.code === "obs_input_missing" ? { lastError: null } : {}) });
     }
@@ -215,6 +228,8 @@ export class ObsCaptionOutputService {
   #onClose(): void {
     this.#client = null;
     this.#consecutiveTimeouts = 0;
+    this.#streamEventGeneration = 0;
+    this.#muteEventGeneration = 0;
     if (this.#refreshTimer) { clearInterval(this.#refreshTimer); this.#refreshTimer = null; }
     this.#patch({ connected: false, streaming: false, captionSupported: false, micMuted: false });
     if (this.#stopped || this.#reconnectTimer) return;

@@ -246,11 +246,17 @@ export class CaptionSession {
     return { opened: true };
   }
 
+  #testCounter = 0;
+
   // 操作卓の「テスト字幕」。実際の送出条件 (OBS接続/配信中/非ミュート) をそのまま通すので、
   // 送れなかった理由がそのまま運用者への診断になる。policyの重複排除も通す。
+  //
+  // 文言に連番を混ぜているのは、成功後は#lastSentが埋まったままになり、2回目以降のテストが
+  // 常にduplicateとして拒否される (=診断ボタンとして機能しなくなる) のを避けるため。
   async testCaption(text: string): Promise<{ sent: boolean; reason?: string }> {
     if (!this.#running) return { sent: false, reason: "disabled" };
-    const evaluation = this.#policy.evaluate({ sequence: -1, isFinal: true, recognized: "", text, ageMs: 0 }, { connectionGeneration: this.#policy.generation });
+    this.#testCounter += 1;
+    const evaluation = this.#policy.evaluate({ sequence: -1, isFinal: true, recognized: "", text: `${text} (${this.#testCounter})`, ageMs: 0 }, { connectionGeneration: this.#policy.generation });
     if (!evaluation.ok) { this.#counters.rejected += 1; this.#emit(); return { sent: false, reason: evaluation.reason }; }
     this.#counters.accepted += 1;
     this.#lastCaption = evaluation.text;

@@ -50,6 +50,9 @@ const REJECT_LABELS = Object.freeze({
 const describeReason = (reason) => REJECT_LABELS[reason] ?? String(reason ?? "");
 
 export class CaptionPanel {
+  // 直前のrenderがエラー表示だったかどうか。エラー解消時に消し忘れの旧文言を残さないために使う。
+  #lastMessageWasError = false;
+
   // onStatus は「描画したstatus」を毎回呼び出し元へ渡す。subscribe側だけで拾うと、
   // 起動直後に一度だけpullするstatus (refresh) が連携ヘルスへ反映されず、最初の状態変化が
   // 起きるまでヘルス行が"unknown"のままになる。
@@ -117,6 +120,11 @@ export class CaptionPanel {
     this.elements.test.disabled = !status.running;
     if (status.lastError) this.#message(status.lastError.message, true);
     else if (!status.enabled) this.#message("設定で英語CCを有効にしてください");
+    // エラーが解消したら、消し忘れの古いエラー文言を出したままにしない (aria-liveで読まれ続ける)。
+    // ボタン操作の成功/送出結果メッセージ (this.#message() の他の呼び出し) は上書きしない —
+    // ここで消すのは「直前のrenderがエラーだった」場合だけ。
+    else if (this.#lastMessageWasError) this.#message("");
+    this.#lastMessageWasError = Boolean(status.lastError);
   }
 
   async #run(action, successMessage) {
