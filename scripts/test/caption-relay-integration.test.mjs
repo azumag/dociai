@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import http from "node:http";
+import net from "node:net";
 import path from "node:path";
 import test from "node:test";
 import { build } from "esbuild";
@@ -199,6 +200,10 @@ test("OBSが未配信の間はSendStreamCaptionを一度も呼ばない", async 
     const worker = connectWorker(bootstrap.origin, bootstrap.socketToken, bootstrap.protocolVersion);
     await worker.waitForWelcome();
     await waitFor(() => session.status().obs.connected, "obs connected");
+    // 実機と同じく、Chromeタブで「開始」を押した状態にしてからOBS側のゲートを検証する
+    // (認識が止まっている間は health が recognition_stopped を優先するため)。
+    worker.send({ type: "state", state: "recognizing" });
+    await waitFor(() => session.status().worker.state === "recognizing", "recognizing");
     worker.send({ type: "caption", sequence: 1, isFinal: true, recognized: "こんばんは", text: "Good evening.", ageMs: 0 });
     await waitFor(() => session.status().counters.failed === 1, "send refused");
     assert.deepEqual(obs.state.captions, []);
@@ -240,6 +245,28 @@ test("進行中の送出に積まれたテスト字幕は失敗ではなくqueue
     await waitFor(() => obs.state.captions.length === 2, "both captions sent");
     assert.deepEqual(obs.state.captions, ["First caption.", "Second caption."]);
     await worker.close();
+  });
+});
+
+test("不正なrequest-targetでもMainを落とさず400/切断で応答する", async () => {
+  await withSession(async ({ session, launched }) => {
+    const url = await startWorkerAndGetUrl(session, launched);
+    const origin = new URL(url).origin;
+    // Node は絶対形式の request-target をそのまま request.url へ渡すため、
+    // new URL() が投げてMainのuncaughtExceptionになりうる経路 (loopbackなら誰でも叩ける)。
+    const status = await new Promise((resolve, reject) => {
+      const socket = net.connect(Number(new URL(origin).port), "127.0.0.1", () => {
+        socket.write(`GET http://[x HTTP/1.1\r\nHost: 127.0.0.1:${new URL(origin).port}\r\nConnection: close\r\n\r\n`);
+      });
+      let response = "";
+      socket.on("data", (chunk) => { response += chunk.toString("utf8"); });
+      socket.on("end", () => resolve(response.split("\r\n")[0] ?? ""));
+      socket.on("error", reject);
+    });
+    assert.match(status, /^HTTP\/1\.1 400/);
+    // サーバは生きたままで、正規のリクエストは通常どおり処理できる
+    assert.equal((await httpGet(`${origin}/caption-worker.js`)).status, 200);
+    assert.equal(session.status().running, true);
   });
 });
 

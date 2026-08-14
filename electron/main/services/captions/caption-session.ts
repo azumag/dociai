@@ -90,6 +90,9 @@ export class CaptionSession {
   #draining = false;
   // undefined = 未評価。#chromeExecutable() が遅延評価し、applyConfig/openWorker で無効化する。
   #chromeCache: string | null | undefined = undefined;
+  // start()/stop()/applyConfig() のたびに進める。awaitを跨いだ処理が、その間に走った別の
+  // ライフサイクル操作を追い越して副作用を残さないための世代印 (下の #lifecycleChanged 参照)。
+  #lifecycle = 0;
 
   constructor(options: CaptionSessionOptions) {
     this.#options = options;
@@ -151,6 +154,7 @@ export class CaptionSession {
     const previous = this.#config;
     this.#config = config;
     this.#chromeCache = undefined;
+    const token = (this.#lifecycle += 1);
     this.#policy.configure({ maxPending: config.maxPending, maxAgeMs: config.maxAgeMs, maxCaptionChars: config.maxCaptionChars, replacements: config.replacements });
     if (!config.enabled) { if (this.#running) await this.stop(); else this.#emit(); return; }
     if (!this.#running) { this.#emit(); return; }
@@ -160,7 +164,11 @@ export class CaptionSession {
       await this.start();
       return;
     }
-    this.#obs.reconfigure({ ...config.obs, password: await this.#options.readObsPassword() });
+    const password = await this.#options.readObsPassword();
+    // start()と同じ理由 — await中にstop()やもう一度のapplyConfigが走っていたら、
+    // 既に畳んだ (あるいは新しい設定で張り直した) OBS接続をここで蒸し返さない。
+    if (this.#lifecycleChanged(token) || !this.#running) { this.#emit(); return; }
+    this.#obs.reconfigure({ ...config.obs, password });
     this.#emit();
   }
 
@@ -168,20 +176,30 @@ export class CaptionSession {
     if (!this.#config.enabled) { this.#setError("disabled", "英語CCが設定で無効になっています"); return this.status(); }
     if (this.#running) return this.status();
     this.#lastError = null;
+    const token = (this.#lifecycle += 1);
     const generation = this.#policy.reset();
+    // OBSパスワードの読み出しはawaitを挟むので、hostを起動する前に済ませておく。
+    const password = await this.#options.readObsPassword();
+    if (this.#lifecycleChanged(token)) return this.status();
     try {
       await this.#host.start(this.#config.workerPort, generation);
     } catch (error) {
       this.#setError("worker_host_failed", error instanceof Error ? error.message : String(error));
       return this.status();
     }
+    // await中にstop()が入っていたら、起動しかけたhostを畳んで何も残さない。
+    // ここを見ないと running:false のままOBS接続と再接続タイマーだけが生き残る。
+    if (this.#lifecycleChanged(token)) { await this.#host.stop(); return this.status(); }
     this.#running = true;
-    this.#obs.start({ ...this.#config.obs, password: await this.#options.readObsPassword() });
+    this.#obs.start({ ...this.#config.obs, password });
     this.#emit();
     return this.status();
   }
 
+  #lifecycleChanged(token: number): boolean { return this.#lifecycle !== token; }
+
   async stop(): Promise<CaptionStatus> {
+    this.#lifecycle += 1;
     this.#running = false;
     this.#workerConnected = false;
     this.#workerState = "idle";

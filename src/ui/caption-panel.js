@@ -13,6 +13,7 @@ const HEALTH_LABELS = Object.freeze({
   microphone_permission_required: "マイク許可待ち",
   recognition_starting: "認識開始中",
   recognizing: "聞き取り中",
+  recognition_stopped: "認識停止中",
   translator_downloading: "翻訳DL中",
   translator_ready: "翻訳準備完了",
   obs_disconnected: "OBS未接続",

@@ -31,6 +31,9 @@ export function resolveCaptionHealth(input: CaptionHealthInput): CaptionHealthSt
   if (input.workerState === "translator_downloading") return "translator_downloading";
   if (input.workerState === "recognition_starting") return "recognition_starting";
   if (input.workerState === "error" || input.workerState === "translator_unavailable") return "error";
+  // Chromeタブは繋がっているが認識が動いていない (開始前・停止後)。OBS側の状態より先に出す —
+  // 運用者が次に取るべき操作はChromeタブでの「開始」であって、OBSの確認ではないため。
+  if (input.workerState === "idle" || input.workerState === "recognition_stopped") return "recognition_stopped";
   // ここから下流 (OBS側)。字幕を作れてはいるが送り先が整っていない状態。
   if (!input.obsConnected || !input.obsCaptionSupported) return "obs_disconnected";
   if (!input.obsStreaming) return "obs_not_streaming";

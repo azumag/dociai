@@ -213,6 +213,15 @@ test("healthは上流から順に決まり、送出条件が揃ってはじめ�
     assert.equal(resolveCaptionHealth({ ...base, micMuted: true }), "mic_muted");
     assert.equal(resolveCaptionHealth({ ...base, sendingRecently: true }), "sending");
     assert.equal(resolveCaptionHealth(base), "recognizing");
+    // Chromeタブは繋がっているが「開始」前/停止後。「聞き取り中」と出すと、字幕が一切出ない
+    // 状態なのに稼働中に見えてしまう (認識行の「停止」表示とも矛盾する)。
+    assert.equal(resolveCaptionHealth({ ...base, workerState: "idle" }), "recognition_stopped");
+    assert.equal(resolveCaptionHealth({ ...base, workerState: "recognition_stopped" }), "recognition_stopped");
+    // 認識が止まっていても、より上流の異常があればそちらを先に出す
+    assert.equal(resolveCaptionHealth({ ...base, workerState: "idle", workerConnected: false }), "worker_disconnected");
+    // 認識停止はOBS側の状態より優先する (次に取るべき操作はChromeタブでの開始のため)
+    assert.equal(resolveCaptionHealth({ ...base, workerState: "idle", obsStreaming: false }), "recognition_stopped");
+    assert.equal(resolveCaptionHealth({ ...base, workerState: "translator_ready" }), "translator_ready");
   });
 });
 

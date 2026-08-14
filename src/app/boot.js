@@ -292,7 +292,7 @@ function normalizeCaptionHealth(status) {
   if (status.health === "error") return "error";
   if (status.health === "disabled") return "disabled";
   if (["chrome_not_found", "microphone_permission_required"].includes(status.health)) return "configuration_required";
-  if (["worker_disconnected", "obs_disconnected", "obs_not_streaming", "mic_muted"].includes(status.health)) return "degraded";
+  if (["worker_disconnected", "obs_disconnected", "obs_not_streaming", "mic_muted", "recognition_stopped"].includes(status.health)) return "degraded";
   if (["recognition_starting", "translator_downloading"].includes(status.health)) return "checking";
   return "ready";
 }

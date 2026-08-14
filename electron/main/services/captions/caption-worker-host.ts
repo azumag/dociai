@@ -73,6 +73,11 @@ const timingSafeEqual = (a: string, b: string): boolean => {
 
 const newToken = (): string => crypto.randomBytes(CAPTION_SESSION_TOKEN_BYTES).toString("base64url");
 
+// 不正なrequest-targetでも例外にせずnullを返す。
+function parseRequestUrl(target: string | undefined, origin: string): URL | null {
+  try { return new URL(target ?? "/", origin); } catch { return null; }
+}
+
 export class CaptionWorkerHost {
   #options: CaptionWorkerHostOptions;
   #server: http.Server | null = null;
@@ -99,7 +104,14 @@ export class CaptionWorkerHost {
     this.#generation = generation;
     this.#socketToken = null;
     this.#pageToken = null;
-    const server = http.createServer((request, response) => { void this.#handleRequest(request, response); });
+    // ハンドラ内の例外がunhandled rejectionとしてMainへ伝播しないよう、ここで必ず受け止める。
+    // loopbackとはいえローカルの任意プロセスがこのポートへ何でも送れる。
+    const server = http.createServer((request, response) => {
+      void this.#handleRequest(request, response).catch((error) => {
+        this.#options.log?.("字幕ワーカーhostのリクエスト処理に失敗しました", { message: error instanceof Error ? error.message : String(error) });
+        try { response.writeHead(500, securityHeaders(this.origin)).end("Internal Server Error"); } catch { /* 応答済み */ }
+      });
+    });
     const wss = this.#options.webSocketServerFactory({ noServer: true, maxPayload: MAX_WORKER_MESSAGE_BYTES });
     server.on("upgrade", (request, socket, head) => this.#handleUpgrade(request, socket, head, wss));
     await new Promise<void>((resolve, reject) => {
@@ -163,7 +175,10 @@ export class CaptionWorkerHost {
     const headers = securityHeaders(this.origin);
     if (!this.#isLoopbackRequest(request)) { response.writeHead(403, headers).end("Forbidden"); return; }
     if (request.method !== "GET") { response.writeHead(405, headers).end("Method Not Allowed"); return; }
-    const url = new URL(request.url ?? "/", this.origin);
+    // request-target は絶対形式でも来うる (`GET http://[x HTTP/1.1` 等)。Nodeはこれを素通しするので
+    // new URL() が投げる — 不正な要求はここで400にして、Main側の例外にしない。
+    const url = parseRequestUrl(request.url, this.origin);
+    if (!url) { response.writeHead(400, headers).end("Bad Request"); return; }
     const asset = STATIC_FILES[url.pathname];
     if (asset) {
       try {
@@ -212,9 +227,11 @@ export class CaptionWorkerHost {
     return typeof origin === "string" && allowedOrigins.has(origin);
   }
 
+  // upgradeハンドラ内のthrowはEventEmitter経由でuncaughtExceptionになるため、
+  // ここでもURLのパース失敗を握りつぶさず「不正な接続」として切る。
   #handleUpgrade(request: http.IncomingMessage, socket: any, head: Buffer, wss: WorkerSocketServerLike): void {
-    const url = new URL(request.url ?? "/", this.origin);
-    if (url.pathname !== "/socket" || !this.#isLoopbackRequest(request) || !this.#socketToken) {
+    const url = parseRequestUrl(request.url, this.origin);
+    if (!url || url.pathname !== "/socket" || !this.#isLoopbackRequest(request) || !this.#socketToken) {
       socket.destroy();
       return;
     }

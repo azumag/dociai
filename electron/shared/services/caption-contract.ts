@@ -78,6 +78,9 @@ export type CaptionHealthState =
   | "microphone_permission_required"
   | "recognition_starting"
   | "recognizing"
+  // Chromeタブは繋がっているが、まだ「マイクと翻訳を開始」が押されていない/停止された状態。
+  // recognizing と混同すると「聞き取り中」と表示されたまま字幕が一切出ない状況になる。
+  | "recognition_stopped"
   | "translator_downloading"
   | "translator_ready"
   | "obs_disconnected"
