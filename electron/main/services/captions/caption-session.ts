@@ -106,7 +106,7 @@ export class CaptionSession {
       refreshIntervalMs: options.obsRefreshIntervalMs,
       onStateChange: () => this.#emit(),
       // 再接続直後に古い字幕を流さない (issue #282「再接続後に古い字幕キューを流さない」)。
-      onReconnected: () => { this.#policy.clearQueue(); this.#emit(); },
+      onReconnected: () => { this.#applyOverflow(this.#policy.clearQueue()); this.#emit(); },
       log: options.log,
     });
   }
@@ -277,9 +277,8 @@ export class CaptionSession {
       this.#workerState = "idle";
       // 切断時に溜まっていた字幕は捨てる — 再接続後に古い発話が流れると配信内容とずれる。
       // 一度も届いていない以上、期限切れ・送出失敗と同じく重複排除の記憶からも外す。
-      const dropped = this.#policy.clearQueue();
-      this.#counters.rejected += dropped;
-      if (dropped) this.#policy.forgetLastSent();
+      // (ack自体は切断済みのソケットへは飛ばないが、カウントと巻き戻しは同じ経路で行う)
+      this.#applyOverflow(this.#policy.clearQueue());
     }
     this.#emit();
   }
@@ -345,8 +344,10 @@ export class CaptionSession {
         this.#counters.failed += 1;
         reason = result.reason;
         this.#policy.forgetLastSent();
+
         // 送れない理由が解消していない間キューを抱え続けても古くなるだけなので捨てる。
-        this.#counters.rejected += this.#policy.clearQueue();
+        // 溢れ時と同じく、捨てた字幕はworkerへも破棄として伝える。
+        this.#applyOverflow(this.#policy.clearQueue());
         break;
       }
     } finally {

@@ -197,10 +197,12 @@
           <button id="btn-caption-stop" type="button">停止</button>
           <button id="btn-caption-test" type="button">テスト字幕</button>
         </div>
+        <!-- プレビューの2つは認識のたびに何度も書き換わるため aria-live を付けない
+             (スクリーンリーダーが読み上げ続けてしまう)。状態の通知は #caption-status が担う。 -->
         <h3>日本語認識</h3>
-        <div id="caption-recognized" class="caption-preview" aria-live="polite"></div>
+        <div id="caption-recognized" class="caption-preview"></div>
         <h3>英語字幕</h3>
-        <div id="caption-caption" class="caption-preview" aria-live="polite"></div>
+        <div id="caption-caption" class="caption-preview"></div>
         <div id="caption-status" class="muted" aria-live="polite"></div>
       </section>
       <section class="panel">

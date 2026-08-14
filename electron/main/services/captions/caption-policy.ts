@@ -131,16 +131,24 @@ export class CaptionPolicy {
   // 有界キュー: 上限を超えたら「古い方」を捨てて現在の発話を優先する (issue #282)。
   // 捨てた件数と、捨てた字幕のsequence一覧を返す — 呼び出し側がrejected counterへ反映し、
   // そのsequenceへ queue-overflow のackを返せるようにするため。
+  //
+  // 追い出しの対象は「以前の発話」だけで、いま積んでいる発話自身の先頭segmentは決して捨てない。
+  // 素直に head から追い出すと、maxCaptionCharsで3つ以上に分割された字幕が空のキューでも
+  // 自分の s1 を追い出し、Twitchには文の途中から始まる断片だけが出てしまう。上限に収まらない
+  // 分は末尾を落とし、先頭 (文の始まり) と読み順を残す。
   enqueue(segments: string[], context: { sequence: number; now: number; ageMs: number }): { dropped: number; droppedSequences: number[] } {
     let dropped = 0;
     const droppedSequences: number[] = [];
+    const drop = (entry: QueuedCaption | undefined): void => {
+      dropped += 1;
+      if (entry && !droppedSequences.includes(entry.sequence)) droppedSequences.push(entry.sequence);
+    };
     for (const text of segments) {
+      // まず以前の発話を追い出して席を空ける。
+      while (this.#queue.length >= this.#options.maxPending && this.#queue[0].sequence !== context.sequence) drop(this.#queue.shift());
+      // それでも空かない = この発話自身のsegmentだけでキューが埋まっている。末尾を落とす。
+      if (this.#queue.length >= this.#options.maxPending) { drop({ sequence: context.sequence, text, enqueuedAt: context.now, initialAgeMs: context.ageMs }); continue; }
       this.#queue.push({ sequence: context.sequence, text, enqueuedAt: context.now, initialAgeMs: context.ageMs });
-      while (this.#queue.length > this.#options.maxPending) {
-        const removed = this.#queue.shift();
-        dropped += 1;
-        if (removed && !droppedSequences.includes(removed.sequence)) droppedSequences.push(removed.sequence);
-      }
     }
     return { dropped, droppedSequences };
   }
@@ -164,9 +172,13 @@ export class CaptionPolicy {
   forgetLastSent(): void { this.#lastSent = ""; }
 
   // 再接続直後・停止時に「古い字幕を後から流さない」ためのキュー破棄 (世代は据え置き)。
-  clearQueue(): number {
+  // 捨てたsequence一覧も返す — 溢れ時と同じようにworkerへ破棄を伝えられるようにするため
+  // (返さないと、ワーカータブ側の破棄件数だけが実際より少なく見える)。
+  clearQueue(): { dropped: number; droppedSequences: number[] } {
+    const droppedSequences: number[] = [];
+    for (const entry of this.#queue) if (!droppedSequences.includes(entry.sequence)) droppedSequences.push(entry.sequence);
     const dropped = this.#queue.length;
     this.#queue = [];
-    return dropped;
+    return { dropped, droppedSequences };
   }
 }

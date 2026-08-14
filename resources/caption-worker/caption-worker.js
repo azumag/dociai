@@ -190,17 +190,20 @@ async function handleResult(event) {
     if (!result.isFinal) { interim += transcript; continue; }
     // onresultごとに独立した非同期ハンドラが走るので、直列化しないと翻訳の遅い発話を
     // 後の発話が追い越してTwitchへ出てしまう。
-    state.sendChain = state.sendChain.then(() => sendFinal(transcript)).catch(() => {});
+    // finalになった時刻はここで採る — sendFinal()の中で採ると、直列化チェーンの順番待ち
+    // (遅い翻訳や初回のモデルダウンロード) がageMsに算入されず、詰まりが解けた瞬間に
+    // 「実際には数十秒前の発話」がまとめて期限切れ判定 (maxAgeMs) を素通りしてしまう。
+    const finalAt = performance.now();
+    state.sendChain = state.sendChain.then(() => sendFinal(transcript, finalAt)).catch(() => {});
   }
   // interimはこのタブ内のプレビューだけに使い、dociaiへは一切送らない (issue #282)。
   if (interim) view.recognized.textContent = interim;
 }
 
-async function sendFinal(recognized) {
+async function sendFinal(recognized, finalAt) {
   const source = recognized.trim();
   if (!source) return;
   view.recognized.textContent = source;
-  const finalAt = performance.now();
   let translated = "";
   try {
     const translator = await ensureTranslator();
