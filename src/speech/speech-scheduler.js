@@ -34,12 +34,14 @@ export class SpeechScheduler {
     return item;
   }
 
-  take(preferPending = null) {
-    if (this.current || this.held) return null;
+  take(preferPending = null, { allowBypassMicHold = false } = {}) {
+    if (this.current) return null;
+    if (this.held && !allowBypassMicHold) return null;
     this.expire();
-    const item = this.resumeNext ?? this.#nextPending(preferPending);
+    const onlyBypass = this.held && allowBypassMicHold;
+    const item = onlyBypass ? this.#nextPending(preferPending, { onlyBypass }) : (this.resumeNext ?? this.#nextPending(preferPending, { onlyBypass }));
     if (!item) return null;
-    if (this.resumeNext) this.resumeNext = null;
+    if (item === this.resumeNext) this.resumeNext = null;
     else this.pending.splice(this.pending.indexOf(item), 1);
     item.resumeNext = false;
     this.current = item;
@@ -51,9 +53,11 @@ export class SpeechScheduler {
   // 次に take() されるはずのアイテムを、キューから取り除かずに覗き見る。
   // SpeechQueue が「このアイテムを今始めてよいか (例: コメント読み上げの間隔)」を
   // 判断してから実際に take() するために使う。
-  peekNext(preferPending = null) {
+  peekNext(preferPending = null, { allowBypassMicHold = false } = {}) {
     this.expire();
-    return this.resumeNext ?? this.#nextPending(preferPending);
+    if (this.held && !allowBypassMicHold) return null;
+    const onlyBypass = this.held && allowBypassMicHold;
+    return !onlyBypass ? (this.resumeNext ?? this.#nextPending(preferPending, { onlyBypass })) : this.#nextPending(preferPending, { onlyBypass });
   }
 
   complete(item, state, details = {}) {
@@ -181,8 +185,9 @@ export class SpeechScheduler {
     return item;
   }
 
-  #nextPending(preferPending) {
-    if (!preferPending) return this.pending[0] ?? null;
-    return this.pending.find(preferPending) ?? this.pending[0] ?? null;
+  #nextPending(preferPending, { onlyBypass = false } = {}) {
+    const candidates = onlyBypass ? this.pending.filter((entry) => entry.bypassMicHold) : this.pending;
+    if (!preferPending) return candidates[0] ?? null;
+    return candidates.find(preferPending) ?? candidates[0] ?? null;
   }
 }

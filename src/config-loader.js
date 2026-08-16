@@ -420,8 +420,13 @@ export function validateConfig(cfg) {
     if (cr.ignoreUsers != null && !Array.isArray(cr.ignoreUsers)) {
       errors.push("commentReader.ignoreUsers は配列で指定してください");
     }
-    for (const key of ["includeAuthor", "skipEmotes", "collapseConsecutiveEmoji"]) {
+    for (const key of ["includeAuthor", "skipEmotes", "collapseConsecutiveEmoji", "bypassMicHoldForShortComments"]) {
       if (cr[key] != null && typeof cr[key] !== "boolean") errors.push(`commentReader.${key} はbooleanで指定してください`);
+    }
+    // 範囲検証はオプション有効時だけ行う。無効化すると入力欄が非表示になるため、
+    // 残った不正値で保存がブロックされると「直しようのない詰み」になる (翻訳設定と同じ規約)。
+    if (cr.bypassMicHoldForShortComments === true && cr.shortCommentMaxChars != null) {
+      validateNumber(cr.shortCommentMaxChars, "commentReader.shortCommentMaxChars", errors, { min: 1, max: 200, integer: true });
     }
     if (cr.excludeAfterMarker != null && typeof cr.excludeAfterMarker !== "string") {
       errors.push("commentReader.excludeAfterMarker は文字列で指定してください");

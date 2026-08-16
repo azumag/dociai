@@ -9,6 +9,7 @@
 // 完全に同一になる。翻訳が必要なコメント、または既に他のコメントが処理中のときに届いた
 // コメントだけが#queueに積まれ、#drain()が1件ずつ順番に確定させる。
 import { processCommentForSpeech } from "./comment-speech-processor.js";
+import { stripEmotes } from "./comment-sources.js";
 
 export const COMMENT_READER_ID = "__comment_reader__";
 
@@ -168,6 +169,17 @@ export class CommentSpeechPipeline {
 
   #enqueue(comment, cr, bodies) {
     const voice = this.#resolveVoice();
+    // issue #286: マイク保留を無視してよいのは「ごく短いコメント」または「エモートのみ
+    // コメント」だけ。短さは処理済み原文 (bodies[0]は翻訳なし時は原文、originalThenTranslated
+    // のときも1件目が原文) で判定し、エモートのみはTwitchのemotesタグが本文全体を覆うかで
+    // 判定する (skipEmotes:trueのときエモートのみはprocessCommentForSpeechが空として
+    // スキップするため、ここに到達するのは主にskipEmotes:falseのケース)。originalThenTranslated
+    // で翻訳結果だけが短くても、長い原文の読み上げがマイクを無視して始まらないように
+    // コメント全体として判定する。
+    const firstBody = String(bodies[0] ?? "");
+    const short = firstBody.length <= Math.max(1, Number(cr.shortCommentMaxChars) || 12);
+    const emoteOnly = !short && Boolean(comment?.emotes) && Boolean(String(comment.text ?? "").trim()) && stripEmotes(comment.text, comment.emotes).length === 0;
+    const bypassMicHold = Boolean(cr.bypassMicHoldForShortComments) && (short || emoteOnly);
     bodies.forEach((body, index) => {
       const text = cr.includeAuthor === false ? body : `${comment.author}: ${body}`;
       // bodies.length > 1 は outputMode: originalThenTranslated の [原文, 翻訳] のみ — その
@@ -176,7 +188,7 @@ export class CommentSpeechPipeline {
       // しまう (PRレビュー指摘)。1件目 (index===0) は他コメントとの間隔を通常どおり尊重する。
       const metadata = index > 0 ? { skipCommentReaderInterval: true } : undefined;
       // preserve: コメントは待機時間・キュー上限で自動破棄されない (issue #277)。
-      this.#speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice, commentId: comment.id, metadata, preserve: true });
+      this.#speechQueue.enqueue({ personaId: COMMENT_READER_ID, personaName: "コメント読み上げ", text, voice, commentId: comment.id, metadata, preserve: true, bypassMicHold });
     });
   }
 

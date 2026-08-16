@@ -501,6 +501,18 @@ test("ActionRunner: AI output-limit finish reason warns before EventSub speech",
   assert.equal(speech.length, 1);
 });
 
+test("ActionRunner: long AI replies are not cut at the old 200-char default (issue #288)", async () => {
+  const longText = "これはかなり長いAIの返答です。".repeat(40); // 約1000文字
+  const connector = { id: "c1", chat: async () => ({ text: longText }) };
+  const { runner, runtime, speech } = makeRunner({ connectors: { c1: connector } });
+  const event = baseEvent("cheer", { bits: 10, message: "hi" });
+  const plan = makePlan(event, { id: "a1", kind: "ai-response", personaId: "p1" }, { generation: runtime.generations.current() });
+
+  await runner.execute(plan, { speak: true, notifyObs: false });
+  assert.equal(speech.length, 1);
+  assert.equal(speech[0].text, longText, "既定の出力文字数上限は200文字より十分に長い");
+});
+
 test("ActionRunner: AI action cancel — a mid-flight abort of the specific request produces a 'cancelled' result, no fallback, no speech", async () => {
   const { runner, runtime, speech, dispatched } = makeRunner({ connectors: { c1: hangingConnector() } });
   const event = baseEvent("cheer", { bits: 10 });

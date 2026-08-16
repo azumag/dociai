@@ -44,6 +44,40 @@ test("translation.enabled: false stays fully synchronous — byte-identical to t
   assert.equal(speechQueue.items[0].preserve, true, "コメント項目は自動破棄されないpreserve付きでenqueueされる (issue #277)");
 });
 
+test("bypassMicHoldForShortComments marks short and emote-only comments for immediate mic bypass (issue #286)", () => {
+  const config = { commentReader: commentReaderDefaults({ enabled: true, includeAuthor: false, bypassMicHoldForShortComments: true, shortCommentMaxChars: 12 }) };
+  const speechQueue = fakeSpeechQueue();
+  const pipeline = new CommentSpeechPipeline({ config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true });
+
+  pipeline.submit({ id: "c1", author: "Viewer", text: "www" });
+  assert.equal(speechQueue.items.at(-1).bypassMicHold, true, "ごく短いコメントはマイク保留をバイパスする");
+
+  pipeline.submit({ id: "c2", author: "Viewer", text: "Kappa Kappa", emotes: "25:0-4/25:6-10" });
+  assert.equal(speechQueue.items.at(-1).bypassMicHold, true, "エモートのみコメントはマイク保留をバイパスする");
+
+  pipeline.submit({ id: "c3", author: "Viewer", text: "これは十分に長い普通のコメントです" });
+  assert.equal(speechQueue.items.at(-1).bypassMicHold, false, "長いコメントはマイク保留を尊重する");
+});
+
+test("bypassMicHoldForShortComments is off by default even for short comments", () => {
+  const config = { commentReader: commentReaderDefaults({ enabled: true, includeAuthor: false }) };
+  const speechQueue = fakeSpeechQueue();
+  const pipeline = new CommentSpeechPipeline({ config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true });
+  pipeline.submit({ id: "c1", author: "Viewer", text: "www" });
+  assert.equal(speechQueue.items.at(-1).bypassMicHold, false, "オプション無効時はbypassMicHoldを立てない");
+});
+
+test("originalThenTranslated does not mic-bypass a long original even when the translation is short (issue #286 MEDIUM fix)", async () => {
+  const config = baseConfig({ outputMode: "originalThenTranslated", onFailure: "readOriginal" }, { includeAuthor: false, bypassMicHoldForShortComments: true, shortCommentMaxChars: 12 });
+  const speechQueue = fakeSpeechQueue();
+  const adapter = delayedAdapter({ "This is a fairly long English comment that exceeds the short threshold.": { translated: "短い翻訳" } });
+  const pipeline = new CommentSpeechPipeline({ config, speechQueue, resolveVoice: () => ({ engine: "webspeech" }), isCurrent: () => true, translationAdapter: adapter });
+  pipeline.submit({ id: "c1", author: "Viewer", text: "This is a fairly long English comment that exceeds the short threshold." });
+  await waitFor(() => speechQueue.items.length === 2);
+  assert.equal(speechQueue.items[0].bypassMicHold, false, "長い原文はマイク保留を尊重する");
+  assert.equal(speechQueue.items[1].bypassMicHold, false, "同じコメントの翻訳も原文に合わせて尊重する");
+});
+
 test("a Japanese comment with translation enabled also stays on the synchronous fast path", () => {
   const config = baseConfig({}, { includeAuthor: false });
   const speechQueue = fakeSpeechQueue();

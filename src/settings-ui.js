@@ -1197,6 +1197,12 @@ export class SettingsUI {
       cardBody.append(this.#pathCheckbox("ユーザー名を読み上げる", "commentReader.includeAuthor", { value: cr.includeAuthor !== false }));
       cardBody.append(this.#pathCheckbox("エモートを読み上げない", "commentReader.skipEmotes", { value: !!cr.skipEmotes }));
       cardBody.append(this.#pathCheckbox("連続する絵文字を1つにまとめる", "commentReader.collapseConsecutiveEmoji", { value: !!cr.collapseConsecutiveEmoji }));
+      const bypassCheckbox = this.#pathCheckbox("マイク発話中でも短いコメントはすぐ読み上げる", "commentReader.bypassMicHoldForShortComments", { value: !!cr.bypassMicHoldForShortComments });
+      bypassCheckbox.querySelector("input").addEventListener("change", () => this.#render());
+      cardBody.append(bypassCheckbox);
+      if (cr.bypassMicHoldForShortComments) {
+        cardBody.append(this.#pathField("短いコメントの文字数上限", "commentReader.shortCommentMaxChars", { type: "number", value: cr.shortCommentMaxChars ?? 12, attrs: { min: 1, max: 200, step: 1 } }));
+      }
       cardBody.append(this.#pathField("読み上げを無視するユーザー (カンマ区切り)", "commentReader.ignoreUsers", { value: asArray(cr.ignoreUsers).join(", "), csv: true, attrs: { spellcheck: "false" } }));
       cardBody.append(this.#pathField("読み上げ除外マーカー", "commentReader.excludeAfterMarker", { value: cr.excludeAfterMarker ?? "", placeholder: "例: ここまで", attrs: { spellcheck: "false" } }));
     }

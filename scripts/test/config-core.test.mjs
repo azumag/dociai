@@ -92,6 +92,15 @@ test("commentReader.translation validation only applies while commentReader itse
   assert.equal(hidden.ok, true, `expected no issues while the translation card is hidden, got: ${JSON.stringify(hidden.issues)}`);
 });
 
+test("commentReader.bypassMicHoldForShortComments validates shortCommentMaxChars range (issue #286)", () => {
+  const base = { schemaVersion: CURRENT_SCHEMA_VERSION, connectors: {}, personas: [], triggers: {} };
+  const valid = validateConfigStructure({ ...base, commentReader: commentReaderDefaults({ enabled: true, bypassMicHoldForShortComments: true, shortCommentMaxChars: 12 }) });
+  assert.equal(valid.issues.filter((entry) => entry.path.join(".") === "commentReader.shortCommentMaxChars").length, 0);
+
+  const invalid = validateConfigStructure({ ...base, commentReader: commentReaderDefaults({ enabled: true, bypassMicHoldForShortComments: true, shortCommentMaxChars: 0 }) });
+  assert.ok(invalid.issues.some((entry) => entry.path.join(".") === "commentReader.shortCommentMaxChars"));
+});
+
 test("legacy commentReader voice fields migrate only into their selected engine settings", () => {
   const migrated = commentReaderDefaults({ enabled: true, engine: "voicevox", name: "Kyoko", rate: 1.2, pitch: 0.1, speaker: 7, speed: 125, voice: 3, tone: 90, volume: 0.8 });
   assert.deepEqual(migrated.webspeech, { name: "default", rate: 1, pitch: 1 });

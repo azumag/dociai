@@ -209,6 +209,10 @@ CORS: engine は既定 (`--cors_policy_mode localrequests`) で Origin を見て
 `SpeechQueue.release("mic")` が呼ばれ、保留していた次の項目の読み上げが始まります
 (手動の「停止」ボタンとは異なり、マイク発話による保留は再生中の項目を巻き戻しません)。
 しきい値の調整は操作卓の「マイク監視」パネルのメーター表示を見ながら行ってください。
+`commentReader.bypassMicHoldForShortComments` が有効な場合、ごく短いコメントと
+エモートのみコメントだけはこの保留を無視して即座に読み上げます (issue #286)。
+話題提供 (topics) とAI応答はコメントと同様、マイク発話中も破棄されずに待機し、
+無音に戻った後に確実に読み上げられます (issue #284)。
 
 スピーカーで音声を再生している環境では、AI自身の声がマイクに回り込んで誤検知する
 可能性があります。`echoCancellation`/`noiseSuppression` は既定で有効にしていますが、
@@ -233,7 +237,9 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
     "collapseConsecutiveEmoji": false,
     "ignoreUsers": [],
     "intervalSeconds": 0,
-    "excludeAfterMarker": ""
+    "excludeAfterMarker": "",
+    "bypassMicHoldForShortComments": false,
+    "shortCommentMaxChars": 12
   }
 }
 ```
@@ -251,6 +257,8 @@ Twitch等に投稿された全コメントを、AIペルソナの応答とは独
 | `collapseConsecutiveEmoji` | false | trueにすると連続するUnicode絵文字を先頭1つへまとめる。単独の絵文字は残し、絵文字間が空白だけの場合も連続として扱う。Twitchエモートの除去は `skipEmotes` で別に設定する |
 | `ignoreUsers` | `[]` | このユーザー名 (大文字小文字区別なし、前後空白は無視) からのコメントは読み上げをスキップする。AI応答のトリガー判定自体には影響しない |
 | `excludeAfterMarker` | `""` | 設定した文字列がコメント本文にあれば、最初に出現した位置以降 (マーカー自体を含む) を読み上げ対象から除外する (issue #254)。リテラル部分文字列一致 (正規表現ではない)、大文字小文字は区別する。空文字 (既定) では無効。`skipEmotes`/`collapseConsecutiveEmoji` より前に適用されるため、エモート除去・絵文字連投まとめの影響を受けずにマーカーを検出できる。コメントの画面表示・保存内容は変更されない |
+| `bypassMicHoldForShortComments` | false | trueにすると、`shortCommentMaxChars` 以下のごく短いコメントと、Twitchエモートだけのコメントは、マイク発話による保留 (micMonitor) を無視してそのまま読み上げる (issue #286)。手動の「停止」やランタイム保留は従来通りすべての項目を止める |
+| `shortCommentMaxChars` | 12 | `bypassMicHoldForShortComments` が有効なとき「ごく短い」とみなす文字数上限 (1〜200)。エモートのみコメントは文字数に関係なく対象 |
 
 コメントは `AIConnector` を経由せずそのまま読み上げキューに積まれるため、APIキーなし
 (モック接続すら不要) で動作する。AIペルソナがトリガーで応答する場合、同じキューに

@@ -144,6 +144,24 @@ export class VoiceVoxError extends Error {
 // 句点(。)で文に分け、さらに長い文は読点(、)で分け、maxChars を超えないよう結合する。
 export function chunkText(text, maxChars = DEFAULT_MAX_CHARS) {
   const max = Math.max(8, Number(maxChars) || DEFAULT_MAX_CHARS);
+  // 句点・読点の無い長い連続文字列を、maxChars単位で強制分割する (issue #288)。
+  // これをしないと1文がmaxCharsを超えたまま1チャンクになり、VOICEVOX側の合成が
+  // 失敗して返答の途中で読み上げが止まる。UTF-16 slice ではサロゲートペア (絵文字など)
+  // が途中で切れるため、Array.from のコードポイント単位で境界を探す。
+  const hardSplit = (s) => {
+    const out = [];
+    let rest = "";
+    for (const char of Array.from(s)) {
+      if (rest && rest.length + char.length > max) {
+        out.push(rest);
+        rest = char;
+      } else {
+        rest += char;
+      }
+    }
+    if (rest) out.push(rest);
+    return out;
+  };
   const chunks = [];
   const push = (s) => {
     const trimmed = s.trim();
@@ -168,13 +186,15 @@ export function chunkText(text, maxChars = DEFAULT_MAX_CHARS) {
       for (const part of withDot.split("、")) {
         const candidate = buf ? `${buf}、${part}` : part;
         if (candidate.length > max && buf) {
-          chunks.push(buf);
+          for (const piece of hardSplit(buf)) push(piece);
           buf = part;
         } else {
           buf = candidate;
         }
       }
-      if (buf) chunks.push(buf);
+      if (buf) {
+        for (const piece of hardSplit(buf)) push(piece);
+      }
     }
   }
   return chunks;

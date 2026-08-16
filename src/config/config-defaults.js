@@ -35,6 +35,10 @@ export function commentReaderDefaults(input = {}) {
     ignoreUsers: [],
     intervalSeconds: 0,
     excludeAfterMarker: "",
+    // issue #286: ごく短いコメントやエモートのみコメントは、マイク発話による保留
+    // (micMonitorのhold) があっても待たずに即読み上げるオプション。既定は無効。
+    bypassMicHoldForShortComments: false,
+    shortCommentMaxChars: 12,
     ...common,
     webspeech: section(webspeech, { name: "default", rate: 1, pitch: 1, ...legacyWebSpeech }),
     voicevox: section(voicevox, { speed: 1, pitch: 0, intonation: 1, volume: 1, ...legacyVoiceVox }),

@@ -16,7 +16,10 @@ import { buildStreamEventContext } from "../context/stream-event-context.js";
 import { sanitizeInlineText } from "./action-schema.js";
 
 export const DEFAULT_AI_TIMEOUT_MS = 15_000;
-export const DEFAULT_MAX_OUTPUT_CHARS = 200;
+// issue #288: 既定200文字だと、長めの返答が途中で「…」で切り詰められて読まれる。
+// 読み上げ側はVOICEVOX等でチャンク分割されるため、ここでは読み上げ時間を短く抑える
+// ための上限として十分に長い値を既定にする。個別actionはmaxCharsで上書きできる。
+export const DEFAULT_MAX_OUTPUT_CHARS = 2000;
 
 /**
  * Confirms the `ai-response` action's configured persona/connector actually exist and are enabled

@@ -19,6 +19,28 @@ test("validateConfig accepts only integer connector maxTokens within the runtime
   for (const value of [0, 32769, 1.5, "not-a-number"]) assert.ok(validateConfig(config(value)).errors.some((error) => error.includes("maxTokens")), String(value));
 });
 
+test("validateConfig enforces bypassMicHoldForShortComments boolean and shortCommentMaxChars range (issue #286 MEDIUM fix)", () => {
+  const base = {
+    connectors: { mock: { provider: "mock", model: "m" } },
+    personas: [{ id: "p", name: "P", connector: "mock" }],
+    triggers: {},
+    commentReader: { enabled: true },
+  };
+  assert.equal(validateConfig({ ...base, commentReader: { ...base.commentReader, bypassMicHoldForShortComments: true, shortCommentMaxChars: 12 } }).errors.length, 0);
+
+  const stringBool = validateConfig({ ...base, commentReader: { ...base.commentReader, bypassMicHoldForShortComments: "false" } });
+  assert.ok(stringBool.errors.some((entry) => entry.includes("bypassMicHoldForShortComments")));
+
+  const outOfRange = validateConfig({ ...base, commentReader: { ...base.commentReader, bypassMicHoldForShortComments: true, shortCommentMaxChars: 999 } });
+  assert.ok(outOfRange.errors.some((entry) => entry.includes("shortCommentMaxChars")));
+
+  const zero = validateConfig({ ...base, commentReader: { ...base.commentReader, bypassMicHoldForShortComments: true, shortCommentMaxChars: 0 } });
+  assert.ok(zero.errors.some((entry) => entry.includes("shortCommentMaxChars")));
+
+  const disabledWithBadValue = validateConfig({ ...base, commentReader: { ...base.commentReader, bypassMicHoldForShortComments: false, shortCommentMaxChars: 999 } });
+  assert.ok(!disabledWithBadValue.errors.some((entry) => entry.includes("shortCommentMaxChars")), "オプション無効時は残った不正値で保存をブロックしない");
+});
+
 test("validateConfig errors on a missing Todoist topics.sources token unless tokenConfigured is set", () => {
   const withoutToken = { connectors: {}, personas: [], triggers: {}, topics: { enabled: true, sources: [{ type: "todoist", projectId: "1", name: "x" }] } };
   const { errors: withoutTokenErrors } = validateConfig(withoutToken);
