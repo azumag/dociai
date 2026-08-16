@@ -16,6 +16,7 @@ test("ResponseCoordinator delivers final text once to store, OBS, and speech", a
   assert.equal(await coordinator.respond(persona), "hello");
   assert.equal(actions.filter((action) => action.type === "response-final").length, 1);
   assert.equal(spoken.length, 1); assert.equal(published.length, 1);
+  assert.equal(spoken[0].preserve, true, "AI応答はキュー上限・待機時間で自動破棄されない (issue #285)");
   assert.equal(coordinator.dispose(), true); assert.equal(coordinator.dispose(), false);
 });
 

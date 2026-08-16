@@ -52,7 +52,8 @@ export class ResponseCoordinator {
       }
       this.dispatch({ type: "response-final", persona, triggerId, text: result.text });
       this.publish("reply", { personaId: persona.id, personaName: persona.name, text: result.text, time: Date.now() });
-      this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text: result.text, voice: persona.voice });
+      // preserve: AI応答もコメントと同様、待機時間・キュー上限による自動破棄をしない (issue #285)。
+      this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text: result.text, voice: persona.voice, preserve: true });
       return result.text;
     } catch (error) {
       if (error?.kind !== "cancelled" && error?.name !== "AbortError") { this.dispatch({ type: "response-error", persona, triggerId, error }); this.onError(error, persona); }

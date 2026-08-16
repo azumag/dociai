@@ -19,8 +19,9 @@ export function createSpeechItem(input, now = Date.now()) {
     createdAt,
     deadlineAt: input.deadlineAt == null ? null : Number(input.deadlineAt),
     // preserve: 自動破棄 (max-age期限切れ・キュー上限によるdrop-oldest) を一切行わない
-    // 項目 (issue #277: コメント読み上げ)。ユーザーが明示的にキャンセル/スキップ/全消去した
-    // 場合だけが終端に遷移する。呼び出し元 (CommentSpeechPipeline) だけが立てる。
+    // 項目 (issue #277: コメント読み上げ、#285: AI応答)。ユーザーが明示的にキャンセル/
+    // スキップ/全消去した場合だけが終端に遷移する。呼び出し元
+    // (CommentSpeechPipeline / ResponseCoordinator / ActionRunner) が立てる。
     preserve: Boolean(input.preserve),
     // 任意のcaller-defined metadata (issue #193: NewsSpeechMetadata等)。音声engineへは渡さず、
     // 呼び出し側がqueue上のitemを識別する (attribution表示、重複判定) ためだけに使う。
