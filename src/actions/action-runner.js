@@ -282,6 +282,8 @@ export class ActionRunner {
         voice: persona?.voice ?? {},
         source: `stream-event:${source}`,
         priority: plan.priority,
+        // preserve: AI生成の応答テキストはコメントと同様、自動破棄しない (issue #285)。
+        preserve: source === "ai-response",
       });
     }
     if (notifyObs && this.obs) {

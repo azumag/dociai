@@ -470,9 +470,20 @@ test("ActionRunner: AI action success — dispatches action-final, enqueues the 
   assert.equal(speech[0].text, "了解です!");
   assert.equal(speech[0].source, "stream-event:ai-response");
   assert.equal(speech[0].priority, 7);
+  assert.equal(speech[0].preserve, true, "AI生成の応答テキストはキュー上限・待機時間で自動破棄されない (issue #285)");
   assert.ok(dispatched.some((entry) => entry.type === "action-started"));
   assert.ok(dispatched.some((entry) => entry.type === "action-final" && entry.text === "了解です!"));
   assert.ok(trace.list().some((entry) => entry.status === "executed"));
+});
+
+test("ActionRunner: template-speech items stay auto-discardable (only AI responses are preserved)", async () => {
+  const { runner, runtime, speech } = makeRunner();
+  const event = baseEvent("raid", { from: "channel", viewers: 12 });
+  const plan = makePlan(event, { id: "a2", kind: "template-speech", template: "ありがとうございます!" }, { generation: runtime.generations.current() });
+  await runner.execute(plan, { speak: true, notifyObs: false, mockAi: false });
+  assert.equal(speech.length, 1);
+  assert.equal(speech[0].source, "stream-event:template-speech");
+  assert.equal(speech[0].preserve, false, "テンプレ発話はAI応答ではないため自動破棄の対象外拡大をしない");
 });
 
 test("ActionRunner: AI output-limit finish reason warns before EventSub speech", async () => {
@@ -521,6 +532,8 @@ test("ActionRunner: AI action error — connector throws, dispatches action-erro
   assert.equal(result.usedFallback, true);
   assert.equal(result.fallbackReason, "ai-error");
   assert.equal(speech.length, 1, "the fallback text must still reach SpeechQueue");
+  assert.equal(speech[0].source, "stream-event:fallback", "フォールバック発話はAI生成ではない");
+  assert.equal(speech[0].preserve, false, "フォールバック発話は自動破棄の対象外拡大をしない");
   assert.ok(dispatched.some((entry) => entry.type === "action-error"));
   assert.ok(dispatched.some((entry) => entry.type === "action-fallback"));
   assert.ok(trace.list().some((entry) => entry.status === "fallback" && entry.fallbackReason === "ai-error"));
