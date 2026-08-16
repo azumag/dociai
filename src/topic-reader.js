@@ -141,7 +141,10 @@ export class TopicReader {
           // and the Todoist completion to the CURRENT generation after a config reload, instead
           // of replaying this specific run's (possibly stale) closure.
           const deliveryPayload = { persona, item, text, debugText };
-          const queued = this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "topics", onDelivered: () => { this.onRead(deliveryPayload); this.completeTodoistTask(item, context).catch((error) => { if (!isCancellation(error)) this.log(`Todoistタスクの完了処理に失敗しました [${item.title}]: ${error.message}`, "warn"); }); }, deliveryPayload });
+          // preserve: 話題提供はコメント・AI応答と同様、マイク発話による保留 (hold("mic"))
+          // やキュー上限・期限切れで自動破棄しない (issue #284)。マイクで話している間も
+          // 待機し続け、無音に戻ったら確実に読み上げられる。
+          const queued = this.speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "topics", preserve: true, onDelivered: () => { this.onRead(deliveryPayload); this.completeTodoistTask(item, context).catch((error) => { if (!isCancellation(error)) this.log(`Todoistタスクの完了処理に失敗しました [${item.title}]: ${error.message}`, "warn"); }); }, deliveryPayload });
           this.#guard(context);
           // onDelivered (onRead + Todoist completion) only fires when queued.state !== "dropped"
           // (SpeechQueue.enqueue()'s own contract), so a drop must not markRead either — that

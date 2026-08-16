@@ -23,6 +23,11 @@ export function createSpeechItem(input, now = Date.now()) {
     // スキップ/全消去した場合だけが終端に遷移する。呼び出し元
     // (CommentSpeechPipeline / ResponseCoordinator / ActionRunner) が立てる。
     preserve: Boolean(input.preserve),
+    // bypassMicHold: マイク発話による保留 (issue #32のhold("mic")) が効いていても、
+    // この項目だけは保留を無視して再生を開始してよい (issue #286: ごく短いコメント・
+    // エモートのみコメントの即時読み上げオプション)。手動停止やruntime保留は対象外 —
+    // SpeechQueue側が保留理由が"mic"のみのときだけバイパスを許可する。
+    bypassMicHold: Boolean(input.bypassMicHold),
     // 任意のcaller-defined metadata (issue #193: NewsSpeechMetadata等)。音声engineへは渡さず、
     // 呼び出し側がqueue上のitemを識別する (attribution表示、重複判定) ためだけに使う。
     metadata: input.metadata ?? null,

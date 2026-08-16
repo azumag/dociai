@@ -5,6 +5,7 @@ import { BouyomiBackend, estimateBouyomiSpeakMs } from "../../src/speech/backend
 import { VoiceVoxBackend } from "../../src/speech/backends/voicevox-backend.js";
 import { WebSpeechBackend } from "../../src/speech/backends/web-speech-backend.js";
 import { SpeechQueue } from "../../src/speech-queue.js";
+import { chunkText } from "../../src/voicevox.js";
 
 class FakeUtterance { constructor(text) { this.text = text; FakeUtterance.items.push(this); } static items = []; }
 
@@ -168,6 +169,96 @@ test("VOICEVOX owns and releases audio listeners and Blob URLs", async () => {
   assert.equal(revoked.length, 100);
 });
 
+test("VOICEVOX skips a failed chunk and keeps playing the rest instead of cutting the reply short (issue #288)", async () => {
+  const played = [];
+  let urlSequence = 0;
+  class FakeAudio {
+    listeners = new Map();
+    addEventListener(type, callback) { this.listeners.set(type, callback); }
+    removeEventListener(type, callback) { if (this.listeners.get(type) === callback) this.listeners.delete(type); }
+    play() { played.push(this.src); queueMicrotask(() => this.listeners.get("ended")?.()); return Promise.resolve(); }
+    pause() {}
+  }
+  const warnings = [];
+  let synthCalls = 0;
+  const backend = new VoiceVoxBackend({
+    synth: async (text) => {
+      synthCalls++;
+      // 2回目の合成 (2番目のチャンク) だけ失敗させる
+      if (synthCalls === 2) throw new Error("synthesis timeout");
+      return new Blob(["wav"]);
+    },
+  }, {
+    AudioImpl: FakeAudio,
+    urlApi: { createObjectURL: () => `blob:${++urlSequence}`, revokeObjectURL: () => {} },
+    onHealth: (health) => warnings.push(health),
+  });
+  const result = await backend.play({ text: "1つ目のチャンクです。2つ目のチャンクです。3つ目のチャンクです。", voice: { speaker: 1, maxChars: 14 } }, { executionId: "chunk-skip" });
+  assert.equal(result.state, "done", "失敗チャンクを飛ばしても残りが再生できれば成功扱い");
+  assert.equal(played.length, 2, "2つ目のチャンクは飛ばされ、1・3つ目だけ再生される");
+  assert.ok(synthCalls >= 3);
+  assert.ok(warnings.some((entry) => String(entry.error).includes("読み飛ばします")), "失敗チャンクのスキップがhealth警告に出る");
+});
+
+test("VOICEVOX reports failed when every chunk fails (issue #288)", async () => {
+  const backend = new VoiceVoxBackend({ synth: async () => { throw new Error("down"); } }, {
+    AudioImpl: class { addEventListener() {} removeEventListener() {} play() { return Promise.resolve(); } pause() {} },
+    urlApi: { createObjectURL: () => "blob:x", revokeObjectURL: () => {} },
+  });
+  const result = await backend.play({ text: "全部失敗します。", voice: { speaker: 1 } }, { executionId: "all-fail" });
+  assert.equal(result.state, "failed");
+});
+
+test("chunkText hard-splits long unpunctuated runs so no single chunk exceeds maxChars (issue #288)", () => {
+  const chunks = chunkText("あ".repeat(500), 200);
+  assert.ok(chunks.every((chunk) => chunk.length <= 200), `各チャンクはmaxChars以下 (got ${chunks.map((c) => c.length)})`);
+  assert.equal(chunks.join("").replace(/。$/g, ""), "あ".repeat(500), "句点を除いた結合は原文と一致する");
+});
+
+test("chunkText never splits surrogate pairs (issue #288)", () => {
+  const text = "😀".repeat(10); // 20 UTF-16 units
+  const chunks = chunkText(text, 9);
+  const hasLoneSurrogate = (value) => {
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i);
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = value.charCodeAt(i + 1);
+        if (next < 0xdc00 || next > 0xdfff) return true;
+        i++;
+      } else if (code >= 0xdc00 && code <= 0xdfff) {
+        return true;
+      }
+    }
+    return false;
+  };
+  assert.ok(chunks.every((chunk) => !hasLoneSurrogate(chunk)), "各チャンクに単独サロゲートが無い");
+  assert.equal(chunks.join("").replace(/。$/g, ""), text);
+});
+
+test("VOICEVOX skips a playback failure and keeps the remaining chunks (issue #288)", async () => {
+  const played = [];
+  let urlSequence = 0;
+  class FakeAudio {
+    listeners = new Map();
+    addEventListener(type, callback) { this.listeners.set(type, callback); }
+    removeEventListener(type, callback) { if (this.listeners.get(type) === callback) this.listeners.delete(type); }
+    play() {
+      played.push(this.src);
+      if (played.length === 1) return Promise.reject(new Error("playback failed"));
+      queueMicrotask(() => this.listeners.get("ended")?.());
+      return Promise.resolve();
+    }
+    pause() {}
+  }
+  const backend = new VoiceVoxBackend({ synth: async () => new Blob(["wav"]) }, {
+    AudioImpl: FakeAudio,
+    urlApi: { createObjectURL: () => `blob:${++urlSequence}`, revokeObjectURL: () => {} },
+  });
+  const result = await backend.play({ text: "1つ目。2つ目。3つ目。", voice: { speaker: 1, maxChars: 8 } }, { executionId: "playback-skip" });
+  assert.equal(result.state, "done", "再生失敗チャンクを飛ばしても残りが再生できれば成功扱い");
+  assert.equal(played.length, 2);
+});
+
 test("registry rejects or warns about mixed Bouyomi ordering", () => {
   assert.throws(() => new BackendRegistry({ strictOrdering: true }).validateMix(["bouyomi", "webspeech"]), /順序は保証できません/);
   const warnings = [];
@@ -242,6 +333,57 @@ test("mic hold lets the currently playing item keep speaking, but withholds the 
 
   queue.release("mic");
   assert.equal(next.state, "speaking", "保留解除で次の項目が始まる");
+  queue.dispose();
+});
+
+test("mic-only hold lets bypassMicHold items start immediately while everything else waits (issue #286)", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
+  queue.hold("mic");
+  const normal = queue.enqueue({ text: "normal", voice: { engine: "webspeech" } });
+  const bypass = queue.enqueue({ text: "短い", voice: { engine: "webspeech" }, bypassMicHold: true });
+  assert.equal(normal.state, "waiting", "マイク保留中は通常項目が待つ");
+  assert.equal(bypass.state, "speaking", "マイク保留中でもbypass項目は即開始される");
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  assert.equal(bypass.state, "done");
+  assert.equal(normal.state, "waiting", "bypass項目の後も保留中は通常項目が待つ");
+  queue.release("mic");
+  assert.equal(normal.state, "speaking", "保留解除で通常項目が始まる");
+  queue.dispose();
+});
+
+test("manual hold still blocks bypassMicHold items (only the mic reason can be bypassed)", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
+  queue.hold("manual");
+  const bypass = queue.enqueue({ text: "短い", voice: { engine: "webspeech" }, bypassMicHold: true });
+  assert.equal(bypass.state, "waiting", "手動停止中はbypass項目も待つ");
+  queue.release("manual");
+  assert.equal(bypass.state, "speaking");
+  queue.dispose();
+});
+
+test("a manual hold added after mic bypass playback interrupts the playing bypass item (issue #286 HIGH fix)", async () => {
+  FakeUtterance.items = [];
+  const synthesis = { speak() {}, cancel() {}, getVoices: () => [] };
+  const queue = new SpeechQueue({ webSpeech: { synthesis, Utterance: FakeUtterance } });
+  queue.hold("mic");
+  const bypass = queue.enqueue({ text: "短い", voice: { engine: "webspeech" }, bypassMicHold: true });
+  assert.equal(bypass.state, "speaking");
+  queue.hold("manual");
+  await Promise.resolve();
+  assert.equal(bypass.state, "waiting", "micに続けてmanualが追加されたら再生中bypass項目も中断してキュー先頭へ戻す");
+  assert.deepEqual(queue.holdReasons, ["mic", "manual"]);
+  queue.release("mic");
+  assert.equal(bypass.state, "waiting", "mic解放だけでは再開しない");
+  queue.release("manual");
+  assert.equal(bypass.state, "speaking", "全理由解放で再開する");
+  FakeUtterance.items.at(-1).onend();
+  await Promise.resolve();
+  assert.equal(bypass.state, "done");
   queue.dispose();
 });
 

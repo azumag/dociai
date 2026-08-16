@@ -117,10 +117,10 @@ export class SpeechQueue {
   // queue (never on drop). Callers such as a news/topic pipeline's onRead broadcast, or
   // GeneratedSpeechBuffer's own per-generation handler (src/readers/generated-speech-buffer.js),
   // rely on this firing at real-queue time.
-  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt, commentId, metadata, preserve, onDelivered }) {
+  enqueue({ personaId, personaName, text, voice = {}, source, priority, deadlineAt, commentId, metadata, preserve, bypassMicHold, onDelivered }) {
     const engines = [...this.scheduler.pending, ...(this.current ? [this.current] : [])].map((item) => item.voice?.engine ?? this.#defaultEngine());
     this.backends.validateMix([...engines, voice?.engine ?? this.#defaultEngine()]);
-    const item = this.scheduler.enqueue({ personaId, personaName, text, voice, source, priority, deadlineAt, commentId, metadata, preserve });
+    const item = this.scheduler.enqueue({ personaId, personaName, text, voice, source, priority, deadlineAt, commentId, metadata, preserve, bypassMicHold });
     // The item is already genuinely enqueued at this point — a throwing onDelivered (e.g. a
     // console/OBS broadcast handler bug) must never stall notify/pump behind it, nor propagate
     // out of enqueue() into a caller (like the news pipeline) that would otherwise treat it as a
@@ -134,7 +134,15 @@ export class SpeechQueue {
   }
 
   hold(reason = "manual") {
+    const wasHeld = this.controls.held;
     this.controls.hold(reason);
+    // issue #286: マイク保留 (bypass項目が再生中) のあとに手動停止・runtime保留が追加された
+    // 場合、onFirstHoldは最初の保留理由でしか呼ばれないため、ここで再生中の項目を中断して
+    // キュー先頭へ戻す。mic以外の理由は「割り込み」として扱う (mic同士は従来通り)。
+    if (wasHeld && reason !== "mic" && (this.activeExecution || this.current)) {
+      this.cancelMode = "hold";
+      this.#cancelActive();
+    }
     this.log(reason === "mic" ? "マイクの発話を検知しました (次の読み上げを保留)" : "読み上げを停止しました (キュー保留)");
   }
 
@@ -252,13 +260,20 @@ export class SpeechQueue {
   }
 
   #pump() {
-    if (this.current || this.paused) return;
+    if (this.current) return;
+    // issue #286: 保留理由が"mic"だけのときは、bypassMicHold付き項目 (ごく短いコメント・
+    // エモートのみコメント) だけ保留を無視して開始できる。手動停止やruntime保留は
+    // 従来通りすべての項目を止める。
+    const reasons = this.holdReasons;
+    const micOnlyHold = this.paused && reasons.length === 1 && reasons[0] === "mic";
+    if (this.paused && !micOnlyHold) return;
     const preferComment = (item) => this.isCommentReaderItem(item);
-    const next = this.scheduler.peekNext(preferComment);
+    const next = this.scheduler.peekNext(preferComment, { allowBypassMicHold: micOnlyHold });
     if (!next) return;
+    if (micOnlyHold && !next.bypassMicHold) return;
     const waitMs = this.#commentReaderWaitMs(next);
     if (waitMs > 0) { this.#scheduleRetry(waitMs); return; }
-    const item = this.scheduler.take(preferComment);
+    const item = this.scheduler.take(preferComment, { allowBypassMicHold: micOnlyHold });
     if (!item) return;
     if (item.voice?.enabled === false) {
       this.scheduler.complete(item, "done", { error: "音声OFFのペルソナのため読み上げなし" });

@@ -49,12 +49,33 @@ export class VoiceVoxBackend extends SpeechBackend {
         return url;
       };
       let prepared = synth(chunks[0]);
+      let playedAny = false;
       for (let index = 0; index < chunks.length; index++) {
         item.chunkIndex = index;
-        const url = await prepared;
+        let url;
+        try {
+          url = await prepared;
+        } catch (error) {
+          if (this.execution !== execution || controller.signal.aborted) return speechResult("cancelled");
+          // issue #288: 1チャンクの合成失敗で返答全体を止めない。失敗したチャンクは
+          // 読み飛ばして残りを続ける (途中で短く途切れるのを防ぐ)。
+          this.onHealth({ backend: this.id, status: "error", error: `チャンク${index + 1}の合成に失敗したため読み飛ばします: ${error.message}` });
+          prepared = index + 1 < chunks.length ? synth(chunks[index + 1]) : null;
+          continue;
+        }
         if (this.execution !== execution || controller.signal.aborted) return speechResult("cancelled");
         prepared = index + 1 < chunks.length ? synth(chunks[index + 1]) : null;
-        await this.#playAudio(execution, url);
+        try {
+          await this.#playAudio(execution, url);
+          playedAny = true;
+        } catch (error) {
+          if (this.execution !== execution || controller.signal.aborted) return speechResult("cancelled");
+          this.onHealth({ backend: this.id, status: "error", error: `チャンク${index + 1}の再生に失敗したため読み飛ばします: ${error.message}` });
+        }
+      }
+      if (!playedAny) {
+        this.onHealth({ backend: this.id, status: "error", error: "すべてのチャンクの合成・再生に失敗しました" });
+        return speechResult("failed", { error: "すべてのチャンクの合成・再生に失敗しました" });
       }
       this.onHealth({ backend: this.id, status: "ok" });
       return speechResult("done");

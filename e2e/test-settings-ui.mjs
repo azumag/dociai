@@ -258,7 +258,18 @@ try {
     }
     const collapseEmoji = document.querySelector('[data-config-path="commentReader.collapseConsecutiveEmoji"]');
     collapseEmoji.click();
+    document.querySelector('[data-config-path="commentReader.bypassMicHoldForShortComments"]').click();
   });
+  await page.waitForSelector('[data-config-path="commentReader.shortCommentMaxChars"]');
+  await page.$eval('[data-config-path="commentReader.shortCommentMaxChars"]', (input) => {
+    input.value = "20";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const bypassFieldState = await page.evaluate(() => ({
+    shown: !!document.querySelector('[data-config-path="commentReader.shortCommentMaxChars"]'),
+    value: document.querySelector('[data-config-path="commentReader.shortCommentMaxChars"]')?.value,
+  }));
+  check("マイク保留バイパスをONにすると文字数上限欄が即時表示される (issue #286)", bypassFieldState.shown && bypassFieldState.value === "20", JSON.stringify(bypassFieldState));
 
   // ニュースitem単位のランダムペルソナ設定。無効personaは保存候補として残せるが、
   // UI上で抽選対象外と明示される。
@@ -448,6 +459,7 @@ try {
   check("config.local.json に connector maxTokens が保存される", diskConfig.connectors?.mock_main?.maxTokens === 32768);
   check("commentReaderの3エンジン別音声設定が保存される", diskConfig.commentReader?.webspeech?.rate === 0.8 && diskConfig.commentReader?.voicevox?.speed === 1.3 && diskConfig.commentReader?.bouyomi?.speed === 140);
   check("commentReaderの絵文字連投抑制が保存される", diskConfig.commentReader?.collapseConsecutiveEmoji === true);
+  check("commentReaderのマイク保留バイパス設定が保存される", diskConfig.commentReader?.bypassMicHoldForShortComments === true && diskConfig.commentReader?.shortCommentMaxChars === 20);
   check("ニュースのランダムペルソナ設定が保存される", diskConfig.news?.randomPersona === true && diskConfig.news?.personas?.includes("partner_ai") && diskConfig.news?.personas?.includes("tsukkomi_ai"));
 
   // 11c. ページを再読み込みしても編集内容が残る (ダウンロード→手動コピー不要であることの確認)

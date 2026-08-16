@@ -188,3 +188,50 @@ test("createSpeechItem/scheduler.enqueue carry an optional caller-defined metada
   const withoutMetadata = scheduler.enqueue({ text: "plain item" });
   assert.equal(withoutMetadata.metadata, null);
 });
+
+test("bypassMicHold items are the only ones schedulable while held, and only when explicitly allowed (issue #286)", () => {
+  const scheduler = new SpeechScheduler();
+  const plain = scheduler.enqueue({ text: "plain" });
+  const bypass = scheduler.enqueue({ text: "short", bypassMicHold: true });
+  scheduler.held = true;
+
+  assert.equal(scheduler.peekNext(), null, "通常の保留中は何も開始できない");
+  assert.equal(scheduler.peekNext(null, { allowBypassMicHold: true }), bypass, "バイパス許可時はbypass項目だけが見える");
+  assert.equal(scheduler.take(null, { allowBypassMicHold: true }), bypass);
+  assert.equal(scheduler.take(), null, "bypass項目の後は保留中なので通常項目は開始できない");
+  scheduler.complete(bypass, "done");
+
+  scheduler.held = false;
+  assert.equal(scheduler.take(), plain, "保留解除後は通常項目が開始できる");
+});
+
+test("bypassMicHold flag survives createSpeechItem round-trips used by runtime restore", () => {
+  const scheduler = new SpeechScheduler({ maxPending: 1, maxPendingPerSource: 1 });
+  const item = scheduler.enqueue({ text: "short", bypassMicHold: true, preserve: true });
+  scheduler.restorePending([{ ...item, createdAt: item.createdAt }]);
+  assert.equal(scheduler.pending[0].bypassMicHold, true);
+});
+
+test("resumeNext is preserved when a bypass pending item is taken while held (issue #286 MEDIUM fix)", () => {
+  const scheduler = new SpeechScheduler();
+  scheduler.restorePending([{ text: "resumed", createdAt: 0, runtimeReloadCurrent: true }]);
+  scheduler.enqueue({ text: "short", bypassMicHold: true });
+  scheduler.held = true;
+
+  const taken = scheduler.take(null, { allowBypassMicHold: true });
+  assert.equal(taken.text, "short", "held中はbypass pending項目が取れる");
+  assert.equal(scheduler.resumeNext.text, "resumed", "復元項目 (resumeNext) は消えない");
+  scheduler.complete(taken, "done");
+  scheduler.held = false;
+  assert.equal(scheduler.take().text, "resumed", "保留解除後はresumeNextが先に取れる");
+});
+
+test("bypassMicHold resumeNext is still schedulable after release (issue #286 MEDIUM fix)", () => {
+  const scheduler = new SpeechScheduler();
+  scheduler.restorePending([{ text: "resumed", createdAt: 0, runtimeReloadCurrent: true, bypassMicHold: true }]);
+  scheduler.held = true;
+  assert.equal(scheduler.peekNext(null, { allowBypassMicHold: true }), null, "held中はresumeNextをbypass対象にしない");
+  scheduler.held = false;
+  const taken = scheduler.take();
+  assert.equal(taken.text, "resumed", "保留解除後はbypass付きresumeNextが取れる");
+});

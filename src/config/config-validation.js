@@ -53,6 +53,13 @@ export function validateConfigStructure(config) {
     const maxPendingComments = Number(t.maxPendingComments);
     if (!Number.isInteger(maxPendingComments) || maxPendingComments < 1 || maxPendingComments > 200) issues.push(issue(["commentReader", "translation", "maxPendingComments"], "range", "maxPendingComments must be an integer from 1 to 200"));
   }
+  // issue #286: 短いコメントの文字数閾値は1〜200の整数のみ許可する。
+  if (config.commentReader?.bypassMicHoldForShortComments === true) {
+    const shortCommentMaxChars = Number(config.commentReader.shortCommentMaxChars);
+    if (!Number.isInteger(shortCommentMaxChars) || shortCommentMaxChars < 1 || shortCommentMaxChars > 200) {
+      issues.push(issue(["commentReader", "shortCommentMaxChars"], "range", "shortCommentMaxChars must be an integer from 1 to 200"));
+    }
+  }
   // issue #282 (英語CC)。OBS WebSocketパスワードだけはenabledに関係なく常に拒否する —
   // 設定JSONへ直接書かれた場合、そのままconfig exportやディスクへ平文で残ってしまうため
   // (secret storeへ入れる正規の経路は設定UIのパスワード欄)。

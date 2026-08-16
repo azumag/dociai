@@ -300,6 +300,22 @@ test("TopicReader runs Web research before chat and includes grounded results", 
   assert.equal(reader.status().counts.read, 1);
 });
 
+test("TopicReader enqueues topic speech with preserve so mic holds never discard it (issue #284)", async () => {
+  const now = { value: 1_000 };
+  const seen = [];
+  const reader = new TopicReader({
+    config: { topics: { enabled: true, maxItems: 1 } },
+    ...readerDependencies({ now, connector: { chat: async () => ({ text: "話題コメント" }) } }),
+    speechQueue: { enqueue: (item) => { seen.push(item); item?.onDelivered?.(); return { state: "waiting" }; } },
+  });
+  reader.fetchAll = async () => reader.refineItems([{ guid: "topic", title: "topic title", sourceName: "todoist" }]);
+  await reader.run({ generation: 1 });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].source, "topics");
+  assert.equal(seen[0].preserve, true, "話題提供はマイク保留・期限切れで破棄されない (issue #284)");
+  assert.equal(reader.status().counts.read, 1);
+});
+
 test("TopicReader resets a dropped item back to unread (not markRead) so a later run can retry it, and skips the Todoist completion", async () => {
   const now = { value: 1_000 };
   let todoistCalls = 0;
