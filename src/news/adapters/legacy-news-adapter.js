@@ -154,7 +154,7 @@ export function createLegacyNewsAdapter({ getConfig, getConnector, personaRouter
   }
 
   function deliver({ persona, item, text, onDelivered, deliveryPayload }) {
-    const queued = speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "news", onDelivered, deliveryPayload });
+    const queued = speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: "news", preserve: true, onDelivered, deliveryPayload });
     if (queued?.state === "dropped") log(`ニュース音声はキュー上限で破棄されました [${item.title}]`, "warn");
     return { queued };
   }
