@@ -33,13 +33,26 @@ export class SpeechQueue {
       bouyomiCharsPerSecond,
     });
     this.controls = new SpeechControls({
-      // "mic" (マイク発話によるバージイン) は現在の読み上げを止めずに最後まで再生させる。
-      // ただし保留状態そのものは維持するため、#pump() が次のアイテムを勝手に始めることはない
+      // "mic" (マイク発話によるバージイン) は、通常の読み上げ (コメント/AI応答) では
+      // 現在の読み上げを止めずに最後まで再生させるが、話題/ニュースの長尺読み上げは
+      // すぐに中断してキュー先頭へ戻す (issue: 話題の再生で割り込みが効かない)。いずれも
+      // 保留状態そのものは維持するため、#pump() が次のアイテムを勝手に始めることはない
       // (発話が止んで release されるまで次の読み上げは始まらない)。
       // それ以外の理由 (manual/runtime系) は従来通り中断→キュー先頭へ戻し最初から読み直す。
       onFirstHold: (reason) => {
         this.scheduler.held = true;
-        if (reason === "mic") return;
+        if (reason === "mic") {
+          const source = this.current?.source ?? this.scheduler.current?.source ?? null;
+          // 話題/ニュースは長尺で割り込みの体感が重要なため、マイクでも即時中断する。
+          // コメント/AI応答などは従来通り最後まで再生してから次を保留する。
+          if (source === "topics" || source === "news") {
+            if (this.activeExecution || this.current) {
+              this.cancelMode = "hold";
+              this.#cancelActive();
+            }
+          }
+          return;
+        }
         if (this.activeExecution || this.current) {
           this.cancelMode = "hold";
           this.#cancelActive();
