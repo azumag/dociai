@@ -43,6 +43,13 @@ test("registry, schema enums, UI options, and security unknown policy stay align
   assert.ok(CONFIG_REGISTRY.topicSourceTypes[0].secretFields.includes("token"));
 });
 
+test("OpenCode session opt-in is a boolean connector setting", () => {
+  const base = { schemaVersion: CURRENT_SCHEMA_VERSION, connectors: { opencode: { provider: "openai-compatible", model: "glm-5.2", opencodeSession: true } }, personas: [], triggers: {} };
+  assert.equal(validateConfigStructure(base).ok, true);
+  const invalid = validateConfigStructure({ ...base, connectors: { opencode: { ...base.connectors.opencode, opencodeSession: "true" } } });
+  assert.ok(invalid.issues.some((entry) => entry.path.join(".") === "connectors.opencode.opencodeSession" && entry.code === "type.boolean"));
+});
+
 // issue #257 (PR #269 review指摘): settings-ui.js#pathFieldはCONFIG_UI_METADATAのmin/maxを
 // 呼び出し側のattrsより後にspreadして上書きする (settings-ui.js:511) — inline attrsだけ
 // config-validation.jsのrangeへ合わせても、ここのmetadataが古い値のままだと入力欄のmaxが

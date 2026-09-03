@@ -23,6 +23,29 @@ function boundedMaxTokens(value, fallback = DEFAULT_MAX_TOKENS) {
   return Number.isFinite(parsed) ? Math.max(1, Math.min(MAX_MAX_TOKENS, Math.floor(parsed))) : fallback;
 }
 
+function isOpenCodeGoBaseUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname === "opencode.ai" && /^\/zen\/go(?:\/|$)/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isOpenCodeProxyBaseUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname) && parsed.port === "8787";
+  } catch {
+    return false;
+  }
+}
+
+function createSessionId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  return `dociai-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
+}
+
 // 秒未満のtimeoutMsをそのまま切り捨てると「0秒でタイムアウトしました」という
 // 誤解を招く表示になる (例: ミリ秒のつもりで秒の値を入力した設定ミス)。
 function formatTimeout(ms) {
@@ -300,6 +323,7 @@ function toAnthropicMessages(messages) {
 class OpenAICompatibleConnector {
   // APIキーはprivateフィールドに閉じ、describe()やJSON化で漏れないようにする
   #apiKey;
+  #opencodeSessionId;
 
   constructor(id, cfg, { log = () => {} } = {}) {
     this.id = id;
@@ -311,6 +335,7 @@ class OpenAICompatibleConnector {
     this.retries = cfg.retries ?? 1;
     this.log = log;
     this.#apiKey = cfg.apiKey ?? "";
+    this.#opencodeSessionId = cfg.opencodeSession === true || isOpenCodeGoBaseUrl(this.baseUrl) || isOpenCodeProxyBaseUrl(this.baseUrl) ? createSessionId() : null;
   }
 
   describe() {
@@ -325,6 +350,7 @@ class OpenAICompatibleConnector {
       headers["HTTP-Referer"] = location.origin;
       headers["X-Title"] = "dociai";
     }
+    if (this.#opencodeSessionId) headers["x-opencode-session"] = this.#opencodeSessionId;
     return headers;
   }
 

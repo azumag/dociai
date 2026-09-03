@@ -97,6 +97,7 @@ export function validateConfig(cfg) {
           warnings.push(`connectors.${id} にapiKeyがありません。呼び出し時に認証エラーになる可能性があります`);
         }
       }
+      if (c.opencodeSession != null && typeof c.opencodeSession !== "boolean") errors.push(`connectors.${id}.opencodeSession は真偽値にしてください`);
       if (c.timeoutMs != null && Number(c.timeoutMs) > 0 && Number(c.timeoutMs) < 1000) {
         warnings.push(`connectors.${id}.timeoutMs は${c.timeoutMs}(ミリ秒)です。秒のつもりの値だと即座にタイムアウトします (例: 30秒 → 30000)`);
       }
