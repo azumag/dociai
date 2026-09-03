@@ -56,6 +56,48 @@ test("AiService resolves secrets in Main, normalizes OpenAI response, and never 
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
+test("AiService keeps one OpenCode session header across requests, retries, and proxy opt-ins", async () => {
+  const { modules, directory } = await loadModules();
+  try {
+    const calls = [];
+    const deps = dependencies({
+      opencode: { provider: "openai-compatible", model: "glm-5.2", baseUrl: "https://opencode.ai/zen/go/v1", apiKeySecretRef: "connectors.opencode.apiKey", retries: 0 },
+      proxy: { provider: "openai-compatible", model: "glm-5.2", baseUrl: "http://localhost:8787", apiKeySecretRef: "connectors.proxy.apiKey", retries: 0 },
+      custom: { provider: "openai-compatible", model: "glm-5.2", baseUrl: "http://localhost:9999", opencodeSession: true, apiKeySecretRef: "connectors.custom.apiKey", retries: 0 },
+      remote: { provider: "openai-compatible", model: "model", baseUrl: "https://example.com/v1", apiKeySecretRef: "connectors.remote.apiKey", retries: 0 },
+    }, { "connectors.opencode.apiKey": "opencode-secret", "connectors.proxy.apiKey": "proxy-secret", "connectors.custom.apiKey": "custom-secret", "connectors.remote.apiKey": "remote-secret" });
+    const service = new modules.AiService(deps.configRepository, deps.secretStore, async (url, init) => {
+      calls.push({ url, headers: init.headers });
+      return new Response(JSON.stringify({ choices: [{ message: { content: "answer" } }] }), { status: 200 });
+    });
+    await service.chat(input("opencode"));
+    await service.chat({ ...input("opencode"), requestId: "opencode-request-2" });
+    await service.chat(input("proxy"));
+    await service.chat(input("custom"));
+    await service.chat(input("remote"));
+    const first = calls[0].headers["x-opencode-session"];
+    assert.match(first, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    assert.equal(calls[1].headers["x-opencode-session"], first);
+    assert.match(calls[2].headers["x-opencode-session"], /^[0-9a-f-]{36}$/i);
+    assert.match(calls[3].headers["x-opencode-session"], /^[0-9a-f-]{36}$/i);
+    assert.notEqual(calls[2].headers["x-opencode-session"], calls[3].headers["x-opencode-session"]);
+    assert.equal(calls[4].headers["x-opencode-session"], undefined);
+
+    const retryCalls = [];
+    const retryDeps = dependencies({ opencode: { provider: "openai-compatible", model: "glm-5.2", baseUrl: "https://opencode.ai/zen/go/v1", apiKeySecretRef: "connectors.opencode.apiKey", retries: 1 } }, { "connectors.opencode.apiKey": "opencode-secret" });
+    let attempts = 0;
+    const retryService = new modules.AiService(retryDeps.configRepository, retryDeps.secretStore, async (_url, init) => {
+      retryCalls.push(init.headers["x-opencode-session"]);
+      attempts += 1;
+      return attempts === 1
+        ? new Response("{}", { status: 500, headers: { "Retry-After": "0" } })
+        : new Response(JSON.stringify({ choices: [{ message: { content: "retried" } }] }), { status: 200 });
+    });
+    assert.equal((await retryService.chat(input("opencode"))).text, "retried");
+    assert.equal(retryCalls[0], retryCalls[1]);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("AiService disables Ollama reasoning, honors connector maxTokens, and never exposes reasoning as the answer", async () => {
   const { modules, directory } = await loadModules();
   try {
@@ -112,6 +154,36 @@ test("browser connector applies Ollama-only reasoning controls without exposing 
     const compatible = createConnector("remote", { provider: "openai-compatible", model: "model", apiKey: "test", retries: 0 });
     await assert.rejects(compatible.chat([{ role: "user", content: "hello" }]), (error) => error instanceof ConnectorError && error.kind === "empty" && !error.message.includes("private"));
     assert.equal("reasoning_effort" in bodies[1], false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("browser OpenCode connectors keep a stable session header and support the bundled proxy", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url, headers: init.headers });
+      return new Response(JSON.stringify({ choices: [{ message: { content: "answer" } }] }), { status: 200 });
+    };
+    const direct = createConnector("opencode", { provider: "openai-compatible", model: "glm-5.2", baseUrl: "https://opencode.ai/zen/go/v1", apiKey: "test", retries: 0 });
+    await direct.chat([{ role: "user", content: "hello" }]);
+    await direct.chat([{ role: "user", content: "hello again" }]);
+    const proxy = createConnector("opencode-proxy", { provider: "openai-compatible", model: "glm-5.2", baseUrl: "http://localhost:8787", apiKey: "test", retries: 0 });
+    await proxy.chat([{ role: "user", content: "through proxy" }]);
+    const custom = createConnector("opencode-custom", { provider: "openai-compatible", model: "glm-5.2", baseUrl: "http://localhost:9999", opencodeSession: true, apiKey: "test", retries: 0 });
+    await custom.chat([{ role: "user", content: "through custom proxy" }]);
+    const remote = createConnector("remote", { provider: "openai-compatible", model: "model", baseUrl: "https://example.com/v1", apiKey: "test", retries: 0 });
+    await remote.chat([{ role: "user", content: "unrelated" }]);
+    const directSession = calls[0].headers["x-opencode-session"];
+    assert.match(directSession, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    assert.equal(calls[1].headers["x-opencode-session"], directSession);
+    assert.match(calls[2].headers["x-opencode-session"], /^[0-9a-f-]{36}$/i);
+    assert.notEqual(calls[2].headers["x-opencode-session"], directSession);
+    assert.match(calls[3].headers["x-opencode-session"], /^[0-9a-f-]{36}$/i);
+    assert.notEqual(calls[3].headers["x-opencode-session"], calls[2].headers["x-opencode-session"]);
+    assert.equal(calls[4].headers["x-opencode-session"], undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }

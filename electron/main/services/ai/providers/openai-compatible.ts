@@ -3,6 +3,15 @@ import type { AiMessage } from "../../../../shared/services/ai-contract";
 
 type ChatOptions = { maxTokens: number; temperature?: number; stream: boolean; onToken(text: string): void };
 
+function requestHeaders(config: { provider: string; apiKey?: string; opencodeSessionId?: string }): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+    ...(config.provider === "openrouter" ? { "HTTP-Referer": "https://dociai.local", "X-Title": "dociai" } : {}),
+    ...(config.opencodeSessionId ? { "x-opencode-session": config.opencodeSessionId } : {}),
+  };
+}
+
 function abortError(signal: AbortSignal, serviceId: string): ServiceError {
   return signal.reason instanceof ServiceError ? signal.reason : new ServiceError("CANCELLED", "request cancelled", { serviceId, retryable: false });
 }
@@ -47,10 +56,10 @@ async function streamResponse(response: Response, signal: AbortSignal, serviceId
   return { text: trimmed, usage, ...(finishReason ? { finishReason } : {}) };
 }
 
-export async function openAiCompatibleChat(fetchFn: typeof fetch, config: { id: string; provider: string; model: string; baseUrl: string; apiKey?: string }, messages: AiMessage[], options: ChatOptions, signal: AbortSignal): Promise<{ text: string; usage: unknown; finishReason?: string }> {
+export async function openAiCompatibleChat(fetchFn: typeof fetch, config: { id: string; provider: string; model: string; baseUrl: string; apiKey?: string; opencodeSessionId?: string }, messages: AiMessage[], options: ChatOptions, signal: AbortSignal): Promise<{ text: string; usage: unknown; finishReason?: string }> {
   let response: Response;
   try {
-    response = await fetchFn(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, { method: "POST", signal, headers: { "Content-Type": "application/json", ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}), ...(config.provider === "openrouter" ? { "HTTP-Referer": "https://dociai.local", "X-Title": "dociai" } : {}) }, body: JSON.stringify({ model: config.model, messages, max_tokens: options.maxTokens, ...(config.provider === "ollama" ? { reasoning_effort: "none" } : {}), ...(options.stream ? { stream: true, stream_options: { include_usage: true } } : {}), ...(options.temperature !== undefined ? { temperature: options.temperature } : {}) }) });
+    response = await fetchFn(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, { method: "POST", signal, headers: requestHeaders(config), body: JSON.stringify({ model: config.model, messages, max_tokens: options.maxTokens, ...(config.provider === "ollama" ? { reasoning_effort: "none" } : {}), ...(options.stream ? { stream: true, stream_options: { include_usage: true } } : {}), ...(options.temperature !== undefined ? { temperature: options.temperature } : {}) }) });
   } catch (error) { throw signal.aborted || (error instanceof Error && error.name === "AbortError") ? abortError(signal, config.id) : new ServiceError("NETWORK", "provider connection failed", { serviceId: config.id }); }
   if (!response.ok) throw errorFromHttpStatus(response.status, { serviceId: config.id, retryAfterMs: retryAfterMs(response) });
   if (options.stream) return streamResponse(response, signal, config.id, options.onToken);

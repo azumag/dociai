@@ -28,11 +28,14 @@
 | `apiKey` | APIキー。`mock` / `ollama` では不要 |
 | `model` | モデルID。`mock` では省略可 |
 | `baseUrl` | 省略可。ローカルLLM やOpenAI互換サーバーを指す。`ollama` の既定は `http://localhost:11434/v1` |
+| `opencodeSession` | 省略可。`true` で OpenCode Go 用の `x-opencode-session` を有効化。`https://opencode.ai/zen/go` と既定の `http://localhost:8787` プロキシでは自動判定される |
 | `timeoutMs` | 省略可。既定 30000 (ミリ秒。秒ではない点に注意) |
 | `maxTokens` | 省略可。通常応答の最大出力トークン数。既定 2048、範囲 1〜32768 |
 | `retries` | 省略可。既定 1。タイムアウトした場合のみ即座に再試行する回数 (認証エラー等はリトライしない) |
 
 `mock` はAPIキーなしで応答・画面認識・ニュース要約の動作確認ができるモックです。
+
+OpenCode Go を使う場合、dociai はコネクタ実体ごとにランタイム内のセッションIDを一度だけ生成し、同じ実行中の要求と再試行で再利用します。IDはdociaiの設定ファイルやローカルログには保存しません。OpenCode側での取り扱いは同サービスのポリシーに従います。既定プロキシ以外の中継サーバーを使う場合は、そのコネクタに `"opencodeSession": true` を追加してください。
 
 Ollama を使う場合は、Ollama を起動してモデルを pull したうえで `provider: "ollama"` を指定します。発話用ペルソナ、ニュース要約、`context.screenCapture.connector` の vision_model 参照先として同じように選べます。
 Ollama の OpenAI 互換APIには `reasoning_effort: "none"` を自動指定し、thinking対応モデルでも内部思考ではなく最終回答に出力予算を使わせます。内部思考は応答や読み上げには使用しません。プロバイダが出力上限による終了を通知した場合は、システムログに「読み上げ処理による切断ではない」ことと `maxTokens` の確認案内を表示します。モデル側がthinking無効化に対応していない場合や、2048トークンを超える長文が必要な場合は設定画面の `maxTokens` を増やしてください。

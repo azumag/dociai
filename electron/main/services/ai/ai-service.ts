@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { AiChatInput, AiChatResponse, AiMessage, AiTokenEvent, AiWebSearchInput, AiWebSearchResponse } from "../../../shared/services/ai-contract";
 import type { SecretStore } from "../../../shared/secret-contract";
 import { ConfigRepository } from "../../config/config-repository";
@@ -32,7 +33,16 @@ function assertMessages(messages: AiMessage[]): void {
 
 export class AiService {
   readonly runtime = new ServiceRuntime("ai");
+  readonly #opencodeSessionIds = new Map<string, string>();
   constructor(private readonly configRepository: ConfigRepository, private readonly secretStore: SecretStore, private readonly fetchFn: typeof fetch = fetch, private readonly emitToken: (event: AiTokenEvent) => void = () => {}) {}
+
+  #opencodeSessionId(connectorId: string): string {
+    const existing = this.#opencodeSessionIds.get(connectorId);
+    if (existing) return existing;
+    const sessionId = crypto.randomUUID();
+    this.#opencodeSessionIds.set(connectorId, sessionId);
+    return sessionId;
+  }
 
   cancel(requestId: string): boolean { return this.runtime.registry.cancel(requestId, "cancelled"); }
 
@@ -46,6 +56,7 @@ export class AiService {
     const secretRef = typeof connector.apiKeySecretRef === "string" ? connector.apiKeySecretRef : typeof connector.secretRef === "string" ? connector.secretRef : `connector.${input.connectorId}.apiKey`;
     const secret = await this.secretStore.getForService(secretRef as never);
     const config = providerConfig(input.connectorId, connector, secret);
+    const requestConfig = config.opencodeSession ? { ...config, opencodeSessionId: this.#opencodeSessionId(input.connectorId) } : config;
     const generation = input.generation ?? this.runtime.generation;
     if (generation !== this.runtime.generation) throw new ServiceError("CANCELLED", "request generation is stale", { serviceId: input.connectorId, retryable: false });
     const handle = this.runtime.registry.create({ serviceId: input.connectorId, generation, ownerId: input.ownerId ?? "console", requestId: input.requestId, timeoutMs: config.timeoutMs });
@@ -61,8 +72,8 @@ export class AiService {
     try {
       const result = await retryWithPolicy(async () => {
         if (config.provider === "mock") return mockChat(input.messages, options);
-        if (config.provider === "minimax") return miniMaxChat(this.fetchFn, { ...config, apiKey: config.apiKey ?? "" }, input.messages, options, handle.context.signal);
-        return openAiCompatibleChat(this.fetchFn, config, input.messages, options, handle.context.signal);
+        if (requestConfig.provider === "minimax") return miniMaxChat(this.fetchFn, { ...requestConfig, apiKey: requestConfig.apiKey ?? "" }, input.messages, options, handle.context.signal);
+        return openAiCompatibleChat(this.fetchFn, requestConfig, input.messages, options, handle.context.signal);
       }, { maxAttempts: 1 + config.retries, baseDelayMs: 500, maxDelayMs: 5000 }, handle.context);
       if (handle.context.generation !== this.runtime.generation || handle.context.signal.aborted) throw new ServiceError("CANCELLED", "request generation is stale", { serviceId: input.connectorId, retryable: false });
       handle.complete(result);
@@ -109,5 +120,5 @@ export class AiService {
       throw normalized;
     } finally { if (timeout) clearTimeout(timeout); }
   }
-  dispose(): void { this.runtime.dispose(); }
+  dispose(): void { this.runtime.dispose(); this.#opencodeSessionIds.clear(); }
 }

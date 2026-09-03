@@ -19,6 +19,12 @@ test("validateConfig accepts only integer connector maxTokens within the runtime
   for (const value of [0, 32769, 1.5, "not-a-number"]) assert.ok(validateConfig(config(value)).errors.some((error) => error.includes("maxTokens")), String(value));
 });
 
+test("validateConfig accepts a boolean OpenCode session setting only", () => {
+  const base = { connectors: { opencode: { provider: "openai-compatible", model: "glm-5.2", opencodeSession: true } }, personas: [{ id: "p", name: "P", connector: "opencode" }], triggers: {} };
+  assert.deepEqual(validateConfig(base).errors, []);
+  assert.ok(validateConfig({ ...base, connectors: { opencode: { ...base.connectors.opencode, opencodeSession: "true" } } }).errors.some((error) => error.includes("opencodeSession")));
+});
+
 test("validateConfig enforces bypassMicHoldForShortComments boolean and shortCommentMaxChars range (issue #286 MEDIUM fix)", () => {
   const base = {
     connectors: { mock: { provider: "mock", model: "m" } },
