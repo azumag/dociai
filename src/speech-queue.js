@@ -33,17 +33,26 @@ export class SpeechQueue {
       bouyomiCharsPerSecond,
     });
     this.controls = new SpeechControls({
-      // "mic" (マイク発話によるバージイン) は現在の読み上げを止めずに最後まで再生させる。
-      // ただし保留状態そのものは維持するため、#pump() が次のアイテムを勝手に始めることはない
+      // "mic" (マイク発話によるバージイン) は、通常の読み上げ (コメント/AI応答) では
+      // 現在の読み上げを止めずに最後まで再生させるが、話題/ニュースの長尺読み上げは
+      // すぐに中断してキュー先頭へ戻す (issue: 話題の再生で割り込みが効かない)。いずれも
+      // 保留状態そのものは維持するため、#pump() が次のアイテムを勝手に始めることはない
       // (発話が止んで release されるまで次の読み上げは始まらない)。
       // それ以外の理由 (manual/runtime系) は従来通り中断→キュー先頭へ戻し最初から読み直す。
       onFirstHold: (reason) => {
         this.scheduler.held = true;
-        if (reason === "mic") return;
-        if (this.activeExecution || this.current) {
-          this.cancelMode = "hold";
-          this.#cancelActive();
+        if (reason === "mic") {
+          const source = this.current?.source ?? this.scheduler.current?.source ?? null;
+          // 話題/ニュースは長尺で割り込みの体感が重要なため、マイクでも即時中断する。
+          // コメント/AI応答などは従来通り最後まで再生してから次を保留する。
+          // newstalk は createNewsDeliveryStage の既定 sourceLabel (runtime-factory では
+          // "news" に上書きされるが、テスト/直接利用では既定が残るため両方を対象にする)。
+          if (["topics", "news", "newstalk"].includes(source)) {
+            this.#interruptCurrentForHold();
+          }
+          return;
         }
+        this.#interruptCurrentForHold();
       },
       onAllReleased: () => {
         this.scheduler.held = false;
@@ -139,9 +148,8 @@ export class SpeechQueue {
     // issue #286: マイク保留 (bypass項目が再生中) のあとに手動停止・runtime保留が追加された
     // 場合、onFirstHoldは最初の保留理由でしか呼ばれないため、ここで再生中の項目を中断して
     // キュー先頭へ戻す。mic以外の理由は「割り込み」として扱う (mic同士は従来通り)。
-    if (wasHeld && reason !== "mic" && (this.activeExecution || this.current)) {
-      this.cancelMode = "hold";
-      this.#cancelActive();
+    if (wasHeld && reason !== "mic") {
+      this.#interruptCurrentForHold();
     }
     this.log(reason === "mic" ? "マイクの発話を検知しました (次の読み上げを保留)" : "読み上げを停止しました (キュー保留)");
   }
@@ -257,6 +265,25 @@ export class SpeechQueue {
     this.activeExecution.controller.abort();
     this.backends.cancel(this.activeExecution.id);
     return true;
+  }
+
+  // topics/news のマイク割り込みや manual 追加時の割り込みで使う。
+  // activeExecution があれば通常の cancel 経路 (#finish で requeue)、
+  // まだ execution が立つ前の race window (scheduler.current はあるが
+  // activeExecution が null) では直接 requeue して即時中断する (H2)。
+  #interruptCurrentForHold() {
+    if (this.activeExecution) {
+      this.cancelMode = "hold";
+      this.#cancelActive();
+      return true;
+    }
+    if (this.current) {
+      const item = this.current;
+      this.scheduler.requeueCurrent();
+      this.#notify(item, "waiting");
+      return true;
+    }
+    return false;
   }
 
   #pump() {
