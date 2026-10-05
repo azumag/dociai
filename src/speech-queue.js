@@ -272,6 +272,8 @@ export class SpeechQueue {
   // まだ execution が立つ前の race window (scheduler.current はあるが
   // activeExecution が null) では直接 requeue して即時中断する (H2)。
   #interruptCurrentForHold() {
+    // A pending skip/cancel must stay terminal even if a hold arrives before the backend settles.
+    if (this.cancelMode === "skipped" || this.cancelMode === "cancelled") return false;
     if (this.activeExecution) {
       this.cancelMode = "hold";
       this.#cancelActive();
