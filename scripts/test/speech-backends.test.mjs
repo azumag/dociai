@@ -7,6 +7,30 @@ import { WebSpeechBackend } from "../../src/speech/backends/web-speech-backend.j
 import { SpeechQueue } from "../../src/speech-queue.js";
 import { chunkText } from "../../src/voicevox.js";
 
+for (const terminalState of ["skipped", "cancelled"]) {
+  test(`mic hold preserves ${terminalState} while backend cancellation is pending`, async () => {
+    const queue = new SpeechQueue();
+    let finishPlayback;
+    queue.backends.resolve = () => ({
+      id: "webspeech",
+      play: () => new Promise((resolve) => { finishPlayback = resolve; }),
+    });
+    queue.backends.cancel = () => {};
+    const item = queue.enqueue({ text: "news", source: "news", preserve: true, voice: { engine: "webspeech" } });
+    if (terminalState === "skipped") queue.skip();
+    else queue.cancelItem(item.id);
+    assert.equal(queue.activeExecution.controller.signal.aborted, true);
+    queue.hold("mic");
+    finishPlayback({ state: "cancelled" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(item.state, terminalState);
+    assert.equal(queue.current, null);
+    assert.equal(queue.activeExecution, null);
+    assert.equal(queue.scheduler.pending.includes(item), false);
+    queue.dispose();
+  });
+}
+
 class FakeUtterance { constructor(text) { this.text = text; FakeUtterance.items.push(this); } static items = []; }
 
 test("Web Speech classifies completion, cancellation, error, and stale callbacks", async () => {

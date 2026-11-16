@@ -75,7 +75,7 @@ export function createNewsDeliveryStage({ speechQueue, sourceLabel = "newstalk",
         throw new PipelineStageError(`ニュース配信をキューへ投入できませんでした (${decision.reason})`, { stage: "deliver", kind: "duplicate" });
       }
 
-      const queued = speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: sourceLabel, priority, metadata, onDelivered, deliveryPayload });
+      const queued = speechQueue.enqueue({ personaId: persona.id, personaName: persona.name, text, voice: persona.voice, source: sourceLabel, priority, preserve: true, metadata, onDelivered, deliveryPayload });
       // A real-queue-capacity drop is a transient system-load condition, not a defect in this
       // particular item — unlike the block/duplicate cases above, throwing a retryable error here
       // would let repeated congestion exhaust this item's retry budget and reach
