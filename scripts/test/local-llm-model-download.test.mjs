@@ -212,6 +212,33 @@ test("model-source-resolver: createGuardedLookup's DNS-hook path rejects a hostn
   assert.equal(allowed.address, "10.1.2.3");
 });
 
+test("model-source-resolver: createGuardedLookup honors Node's all:true (Happy Eyeballs) request and filters every candidate address (no real network — a fake dnsLookup)", async () => {
+  const { modules } = await loadModules();
+  // Mimics dns.lookup: a single (address, family) pair when all is false, an array when all is true.
+  const fakeDnsLookup = (hostname, options, callback) => {
+    const entries = [{ address: "10.1.2.3", family: 4 }, { address: "93.184.216.34", family: 4 }];
+    if (options.all) callback(null, entries);
+    else callback(null, entries[0].address, entries[0].family);
+  };
+  const outcome = await new Promise((resolve) => {
+    modules.createGuardedLookup(modules.isPublicAddress, fakeDnsLookup)("example.com", { family: 0, all: true }, (err, addresses) => resolve({ err, addresses }));
+  });
+  assert.equal(outcome.err, null);
+  assert.deepEqual(outcome.addresses, [{ address: "93.184.216.34", family: 4 }]);
+
+  const singleOutcome = await new Promise((resolve) => {
+    modules.createGuardedLookup(modules.isPublicAddress, fakeDnsLookup)("example.com", { family: 0 }, (err, address, family) => resolve({ err, address, family }));
+  });
+  assert.equal(singleOutcome.err, null);
+  assert.equal(singleOutcome.address, "93.184.216.34");
+  assert.equal(singleOutcome.family, 4);
+
+  const blockedOutcome = await new Promise((resolve) => {
+    modules.createGuardedLookup(modules.isPublicAddress, (hostname, options, callback) => callback(null, [{ address: "10.1.2.3", family: 4 }], undefined))("internal.example.corp", { family: 0, all: true }, (err) => resolve({ err }));
+  });
+  assert.equal(blockedOutcome.err?.code, "EADDRBLOCKED");
+});
+
 test("ModelDownloadService: with the DEFAULT (shipped) address policy, a job whose source is a literal 127.0.0.1 URL is refused before ever connecting to a real local server", async () => {
   let requestCount = 0;
   const { server, url } = await startServer((req, res) => { requestCount += 1; res.end("should never be reached"); });
