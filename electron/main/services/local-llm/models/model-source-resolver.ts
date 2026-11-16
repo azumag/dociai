@@ -10,6 +10,7 @@
 // *default* policy really does refuse to connect to a real 127.0.0.1 server. See
 // scripts/test/local-llm-model-download.test.mjs.
 import dns from "node:dns";
+import net from "node:net";
 import type { LookupAddress, LookupOneOptions, LookupOptions } from "node:dns";
 import { ServiceError } from "../../service-error";
 import type { DownloadJobSource } from "../../../../shared/local-llm/model-contract";
@@ -132,18 +133,27 @@ export type GuardedLookupFunction = (hostname: string, options: LookupOptions, c
  * covers the "hostname resolves to a private address" case. */
 export function createGuardedLookup(isAllowed: AddressPolicy = isPublicAddress, dnsLookup: DnsLookupOne = dns.lookup as unknown as DnsLookupOne): GuardedLookupFunction {
   return (hostname, options, callback) => {
-    dnsLookup(hostname, { family: options.family ?? 0, hints: options.hints, all: false }, (err, address, family) => {
+    // Node's http/https clients may request `all: true` (Happy Eyeballs: every resolved address as an
+    // array). Always resolve with `all: true` so every candidate can be filtered, then return the shape
+    // the caller asked for. Returning a single (address, family) pair to an `all: true` caller makes
+    // Node throw ERR_INVALID_IP_ADDRESS on real hostnames.
+    dnsLookup(hostname, { family: options.family ?? 0, hints: options.hints, all: true } as never, ((err: NodeJS.ErrnoException | null, addresses: unknown) => {
       if (err) {
         callback(err, "", 0);
         return;
       }
-      const resolvedFamily = (family === 6 ? 6 : 4) as 4 | 6;
-      if (!isAllowed(address, resolvedFamily)) {
-        const blocked = Object.assign(new Error(`refusing to connect to a disallowed address (${address})`), { code: "EADDRBLOCKED" });
+      const resolved: LookupAddress[] = Array.isArray(addresses)
+        ? (addresses as LookupAddress[])
+        : [{ address: addresses as string, family: net.isIP(String(addresses)) || 4 }];
+      const allowed = resolved.filter((entry) => isAllowed(entry.address, (entry.family === 6 ? 6 : 4) as 4 | 6));
+      if (allowed.length === 0) {
+        const blockedAddresses = resolved.map((entry) => entry.address).join(", ") || "no address";
+        const blocked = Object.assign(new Error(`refusing to connect to a disallowed address (${blockedAddresses})`), { code: "EADDRBLOCKED" });
         callback(blocked, "", 0);
         return;
       }
-      callback(null, address, family);
-    });
+      if (options.all) callback(null, allowed);
+      else callback(null, allowed[0].address, allowed[0].family);
+    }) as never);
   };
 }
